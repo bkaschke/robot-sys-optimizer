@@ -46,6 +46,7 @@ class Session:
     part: PartState | None = None
     tool: schema.EndEffector | None = None
     tool_model: ToolModel | None = None
+    targets: schema.Targets = field(default_factory=schema.Targets)
     extra: dict = field(default_factory=dict)  # untouched project sections (EE, targets, ...)
 
     # --- assets ---------------------------------------------------------------
@@ -123,7 +124,9 @@ class Session:
                 units=self.part.units,
                 pose=matrix_to_pose(self.part.T_world_part),
             )
-        return schema.Project(robot=robot, part=part, end_effector=self.tool, **self.extra)
+        return schema.Project(
+            robot=robot, part=part, end_effector=self.tool, targets=self.targets, **self.extra
+        )
 
     def apply_project(self, project: schema.Project, project_dir: Path) -> None:
         self.project_dir = project_dir
@@ -138,7 +141,8 @@ class Session:
         if project.part is not None:
             self.part = PartState(project.part.mesh, project.part.units, pose_to_matrix(project.part.pose))
             self.part_mesh()  # fail early if the mesh is missing or broken
-        self.extra = {k: getattr(project, k) for k in ("base", "targets", "optimizer", "results")}
+        self.extra = {k: getattr(project, k) for k in ("base", "optimizer", "results")}
+        self.targets = project.targets
         self.set_tool(project.end_effector)
 
 

@@ -44,6 +44,8 @@ class CellTab:
         self.part_handle = None
         self._busy = False  # set while the code (not the user) updates widgets
         self.listeners: list = []  # called with T_world_flange after any robot move
+        self.part_listeners: list = []  # called after the part mesh/units change
+        self.on_part_click = None  # set by the Targets tab: fn(event)
 
         with server.gui.add_folder("Robot"):
             robots = (*list_robots(), UPLOADED)
@@ -237,6 +239,8 @@ class CellTab:
         self.part_pose.gizmo.visible = part is not None and self.part_pose.show.value
         if part is None:
             self.part_choice.value = "(none)"
+            for fn in self.part_listeners:
+                fn()
             return
         golden = Path(part.mesh_path).stem
         self.part_choice.value = (
@@ -247,3 +251,10 @@ class CellTab:
         self.part_units.value = part.units
         self.part_pose.set(part.T_world_part)
         self.part_handle = self.server.scene.add_mesh_trimesh(f"{PART_NODE}/mesh", self.s.part_mesh())
+        self.part_handle.on_click(self._part_clicked)
+        for fn in self.part_listeners:
+            fn()
+
+    def _part_clicked(self, event) -> None:
+        if self.on_part_click is not None:
+            self.on_part_click(event)

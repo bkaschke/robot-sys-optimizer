@@ -8,7 +8,7 @@ Full spec: `docs/PROJECT_PLAN.md`. It is the source of truth for scope and miles
 
 ## Status
 
-- **Current milestone:** M4 Targets (next). M0–M3 are done and merged to `main`.
+- **Current milestone:** M5 Feasibility checker (next). M0–M4 are done and merged to `main`.
 - **Known perf item for M6:** UR analytic IK takes ~0.8 ms per pose in pure Python. Vectorize it (batch numpy) or JIT it before building reachability maps.
 - **Branch policy:** one branch per milestone (`m0-skeleton`, `m1-kinematics`, …); merge to `main` when its "done when" check passes.
 - **Last updated:** 2026-11-04
@@ -19,7 +19,7 @@ Full spec: `docs/PROJECT_PLAN.md`. It is the source of truth for scope and miles
 | M1 Robot kinematics | **done** 2026-11-04 (worst 4.9e-10 m) | IK round-trip (q → FK → IK → FK) within 1e-6 m on 10,000 samples, all branches found |
 | M2 Viewer | **done** 2026-11-04 (25 random base+q, 4 links, ≤1e-6 m) | Viewer robot pose matches Pinocchio FK for the same q |
 | M3 Tool Setup page | **done** 2026-11-04 (GUI L slider → capsule span L+2r, TCP Δ = ΔL·z_mount, 1e-9) | Changing L stretches the collision capsule and moves the TCP correctly |
-| M4 Targets | todo | 10 mm grid on the curved panel has normals within 1° of analytic |
+| M4 Targets | **done** 2026-11-04 (click-select → 10 mm grid on rotated panel, worst normal < 1°) | 10 mm grid on the curved panel has normals within 1° of analytic |
 | M5 Feasibility checker | todo | Golden-scene reachable counts match hand-verified values |
 | M6 Reachability maps | todo | Heatmap peak within 50 mm of brute-force best base (flat plate) |
 | M7 Placement optimizer | todo | Two-station scene → finds 2 stations, full coverage |
@@ -78,10 +78,11 @@ docs/             PROJECT_PLAN.md (the spec)
 scripts/          make_golden_parts.py → assets/parts/*.stl; import_ur_description.py;
                   make_sample_tools.py → assets/tools/{orbital_sander,scanner} + tools/*.yaml
 ui/               session (state ↔ project file), widgets (PoseWidgets, notify), cell, robot_view,
-                  tool_setup, tool_view, project_panel; later: targets_ui, optimize, results
+                  tool_setup, tool_view, targets_ui, project_panel; later: optimize, results
 core/             schema, golden_parts, robot, ik/{ur,opw,numeric}, transforms, urdf_import,
-                  tool (parametric EE + library I/O), process (presets), mesh_select (pick + region grow);
-                  later: collision, carrier, standoff, targets, payload
+                  tool (parametric EE + library I/O), process (presets), mesh_select (pick + region grow),
+                  targets (selection, normals, generators, CSV, target-set edits);
+                  later: collision, carrier, standoff, payload
 opt/              reachability, placement, tool_geometry, cost
 tools/            tool library (one YAML per EE)
 assets/robots/    robot registry (ur20/ in v1)
@@ -153,6 +154,20 @@ $PY scripts/import_ur_description.py <clone> ur20   # re-import a UR model (see 
 - **Face picking:** a click ray (world) goes into the link frame, then `pick_face`, then `grow_region` (dihedral ≤ slider angle). Clicking an already-picked face removes its region. Picking is off until the checkbox is ticked.
 - `CellTab.listeners` get `T_world_flange` after every base or joint change; the tool view follows the flange this way.
 
+## Targets (M4)
+
+- **The GUI has 5 tabs:** Tool Setup, Cell, **Targets**, Optimize, Results. Targets got its own tab instead of living in Tool Setup as the plan suggested.
+- **Session state:** `session.targets` (schema.Targets) holds points in the **part frame** (m) with outward unit normals. Groups carry tolerances; a new group copies the current tool's process tolerances. The scene draws points, normals and the selection under `/cell/part`, so they follow the part gizmo.
+- **Selection:** an array of face indices on `Session.part_mesh()` (scaled to m), cached per (path, units) and cleared when the mesh changes. Click selects a dihedral region; shift-click adds; ctrl/meta-click removes. You can also select by normal direction, or by box: `on_rect_select` projects face centres through `client.camera`, assuming an OpenCV camera frame. Box select ignores occlusion and has not been checked in a real browser yet.
+- **Normals:** the default is barycentric interpolation of area-weighted vertex normals computed **from the selected faces only**, so normals never blend across the selection border. On the curved panel this gives < 0.05° interior error and ≤ ½ facet angle at the border. `normals="face"` gives flat normals.
+- **Generators (`core/targets.py`):**
+  - `projected_grid`: rays against the mean normal or a given direction; keeps only first hits on selected, front-facing faces.
+  - `poisson_disk`: dart throwing on a hash grid; 0.7 s for 0.48 m² at 10 mm.
+  - `raster`: `mesh_plane` sections, chained, resampled by arc length, serpentine. Note that `mesh_multiplane` returns **2D** coordinates, which caused a bug here.
+  - `edge_paths`: the selection's boundary loops.
+  - `parse_csv`: `x,y,z,nx,ny,nz[,group]`, optional header, mm or m.
+- **Edits** apply to points lying on the selected surface: assign group, flip, delete. "Preview tool at point" draws a ghost of the tool posed with tcp.z = −n, at origin p + standoff·n (`targets_ui.target_tcp_pose`).
+
 ## Robot registry: UR20
 
 - `assets/robots/ur20/` contains `ur20.urdf` (generated from UR's ROS 2 description with xacro, mesh paths made relative), meshes, `spec.yaml` (DH, rated 20 kg, joint torques 738/738/433/107/107/107 N·m) and both licenses.
@@ -176,12 +191,13 @@ $PY scripts/import_ur_description.py <clone> ur20   # re-import a UR model (see 
 - 2026-11-04: Git: commit locally; **do not push** to `origin` unless the user asks.
 - 2026-11-04: The user approved fetching the UR20 description from Universal Robots' ROS 2 repo (BSD-3) in M1. Convert xacro → URDF with the pip `xacro` package.
 - 2026-11-04: The schema rejects unknown keys (`extra="forbid"`). Target normals are auto-normalized; zero normals are rejected. `Robot` takes a registry `name` or a raw `urdf`.
+- 2026-11-04 (M4): Added a separate Targets tab. Click picking plus region growing in Viser works on the curved test panel. Whether it works on real part meshes stays open until the user supplies one; PyVista remains the fallback.
 - 2026-11-04 (M3): The extension model is fixed as Rz(roll)·Tz(L)·Rx(θ)·Ty(d) with capsule collision. This answers the plan's open question "straight or one bend": both are supported, and `type` selects which.
 - 2026-11-04 (M2): `Project.end_effector` and `Project.part` are optional until the Tool Setup (M3) and part steps fill them in. Projects are saved as `<folder>/project.json`. The UI shows UR's required copyright notice.
 
 ## Open decisions (from plan; decide before M5)
 
-- [ ] Viser picking + region growing good enough on real meshes, or PyVista for selection? (prototype in M4)
+- [ ] Viser picking + region growing good enough on real meshes, or PyVista for selection? It works on the curved test panel (M4); confirm on a real part mesh.
 - [x] Tool geometry v1: straight + one bend (with lateral offset d), selectable per tool (decided in M3).
 - [ ] Single tool length for all stations, or a tool swap per station?
 - [ ] Gantry: station mode only in v1, or coordinated mode too?

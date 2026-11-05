@@ -11,9 +11,10 @@ from core.transforms import make_T
 from ui.cell import CellTab
 from ui.project_panel import ProjectPanel
 from ui.session import PartState, Session
+from ui.targets_ui import TargetsTab
 from ui.tool_setup import ToolSetupTab
 
-TABS = ("Tool Setup", "Cell", "Optimize", "Results")
+TABS = ("Tool Setup", "Cell", "Targets", "Optimize", "Results")
 UR_NOTICE = (
     "_UR robot models © 2023 Universal Robots A/S. Use hereof is subject to Universal Robots A/S' "
     "Terms and Conditions for Use of Graphical Documentation._"
@@ -38,6 +39,7 @@ def build_app(server: viser.ViserServer, session: Session | None = None) -> dict
     def on_loaded() -> None:
         state["cell"].refresh()
         state["tool"].refresh()
+        state["targets"].refresh()
 
     project = ProjectPanel(server, session, on_loaded=on_loaded)
     tabs = server.gui.add_tab_group()
@@ -47,12 +49,16 @@ def build_app(server: viser.ViserServer, session: Session | None = None) -> dict
     with tab_handles["Tool Setup"]:
         tool = ToolSetupTab(server, session)
     cell.listeners.append(tool.on_robot_moved)
+    with tab_handles["Targets"]:
+        targets = TargetsTab(server, session)
+    cell.on_part_click = targets.on_part_click
+    cell.part_listeners.append(targets.on_part_changed)
     for name in ("Optimize", "Results"):
         with tab_handles[name]:
             server.gui.add_markdown(f"_{name}: not built yet (see CLAUDE.md milestones)._")
     server.gui.add_markdown(UR_NOTICE)
 
-    state.update(tabs=tab_handles, cell=cell, tool=tool, project=project)
+    state.update(tabs=tab_handles, cell=cell, tool=tool, targets=targets, project=project)
     return state
 
 
