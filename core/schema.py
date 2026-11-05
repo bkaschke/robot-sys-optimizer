@@ -290,8 +290,8 @@ class Project(_Model):
     units: Literal["m"] = "m"
     robot: Robot
     base: Base = Field(default_factory=Base)
-    end_effector: EndEffector
-    part: Part
+    end_effector: EndEffector | None = None  # set up in the Tool Setup tab (M3)
+    part: Part | None = None
     targets: Targets = Field(default_factory=Targets)
     optimizer: Optimizer = Field(default_factory=Optimizer)
     results: list[dict] = Field(default_factory=list)  # typed in M7
@@ -305,7 +305,7 @@ class Project(_Model):
 
     @model_validator(mode="after")
     def _tcp_refs(self) -> Project:
-        known = {t.name for t in self.end_effector.tcps}
+        known = {t.name for t in self.end_effector.tcps} if self.end_effector else set()
         for g in self.targets.groups:
             unknown = set(g.tcps) - known
             if unknown:

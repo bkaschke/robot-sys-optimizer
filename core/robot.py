@@ -44,7 +44,7 @@ class RobotSpec(BaseModel):
     base_link: str
     flange_link: str
     ik: Literal["ur_analytic", "opw", "numeric"]
-    reach_m: float = Field(gt=0)
+    reach_m: float | None = Field(default=None, gt=0)
     dh: DHParams | None = None
     payload: PayloadSpec = Field(default_factory=PayloadSpec)
     folder: Path | None = None  # filled in by load_spec
@@ -80,6 +80,10 @@ class Robot:
         urdf_path = spec.folder / spec.urdf
         self.model = pin.buildModelFromUrdf(str(urdf_path))
         self.data = self.model.createData()
+        if self.model.nq != self.model.nv:
+            raise ValueError(
+                f"{spec.name}: continuous/floating joints are not supported yet; give them limits"
+            )
         self.nq = self.model.nq
         self.joint_names = [n for n in self.model.names[1:]]
         self.lower = np.array(self.model.lowerPositionLimit, dtype=float)
@@ -94,6 +98,20 @@ class Robot:
     @classmethod
     def from_registry(cls, name: str, gravity_base: np.ndarray | None = None) -> Robot:
         return cls(load_spec(name), gravity_base)
+
+    @classmethod
+    def from_urdf(cls, urdf_path: Path, base_link: str, flange_link: str, name: str | None = None) -> Robot:
+        """A non-registry robot (e.g. a user upload): numeric IK, unknown payload limits."""
+        urdf_path = Path(urdf_path).resolve()
+        spec = RobotSpec(
+            name=name or urdf_path.stem,
+            urdf=urdf_path.name,
+            base_link=base_link,
+            flange_link=flange_link,
+            ik="numeric",
+            folder=urdf_path.parent,
+        )
+        return cls(spec)
 
     def _frame_id(self, name: str) -> int:
         if not self.model.existFrame(name):

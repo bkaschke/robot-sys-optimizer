@@ -7,42 +7,41 @@ import time
 
 import viser
 
-from core.golden_parts import GOLDEN_PARTS
+from core.transforms import make_T
+from ui.cell import CellTab
+from ui.project_panel import ProjectPanel
+from ui.session import PartState, Session
 
 TABS = ("Tool Setup", "Cell", "Optimize", "Results")
+UR_NOTICE = (
+    "_UR robot models © 2023 Universal Robots A/S. Use hereof is subject to Universal Robots A/S' "
+    "Terms and Conditions for Use of Graphical Documentation._"
+)
 
 
-def build_app(server: viser.ViserServer) -> dict:
+def build_app(server: viser.ViserServer, session: Session | None = None) -> dict:
     """Populate the scene and GUI. Returns handles for tests and later milestones."""
+    if session is None:
+        session = Session()
+        session.part = PartState("assets/parts/flat_plate.stl", "m", make_T(p=(1.0, 0.0, 0.5)))
     server.scene.set_up_direction("+z")
+    server.initial_camera.position = (3.0, -3.0, 2.2)
+    server.initial_camera.look_at = (0.5, 0.0, 0.6)
     server.scene.add_grid("/world/grid", width=10.0, height=10.0, cell_size=0.1, section_size=1.0)
     server.scene.add_frame("/world/origin", axes_length=0.2, axes_radius=0.005)
 
+    state: dict = {"session": session}
+    project = ProjectPanel(server, session, on_loaded=lambda: state["cell"].refresh())
     tabs = server.gui.add_tab_group()
     tab_handles = {name: tabs.add_tab(name) for name in TABS}
-
-    state: dict = {"tabs": tab_handles, "part": None}
-
     with tab_handles["Cell"]:
-        part_choice = server.gui.add_dropdown(
-            "Test part", options=tuple(GOLDEN_PARTS), initial_value="flat_plate"
-        )
-
-    def show_part(name: str) -> None:
-        mesh = GOLDEN_PARTS[name]()
-        state["part"] = server.scene.add_mesh_trimesh("/world/part", mesh)
-        state["part_name"] = name
-
-    @part_choice.on_update
-    def _(_event) -> None:
-        show_part(part_choice.value)
-
+        cell = CellTab(server, session)
     for name in ("Tool Setup", "Optimize", "Results"):
         with tab_handles[name]:
             server.gui.add_markdown(f"_{name}: not built yet (see CLAUDE.md milestones)._")
+    server.gui.add_markdown(UR_NOTICE)
 
-    show_part(part_choice.value)
-    state["part_choice"] = part_choice
+    state.update(tabs=tab_handles, cell=cell, project=project)
     return state
 
 

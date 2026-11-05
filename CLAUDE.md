@@ -8,7 +8,7 @@ Full spec: `docs/PROJECT_PLAN.md`. It is the source of truth for scope and miles
 
 ## Status
 
-- **Current milestone:** M2 Viewer (next). M0 and M1 are done and merged to `main`.
+- **Current milestone:** M3 Tool Setup page (next). M0–M2 are done and merged to `main`.
 - **Known perf item for M6:** UR analytic IK takes ~0.8 ms per pose in pure Python. Vectorize it (batch numpy) or JIT it before building reachability maps.
 - **Branch policy:** one branch per milestone (`m0-skeleton`, `m1-kinematics`, …); merge to `main` when its "done when" check passes.
 - **Last updated:** 2026-11-04
@@ -17,7 +17,7 @@ Full spec: `docs/PROJECT_PLAN.md`. It is the source of truth for scope and miles
 | --- | --- | --- |
 | M0 Skeleton | **done** 2026-11-04 | `python app.py` serves the page; `pytest` passes |
 | M1 Robot kinematics | **done** 2026-11-04 (worst 4.9e-10 m) | IK round-trip (q → FK → IK → FK) within 1e-6 m on 10,000 samples, all branches found |
-| M2 Viewer | todo | Viewer robot pose matches Pinocchio FK for the same q |
+| M2 Viewer | **done** 2026-11-04 (25 random base+q, 4 links, ≤1e-6 m) | Viewer robot pose matches Pinocchio FK for the same q |
 | M3 Tool Setup page | todo | Changing L stretches the collision capsule and moves the TCP correctly |
 | M4 Targets | todo | 10 mm grid on the curved panel has normals within 1° of analytic |
 | M5 Feasibility checker | todo | Golden-scene reachable counts match hand-verified values |
@@ -76,8 +76,10 @@ app.py            Viser entry point (build_app(server) is testable without block
 environment.yml   conda env `rso` (all dependencies)
 docs/             PROJECT_PLAN.md (the spec)
 scripts/          make_golden_parts.py → assets/parts/*.stl; import_ur_description.py
-ui/               Viser tabs: tool_setup, targets_ui, cell, optimize, results
-core/             schema, golden_parts, robot, ik/{ur,opw,numeric}, collision, tool,
+ui/               session (state ↔ project file), cell, robot_view, project_panel;
+                  later: tool_setup, targets_ui, optimize, results
+core/             schema, golden_parts, robot, ik/{ur,opw,numeric}, transforms, urdf_import,
+                  collision, tool,
                   process, carrier, standoff, targets, payload
 opt/              reachability, placement, tool_geometry, cost
 tools/            tool library (one YAML per EE)
@@ -128,6 +130,17 @@ $PY scripts/import_ur_description.py <clone> ur20   # re-import a UR model (see 
 - `URAnalyticIK` measures the URDF↔DH frame offsets at construction; nothing UR-specific is hard-coded beyond the DH table in `spec.yaml`. `NumericIK` is multi-start DLS on Pinocchio and works for any chain.
 - The URDF rounds π/2 to 9 digits, so it differs from exact DH by about 1e-10. Joint-space comparisons near singularities therefore need about 1e-4 rad tolerance, while pose comparisons hold to about 1e-9.
 
+## Viewer (M2)
+
+- **State flow:** widgets → `ui.session.Session` (SI units, source of truth) → scene. A project file maps to and from `Session` via `to_project()` / `apply_project()`. Loading goes into a fresh `Session` first, so a broken project leaves the current one untouched.
+- **Scene tree:** `/cell/base` is a transform gizmo at the robot `base_link` pose. Under it, `/cell/base/urdf_root` holds the ViserUrdf link frames. `/cell/part` is the part gizmo, with `/cell/part/mesh` under it.
+- **Viser fires `on_update` when code assigns `.value`.** CellTab guards its callbacks with `self._busy` during refreshes. `PoseWidgets` uses `_syncing` for the gizmo↔field sync. Never round widget values for display: the next edit reads the rounded value back into the pose.
+- `RobotView.link_pose_in_parent()` composes the pose from the scene handles (what the browser gets). It relies on ViserUrdf's private `_joint_frames` and `_joint_map_values`; `tests/test_app.py` breaks if a Viser upgrade changes them.
+- **Assets:** project paths are relative to the project folder (default `workspace/default/`, gitignored), with the repo as fallback (golden parts). Uploads go to `<project>/assets/robots/<name>/` and `<project>/assets/parts/`.
+- **URDF upload:** a zip goes through `core.urdf_import`, which guards against zip-slip and archive bombs, resolves `package://` and `file://`, and rejects xacro-only zips. An uploaded robot uses numeric IK, has unknown payload limits, uses the root link as base and the deepest leaf as flange. Continuous joints are not supported yet.
+- Mount presets (floor, wall, ceiling) keep the base yaw. Any other rotation switches the mount to `custom`.
+- Visual smoke test with no GPU: run the app, then `msedge --headless=new --use-angle=swiftshader --enable-unsafe-swiftshader --virtual-time-budget=40000 --screenshot=out.png http://127.0.0.1:<port>/`.
+
 ## Robot registry: UR20
 
 - `assets/robots/ur20/` contains `ur20.urdf` (generated from UR's ROS 2 description with xacro, mesh paths made relative), meshes, `spec.yaml` (DH, rated 20 kg, joint torques 738/738/433/107/107/107 N·m) and both licenses.
@@ -151,6 +164,7 @@ $PY scripts/import_ur_description.py <clone> ur20   # re-import a UR model (see 
 - 2026-11-04: Git: commit locally; **do not push** to `origin` unless the user asks.
 - 2026-11-04: The user approved fetching the UR20 description from Universal Robots' ROS 2 repo (BSD-3) in M1. Convert xacro → URDF with the pip `xacro` package.
 - 2026-11-04: The schema rejects unknown keys (`extra="forbid"`). Target normals are auto-normalized; zero normals are rejected. `Robot` takes a registry `name` or a raw `urdf`.
+- 2026-11-04 (M2): `Project.end_effector` and `Project.part` are optional until the Tool Setup (M3) and part steps fill them in. Projects are saved as `<folder>/project.json`. The UI shows UR's required copyright notice.
 
 ## Open decisions (from plan; decide before M5)
 
