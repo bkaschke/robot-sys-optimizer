@@ -11,7 +11,7 @@ Full spec: `docs/PROJECT_PLAN.md`. It is the source of truth for scope and miles
 - **Current milestone:** none. v1 (M0–M10) is complete; see "Current state".
 - **IK speed:** use `core.ik.ur.solve_batch` (about 7 µs per pose, all 8 branches) for anything bulk. `URAnalyticIK.solve` (about 0.8 ms) is for one-off calls.
 - **Branch policy:** one branch per milestone (`m0-skeleton`, `m1-kinematics`, …); merge to `main` when its "done when" check passes.
-- **Last updated:** 2026-11-05 (post-v1: External Axis tab / carrier builder, examples, brush + single points + tessellation on branch `external-axis-builder`)
+- **Last updated:** 2026-11-05 (post-v1: External Axis tab, examples, brush/single points/tessellation, HTML user guide; merged to main)
 
 | Milestone | State | Done when |
 | --- | --- | --- |
@@ -32,13 +32,12 @@ Full spec: `docs/PROJECT_PLAN.md`. It is the source of truth for scope and miles
 **v1 is complete.** M0–M10 are done and merged to `main`, which is pushed to `origin` (the user authorized the push on 2026-11-04). The user guide is in `docs/USER_GUIDE.md` (setup on a new computer, quickstart, features, examples).
 Launch with `scripts/run_app.bat` (Windows, uses the rso env) or `$PY app.py [--port N] [--dark]`. Dark mode is `apply_theme` in app.py (Viser `configure_theme` + grid colours) with a GUI checkbox; the HTML report follows `prefers-color-scheme`. `examples/headless_plan.py` is the tested no-GUI workflow that the guide cites. **Keep the guide in sync** when GUI labels or commands change. The guide is also HTML: **edit `docs/USER_GUIDE.md`, then run `$PY scripts/build_guide.py`** (markdown-it-py, GitHub-style anchors, self-contained); `tests/test_guide.py` fails when the HTML is stale. `ui/guide.py` serves only that file on port + 1 (`--guide-port`; exclusive bind, because Windows SO_REUSEADDR would let it share a busy port) and the panel's **User guide** folder links to it (onclick swaps in the browser's hostname) or downloads it.
 
-**Post-v1 work (branch `external-axis-builder`, pushed, not merged to main):** the External Axis tab (carrier built from boxes, cylinders and STL bodies, mount snap + gizmos), the `rail_long_part` and `mobile_amr` example projects (Project → Examples), and Targets → brush / single points / remove point / undo / fill selection with rows/columns / tessellate part mesh. See "Carrier builder" and "Target tools" below. The user asked for these and to push them on a new branch; merging to main is theirs to decide.
+**Post-v1 work (merged to `main` 2026-11-05 at the user's request, from branch `external-axis-builder`):** the External Axis tab (carrier built from boxes, cylinders and STL bodies, mount snap + gizmos), the `rail_long_part` and `mobile_amr` example projects (Project → Examples), and Targets → brush / single points / remove point / undo / fill selection with rows/columns / tessellate part mesh. See "Carrier builder" and "Target tools" below.
 
 **Still open with the user**
 - Their own part mesh in the browser, to decide Viser picking vs PyVista.
 - Whether to commit `docs/ur20_data_sheet.pdf` (marked proprietary; untracked and listed in `.gitignore`).
 - Features not yet tried in a real browser: gizmo dragging (incl. carrier body and mount gizmos), contact-face clicks, shift/ctrl modifiers, box select (OpenCV camera assumption), brush/single-point clicks, uploads (incl. carrier STL) and downloads.
-- Merge `external-axis-builder` into `main` once the user has tried it.
 - Next ideas (plan § Later): additional robots (OPW IK), coordinated gantry, STEP import/export, collision-free paths, cycle time, dynamic payload.
 
 **Working notes for this repo**
