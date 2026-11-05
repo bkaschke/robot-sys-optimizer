@@ -47,7 +47,7 @@ The session paused after M9 because of the usage limit. **M10 has not been start
 
 **Still waiting on the user**
 - Confirm the M9 done-when scene (rail wall-side face; see Carriers), or name another one.
-- UR20 wrist-moment / payload-diagram limits in `assets/robots/ur20/spec.yaml`; those checks show as "skipped" until then.
+- **UR20 datasheet** (`docs/ur20_data_sheet.pdf`, Dec 2024, added by the user; **untracked, marked "PROPRIETARY AND CONFIDENTIAL": do not commit or push it without the user's OK**). It has *no* wrist-moment or joint-torque limits. It does have the **payload curve** (full performance: 20 kg flat to a 200 mm COG offset, then roughly linear to about 8 kg at 800 mm; expanded 25 kg under manual conditions). The curve is read off a plot, so it is approximate; get the user to confirm the points. Proposal: replace the wrist-moment check with a payload-curve check (tool mass against COG offset from the flange) using `payload.curve: [[0,20],[200,20],[800,8]]` (mm, kg) in spec.yaml. The datasheet confirms the DH lengths (236.3 / 862 / 728.7 / 201 / 159.3) and the 1750 mm reach. It lists the elbow as ±360°; we keep the ROS ±180° limit because the arm self-collides beyond it.
 - A real part mesh, to settle the open picking decision (Viser vs PyVista).
 - The designer output format for M10 (open decision): envelope sketch, URDF, or STEP stub. Default to URDF + CSV + HTML.
 - Push to `origin` (github.com/bkaschke/robot-sys-optimizer)? Not done; only on request.
