@@ -16,6 +16,7 @@ from core import targets as tg
 from core.schema import TargetGroup, Tolerances
 from core.transforms import make_T, matrix_to_wxyz, wxyz_to_matrix
 from ui.session import Session
+from ui.target_tools_ui import PointTools
 from ui.widgets import MAX_UPLOAD, notify
 
 PART = "/cell/part"
@@ -25,7 +26,7 @@ PALETTE = [(230, 60, 60), (40, 120, 230), (240, 170, 20), (150, 70, 200), (20, 1
 STATUS_COLORS = {"reachable": (40, 180, 70), "marginal": (240, 170, 20), "unreachable": (220, 40, 40)}
 UNCHECKED = (150, 150, 150)
 METHODS = ("Projected grid", "Poisson (even)", "Raster lines", "Selection edges")
-CLICK_MODES = ("off", "select surface", "place point")
+CLICK_MODES = ("off", "select surface", "add single point", "remove point", "brush points")
 
 
 class TargetsTab:
@@ -42,7 +43,10 @@ class TargetsTab:
         with gui.add_folder("Select surface"):
             self.click_mode = gui.add_dropdown("Click on part", CLICK_MODES, initial_value="select surface")
             self.angle = gui.add_slider("Region angle (deg)", 1.0, 45.0, 1.0, 15.0)
-            gui.add_markdown("_Click = new selection, shift-click = add, ctrl-click = remove._")
+            gui.add_markdown(
+                "_Select surface: click = new selection, shift-click = add, ctrl-click = remove. "
+                "Point modes: see **Brush & single points**._"
+            )
             self.normal_dir = gui.add_vector3("Normal direction", (0.0, 0.0, 1.0), step=0.1)
             self.normal_angle = gui.add_number("within (deg)", 30.0, min=0.0, max=180.0)
             self.by_normal = gui.add_button("Select by normal")
@@ -62,6 +66,7 @@ class TargetsTab:
             self.normals_mode = gui.add_dropdown("Normals", ("interpolated", "face"))
             self.gen_group = gui.add_dropdown("Into group", ("default",))
             self.generate = gui.add_button("Generate on selection")
+        self.tools = PointTools(server, self)
         with gui.add_folder("Groups & tolerances"):
             self.group = gui.add_dropdown("Group", ("default",))
             self.new_group = gui.add_text("New group", "")
@@ -131,11 +136,7 @@ class TargetsTab:
         if mode == "select surface":
             self._set_selection(tg.grow_region(m, face, self.angle.value), getattr(event, "modifier", None))
             return
-        # place point: exact ray hit on the clicked face
-        locs, _, tris = m.ray.intersects_location([o], [d / np.linalg.norm(d)], multiple_hits=False)
-        if len(locs):
-            n = tg.surface_normals(m, locs, tris, None, self.normals_mode.value)
-            self._add(locs, n, event)
+        self.tools.on_click(mode, m, o, d, event)
 
     def on_rect(self, event) -> None:
         m = self.mesh()

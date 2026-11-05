@@ -11,7 +11,7 @@ Full spec: `docs/PROJECT_PLAN.md`. It is the source of truth for scope and miles
 - **Current milestone:** none. v1 (M0–M10) is complete; see "Current state".
 - **IK speed:** use `core.ik.ur.solve_batch` (about 7 µs per pose, all 8 branches) for anything bulk. `URAnalyticIK.solve` (about 0.8 ms) is for one-off calls.
 - **Branch policy:** one branch per milestone (`m0-skeleton`, `m1-kinematics`, …); merge to `main` when its "done when" check passes.
-- **Last updated:** 2026-11-05 (M10 done, v1 complete, pushed)
+- **Last updated:** 2026-11-05 (post-v1: External Axis tab / carrier builder, examples, brush + single points + tessellation on branch `external-axis-builder`)
 
 | Milestone | State | Done when |
 | --- | --- | --- |
@@ -32,10 +32,13 @@ Full spec: `docs/PROJECT_PLAN.md`. It is the source of truth for scope and miles
 **v1 is complete.** M0–M10 are done and merged to `main`, which is pushed to `origin` (the user authorized the push on 2026-11-04). The user guide is in `docs/USER_GUIDE.md` (setup on a new computer, quickstart, features, examples).
 Launch with `scripts/run_app.bat` (Windows, uses the rso env) or `$PY app.py [--port N] [--dark]`. Dark mode is `apply_theme` in app.py (Viser `configure_theme` + grid colours) with a GUI checkbox; the HTML report follows `prefers-color-scheme`. `examples/headless_plan.py` is the tested no-GUI workflow that the guide cites. **Keep the guide in sync** when GUI labels or commands change.
 
+**Post-v1 work (branch `external-axis-builder`, pushed, not merged to main):** the External Axis tab (carrier built from boxes, cylinders and STL bodies, mount snap + gizmos), the `rail_long_part` and `mobile_amr` example projects (Project → Examples), and Targets → brush / single points / remove point / undo / fill selection with rows/columns / tessellate part mesh. See "Carrier builder" and "Target tools" below. The user asked for these and to push them on a new branch; merging to main is theirs to decide.
+
 **Still open with the user**
 - Their own part mesh in the browser, to decide Viser picking vs PyVista.
 - Whether to commit `docs/ur20_data_sheet.pdf` (marked proprietary; untracked and listed in `.gitignore`).
-- Features not yet tried in a real browser: gizmo dragging, contact-face clicks, shift/ctrl modifiers, box select (OpenCV camera assumption), uploads and downloads.
+- Features not yet tried in a real browser: gizmo dragging (incl. carrier body and mount gizmos), contact-face clicks, shift/ctrl modifiers, box select (OpenCV camera assumption), brush/single-point clicks, uploads (incl. carrier STL) and downloads.
+- Merge `external-axis-builder` into `main` once the user has tried it.
 - Next ideas (plan § Later): additional robots (OPW IK), coordinated gantry, STEP import/export, collision-free paths, cycle time, dynamic payload.
 
 **Working notes for this repo**
@@ -92,15 +95,18 @@ app.py            Viser entry point (build_app(server, dark=...) is testable wit
 README.md         landing page -> docs/USER_GUIDE.md (user guide)
 environment.yml   conda env `rso` (all dependencies)
 docs/             PROJECT_PLAN.md (the spec)
-scripts/          run_app.bat (Windows launcher); make_golden_parts.py → assets/parts/*.stl; import_ur_description.py;
+scripts/          run_app.bat (Windows launcher); make_examples.py → examples/{rail_long_part,mobile_amr}/project.json;
+                  make_golden_parts.py → assets/parts/*.stl; import_ur_description.py;
                   make_sample_tools.py → assets/tools/{orbital_sander,scanner} + tools/*.yaml
 ui/               session (state ↔ project file), widgets (PoseWidgets, notify), cell, robot_view,
                   tool_setup, tool_view, targets_ui, optimize (feasibility run/inspect),
                   placement (heatmap), stations (planner panel), tool_opt (tool-geometry panel),
-                  results (Results tab), carrier_ui (Cell → Base mode), project_panel
+                  results (Results tab), carrier_ui + carrier_bodies (External Axis tab), target_tools_ui
+                  (brush / single points / tessellate), project_panel (+ Examples)
 core/             schema, golden_parts, robot, ik/{ur,opw,numeric}, transforms, urdf_import,
                   tool (parametric EE + library I/O), process (presets), mesh_select (pick + region grow),
-                  targets (selection, normals, generators, CSV, target-set edits),
+                  targets (selection, normals, generators, CSV, target-set edits), target_tools (lattice,
+                  brush dab, dedupe, refine_mesh),
                   collision (Coal via Pinocchio), payload (static torque), feasibility (per-point check),
                   carrier (rail/gantry/mobile from primitives, URDF, tip-over), standoff (shapely zones)
 opt/              reachability (map, offset map, lookup, voting, coverage matrix), placement (stations),
@@ -179,7 +185,7 @@ $PY scripts/import_ur_description.py <clone> ur20   # re-import a UR model (see 
 
 ## Targets (M4)
 
-- **The GUI has 5 tabs:** Tool Setup, Cell, **Targets**, Optimize, Results. Targets got its own tab instead of living in Tool Setup as the plan suggested.
+- **The GUI has 6 tabs:** Tool Setup, Cell, External Axis (added post-v1), **Targets**, Optimize, Results. Targets got its own tab instead of living in Tool Setup as the plan suggested.
 - **Session state:** `session.targets` (schema.Targets) holds points in the **part frame** (m) with outward unit normals. Groups carry tolerances; a new group copies the current tool's process tolerances. The scene draws points, normals and the selection under `/cell/part`, so they follow the part gizmo.
 - **Selection:** an array of face indices on `Session.part_mesh()` (scaled to m), cached per (path, units) and cleared when the mesh changes. Click selects a dihedral region; shift-click adds; ctrl/meta-click removes. You can also select by normal direction, or by box: `on_rect_select` projects face centres through `client.camera`, assuming an OpenCV camera frame. Box select ignores occlusion and has not been checked in a real browser yet.
 - **Normals:** the default is barycentric interpolation of area-weighted vertex normals computed **from the selected faces only**, so normals never blend across the selection border. On the curved panel this gives < 0.05° interior error and ≤ ½ facet angle at the border. `normals="face"` gives flat normals.
@@ -267,7 +273,7 @@ $PY scripts/import_ur_description.py <clone> ur20   # re-import a UR model (see 
 - **Carrier bodies in collision:** `CollisionScene(base_bodies=..., world_bodies=...)`. The carriage and riser are rigid in the base frame; the track is world-fixed and re-placed in `set_base`. They are checked against the arm from upper_arm on and against the tool, with `self_clearance`.
 - **Bug fixed in M7 code:** `min_stations` used the greedy count, which is an upper bound, so smaller station counts were never tried. It is now an exact CP-SAT minimum set cover.
 - **Done-when scene, and why it is this one:** with a UR20, the rail's *top* face needs 2 stations for both carriers; the single-station spans are rail 3.35 m and mobile 3.15 m, so the reach hides the difference. On the **wall-side face** with a wall keep-out (the robot must reach over the part), the spans are rail 2.05 m and mobile 1.55 m. The exact plan gives rail 4 stations against mobile 5 (mobile with ±10 mm / ±1° localization). Both carriers carry the robot at a 0.7 m mount. On the near face the mobile base is better (3.4 m against 1.6 m), so "rail beats mobile" is not universal.
-- **GUI:** Cell → "Base mode" panel (fields → **Apply** validates as `schema.Base`; "Load carrier defaults" for rail, gantry or mobile). It has DOF sliders that jog the carrier (driving the robot base), draws the bodies, the standoff shells (red minimum, amber preferred) and the keep-outs, and shows a live footprint-to-part distance.
+- **GUI:** (M9: Cell → "Base mode"; now the External Axis tab, see "Carrier builder") (fields → **Apply** validates as `schema.Base`; "Load carrier defaults" for rail, gantry or mobile). It has DOF sliders that jog the carrier (driving the robot base), draws the bodies, the standoff shells (red minimum, amber preferred) and the keep-outs, and shows a live footprint-to-part distance.
 - **Viser gotcha:** setting `gizmo.visible = False` hides the gizmo's whole **subtree**; the robot hangs under the base gizmo and the part, targets and selection under the part gizmo. "Show gizmo" therefore toggles `disable_axes`, `disable_sliders` and `disable_rotations` (`PoseWidgets.set_handles`). This was broken since M2.
 - **Headless screenshots occasionally capture before the scene streams in** (an empty view with "Connected"). Re-take them, and use a fresh port after killing a server, because Viser silently moves to the next free port.
 
@@ -285,6 +291,20 @@ $PY scripts/import_ur_description.py <clone> ur20   # re-import a UR model (see 
   - UR20: 20 kg up to 200 mm, 7 kg at 800 mm, linear estimate beyond (0 kg at about 1123 mm).
   - `core/payload.py` fails tools over the curve and notes when the estimate was used.
   - `is_complete()` accepts the curve in place of wrist moments.
+
+## Carrier builder (post-v1, External Axis tab)
+
+- **Schema:** `Base.bodies: list[Primitive]`. A Primitive is a `box` (size), `cylinder` (radius, height) or `mesh` (file + `units`), with `name`, `pose` (in its parent frame), `attach` (`carriage` = moves with the DOFs, `fixed` = carrier frame `Base.pose`) and `kg`. Box/cylinder frames sit at the bottom-face centre; a mesh keeps its file origin.
+- **Legacy:** projects with `chassis`/`riser`/`track` still work. `core.carrier.body_list(base)` converts them (riser on the chassis top, track centred on the rail range, attach fixed) with unique, URDF-safe names; `migrate(base)` rewrites a Base into body form (the GUI does this on load). The converted geometry is identical (`test_legacy_fields_convert_to_same_geometry`), and the M9 regression counts are unchanged.
+- **`Carrier(base, T_static, resolve=...)`:** `resolve` maps mesh paths (Session passes `Session.resolve`: project folder, then repo). Meshes load once per Carrier (`_load_mesh` is also lru-cached by path + mtime + units). Tip-over sums every carriage body's mass; the **support polygon** is the hull of the carriage bodies within 20 mm of the lowest carriage point (wheels, not the raised chassis). The standoff footprint stays the union of per-body hulls. The carrier URDF has one link per body (`body_<name>` on the carriage, `fixed_<name>` on the world; FK verified).
+- **GUI (`ui/carrier_ui.py` + `ui/carrier_bodies.py`):** the panel keeps a working `bodies` list and `mount_pose`; body and mount edits call `commit()` at once, while the axis-type and safety fields wait for **Apply**. `commit()` also loads every mesh, so a missing or broken file fails there and not mid-plan. DOF sliders are rebuilt only when the DOFs or ranges change (`_dof_sig`); `load()` resets the signature so a loaded project's base pose wins over stale sliders. The body and mount gizmos live under `/carrier_edit/*` (not under the base gizmo) and are re-placed after every draw. Button actions are methods (`add_shape`, `snap_mount`, `add_mesh_bytes`) so tests drive the same code as the buttons.
+- **Examples:** `scripts/make_examples.py` writes `examples/rail_long_part` and `examples/mobile_amr` (repo-relative asset paths). Project → *Examples* copies one to `workspace/examples/<name>/` before loading, so saving never edits the shipped copy. `tests/test_examples.py` loads both and plans them to full coverage.
+
+## Target tools (post-v1)
+
+- **`core/target_tools.py`:** `lattice_grid(mesh, faces, row, col, direction, row_dir, anchor)` puts points at anchor + i·col·u + j·row·v (u = projected `row_dir`, rows serpentine) and casts them along d onto the faces. Anchoring at the part origin makes brush dabs share one lattice. `brush_faces` takes the connected faces within the radius whose normals are within the max angle of the clicked face (no spill over edges); `brush_dab` = lattice inside the sphere. `dedupe(P_new, N_new, P_old, tol)` uses a KD-tree (tol = 0.4 × min spacing in the GUI). `refine_mesh(mesh, max_edge)` = `trimesh.remesh.subdivide_to_size` with the parent-face index, refusing above about 2 M faces.
+- **GUI (`ui/target_tools_ui.py`, folder "Brush & single points" + "Refine part mesh"):** click modes `add single point`, `remove point` (nearest within the brush radius) and `brush points`, plus "Fill selection with rows/columns" and an undo stack of added id lists. **Tessellate** writes `<project>/assets/parts/<stem>_refined_<N>mm.stl` in metres, switches the part to it (units `m`), carries the selection over by matching face centroids through the parent index, and calls `cell.refresh_part` (wired in app.py) so the scene and collision use the refined mesh.
+- **Viser limitation:** there are no freehand drag events on scene meshes, only clicks and rect-select, so the brush works one dab per click. Fill selection covers large areas.
 
 ## Robot registry: UR20
 
@@ -317,6 +337,8 @@ $PY scripts/import_ur_description.py <clone> ur20   # re-import a UR model (see 
 - 2026-11-04 (M4): Added a separate Targets tab. Click picking plus region growing in Viser works on the curved test panel. Whether it works on real part meshes stays open until the user supplies one; PyVista remains the fallback.
 - 2026-11-04 (M3): The extension model is fixed as Rz(roll)·Tz(L)·Rx(θ)·Ty(d) with capsule collision. This answers the plan's open question "straight or one bend": both are supported, and `type` selects which.
 - 2026-11-04 (M2): `Project.end_effector` and `Project.part` are optional until the Tool Setup (M3) and part steps fill them in. Projects are saved as `<folder>/project.json`. The UI shows UR's required copyright notice.
+
+- 2026-11-05 (post-v1): The user asked for a GUI carrier builder (shapes + STL, own tab), mount on top of a body with gizmo fine-tuning, rail + mobile examples, then single points, a row/column brush and mesh tessellation; pushed on the new branch `external-axis-builder`. The "(M7–M8) not built yet" placeholder in the Optimize tab was stale and has been removed (on main).
 
 ## Open decisions (from plan; decide before M5)
 

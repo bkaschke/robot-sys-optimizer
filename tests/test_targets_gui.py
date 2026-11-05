@@ -98,7 +98,7 @@ def test_flip_and_delete_on_selection(app):
 
 def test_place_point_mode(app):
     tab, s = app["targets"], app["session"]
-    tab.click_mode.value = "place point"
+    tab.click_mode.value = "add single point"
     tab.on_part_click(_click_world((0.1, 0.0, gp.PANEL_TOP_Z), (0, 0, -1)))
     p = s.targets.points[-1]
     assert np.allclose(p.p, (0.1, 0.0, gp.PANEL_TOP_Z), atol=1e-6)

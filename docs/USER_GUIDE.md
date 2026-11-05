@@ -52,6 +52,8 @@ Then try a full job on the test plate:
 
 Tick **Dark mode** at the top of the panel at any time.
 
+**Ready-made examples:** **Project** → *Examples* → `rail_long_part` (UR20 on a 7th-axis rail) or `mobile_amr` (UR20 on a mobile robot built from simple shapes) → **Open example** → **Optimize** → **Plan stations**. The example is copied to `workspace/examples/<name>/` first, so saving never changes the shipped copy.
+
 ---
 
 ## 2. Set up on a new computer
@@ -162,7 +164,7 @@ The cost J weighs tool length, unreached points, extra stations, travel, manipul
 ### Top of the panel
 
 - **Dark mode**: switches the GUI and the floor grid. The `--dark` flag starts in dark mode.
-- **Project**: *Folder* (relative to the repo, or absolute), **Save** / **Load** (`<folder>/project.json`), **Download project.json**, **Open project.json** (upload). Loading never half-applies: a broken project leaves the current session untouched.
+- **Project**: *Folder* (relative to the repo, or absolute), **Save** / **Load** (`<folder>/project.json`), **Download project.json**, **Open project.json** (upload). Loading never half-applies: a broken project leaves the current session untouched. *Examples* + **Open example** loads a shipped example project (copied to `workspace/examples/<name>/`).
 
 ### Tool Setup tab
 
@@ -183,25 +185,30 @@ Sample tools: **orbital_sander** (bent extension range, pad as the contact link)
 | --- | --- |
 | **Robot** | Choose the UR20 from the registry, or **Upload URDF (.zip)** for another robot (numeric IK; planning features need a UR-type arm). The mount presets are floor, wall and ceiling. Move the base with the gizmo or the xyz/rpy fields. *Joints (deg)* sliders jog the arm; the readout shows the flange pose computed by Pinocchio. |
 | **Part** | A test part (flat plate, curved panel, open box, long rail, deep hole) or **Upload mesh (.stl/.obj/.ply)** with *Units* (m / mm / in). Place it with the gizmo or the fields. |
-| **Base mode** | **Static**: one base pose, and the planner places one station. **Movable**: choose a **carrier**, then **Load carrier defaults** and **Apply base settings**. |
 
-**Carriers** are built from boxes and cylinders:
-- **Rail**: a track along the frame's x axis; the carriage position *s* is the station variable.
-- **Gantry**: an x/y carriage, usually with the robot mounted upside down.
-- **Mobile base**: chassis x, y and yaw on the floor; position error (localization ±mm / ±deg) and an optional tip-over check.
+### External Axis tab
 
-The other base settings:
-- **Standoff min / preferred**: carrier-to-part distance. The minimum is hard; closer than the preferred adds a cost. It is measured in 3D, so a carrier may sit partly under a raised part. Model fixtures and stands as part of the mesh or as keep-outs.
-- **Keep-outs**: floor rectangles `x0,y0,x1,y1; ...` in mm.
-- ***Carrier position*** sliders move the carrier, and the robot with it.
-- **Drawing**: red line = minimum standoff, amber = preferred, red boxes = keep-outs.
+Build the carrier (external axis) the robot rides on, mount the robot on it, and set where it may go.
+
+| Section | What it does |
+| --- | --- |
+| **Axis type** | *Mode* **static** (one fixed base; the planner places one station) or **movable** (a carrier; the planner chooses its stops). *Carrier*: **rail** (travel *s* along the track frame's x axis), **gantry** (x/y carriage, robot usually upside down) or **mobile** (x, y, yaw on the floor). **Load carrier defaults** fills in a ready-made carrier of that kind. *Track/gantry frame*, *Travel*, *Yaw range* and *Lift range* (optional vertical axis) set the motion. |
+| **Bodies** | The carrier's shapes. **Add box**, **Add cylinder**, or **Add STL/OBJ/PLY body** (choose *Mesh units* first; the file is stored in `<project>/assets/carriers/`). Pick a body in *Body* to edit its *Name*, size, *Position*, *Rotation* and *Mass*. *Attached to*: **carriage (moves)** for everything that travels with the axis (chassis, wheels, column), **fixed (track / frame)** for parts that stay put (rail track, gantry beam). Tick **Drag body with gizmo** to place it in 3D. **Duplicate body** / **Remove body**. The selected body is drawn in blue. |
+| **Robot mount** | *Mount on body* + **Snap robot to top of body** puts the robot base on the top centre of that body (keeps the yaw). Fine-tune with *Mount xyz / rpy* (robot base in the carriage frame) or **Drag mount with gizmo**. |
+| **Standoff and safety** | *Part standoff min / preferred*: carrier-to-part distance; the minimum is hard, closer than preferred adds a cost. It is measured in 3D, so a carrier may sit partly under a raised part: model fixtures and stands as part of the mesh or as keep-outs. *Keep-outs*: floor rectangles `x0,y0,x1,y1; ...` in mm. *Localization* (mobile): position/heading error every stop must tolerate. *Tip-over check* (mobile, needs a mass on at least one body). |
+| **Apply base settings** | Commits the axis-type and safety fields. Body and mount edits apply immediately. |
+| **Carrier position** | Sliders move the carrier, and the robot with it. The readout gives the footprint-to-part distance. |
+
+Every body collides with the arm and tool (from the upper arm on), and counts for standoff and keep-outs. Bodies touching the floor form the **support polygon** for the tip-over check (e.g. the four wheels), and every body's mass counts. Drawing: red line = minimum standoff, amber = preferred, red boxes = keep-outs.
 
 ### Targets tab
 
 | Section | What it does |
 | --- | --- |
-| **Select surface** | *Click on part* = `select surface`: click selects a smooth region; **shift-click** adds, **ctrl-click** removes. **Select by normal** picks every face within an angle of a direction. **Box select (drag in view)** selects the faces inside a rectangle you drag. `place point` mode puts single points on the clicked surface. |
+| **Select surface** | *Click on part* = `select surface`: click selects a smooth region; **shift-click** adds, **ctrl-click** removes. **Select by normal** picks every face within an angle of a direction. **Box select (drag in view)** selects the faces inside a rectangle you drag. The point modes (`add single point`, `remove point`, `brush points`) are described under *Brush & single points*. |
 | **Generate points** | Methods run on the selection: **Projected grid** (spacing in mm, rays against the mean normal or a direction you give), **Poisson (even)** (even spacing on curved surfaces), **Raster lines** (step-over plus step along the line, alternating direction), **Selection edges** (along the borders, for deburring). Normals are *interpolated* by default (smooth), or *face*. |
+| **Brush & single points** | Set *Click on part* to: **add single point** (one target exactly where you click, normal from the surface); **remove point** (deletes the target nearest the click, within the brush radius); **brush points** (each click adds a "dab": a grid of *Row spacing* × *Column spacing* inside the *Brush radius*; rows run along *Row direction*; the dab does not spill over edges sharper than *Brush max surface angle*). All dabs share one grid anchored at the part origin, and points that already exist are skipped, so overlapping dabs never double up. **Fill selection with rows/columns** applies the same grid to the whole selection. **Undo last add** removes the last click/dab/fill. |
+| **Refine part mesh** | **Tessellate part mesh** splits the part's triangles until no edge is longer than *Max edge length*. The shape does not change, but clicks, region growing, brushes and interpolated normals work on a finer mesh (useful for coarse CAD exports with long thin triangles). The refined mesh is saved as `<project>/assets/parts/<name>_refined_<N>mm.stl` and becomes the part; the selection and existing points are kept. |
 | **Groups & tolerances** | Each point belongs to a group, and each group has spin, tilt, standoff and an allowed TCP list. **Apply to group** saves them. |
 | **Edit points** | Assign to group, flip normals, or delete the points on the selected surface; delete all. **Import CSV** reads `x,y,z,nx,ny,nz[,group]` in mm or m. |
 | **Display** | Colour points by *group* or *feasibility*; show normals; **Preview tool at point** draws a see-through tool aimed into the surface at any point. |
@@ -246,25 +253,39 @@ The same job without the GUI is in `examples/headless_plan.py` (section 7).
 
 ### Example B: a long rail part with a 7th-axis rail carrier
 
+Shortcut: **Project** → *Examples* `rail_long_part` → **Open example**, then step 4.
+
 1. Cell → *Part* `long_rail`, xyz `0, 800, 500`.
 2. Targets → *Select by normal* `(0,0,1)` within `5` → *Spacing* `250` → **Generate**.
-3. Cell → *Base mode*: Mode `movable`, Carrier `rail` → **Load carrier defaults**. Set *Track/gantry frame xyz* to `0, 150, 0`, so the 0.5 m carriage sits exactly 300 mm from the part. Optionally add a wall keep-out `-5000,1300,5000,3000`. Click **Apply base settings**.
+3. External Axis → Carrier `rail` → **Load carrier defaults**. Set *Track/gantry frame xyz* to `0, 150, 0`, so the 0.5 m carriage sits exactly 300 mm from the part. Optionally add a wall keep-out `-5000,1300,5000,3000`. Click **Apply base settings**.
 4. Optimize → *Max stations* `5` → **Plan stations**. Expect 2 rail stations for the top face; the Results tab shows the carriage positions *s*.
 5. Try Carrier `mobile` with its defaults on the same targets and compare. Both need 2 stops on the top face. On the wall-side face (generate on the face pointing to the wall) the rail needs 4 and the mobile base 5.
+
+### Example B2: design a mobile robot from simple shapes
+
+Shortcut: **Project** → *Examples* `mobile_amr` → **Open example** (four wheels, chassis, battery box and a column with the UR20 on top; tip-over check on).
+
+1. External Axis → Carrier `mobile` → **Load carrier defaults** (a chassis and a riser).
+2. Select *Body* `chassis`, set *Box L W H* to `1100, 700, 300` and *Position* to `0, 0, 100` (raised for wheels).
+3. **Add cylinder** → *Name* `wheel_fl`, radius/height `100, 80`, *Rotation* `90, 0, 0` (axle along y), *Position* `450, 390, 100`, *Mass* `10`. **Duplicate body** and move the copies to `450,-310,100`, `-450,390,100`, `-450,-310,100`.
+4. **Add box** → a battery or cabinet, or **Add STL/OBJ/PLY body** for a CAD model of your AMR (set *Mesh units* first).
+5. *Mount on body* `riser` (or your column) → **Snap robot to top of body**.
+6. Give the chassis a *Mass*, tick *Tip-over check*, **Apply base settings**, then Optimize → **Plan stations**.
 
 ### Example C: the shortest probe for a deep hole
 
 1. Cell → *Part* `deep_hole`, xyz `800, 0, 0` (100 mm hole, 300 mm deep).
 2. Tool Setup → upload or define a slim straight tool. The test suite uses a probe with capsule radius 20 mm and no head; see `tests/test_tool_geometry.py::_probe`.
-3. Targets → *place point* on the hole bottom; group standoff `50` mm, tilt `0`.
+3. Targets → *Click on part* `add single point` → click the hole bottom; group standoff `50` mm, tilt `0`.
 4. Optimize → **Find shortest tool**: L ≈ **260 mm** = depth − standoff + clearance (the wrist cannot enter the hole).
 
 ### Example D: your own robot cell
 
 1. **Part**: Cell → **Upload mesh**, choose *Units* `mm` if your CAD exports in mm.
 2. **Tool**: Tool Setup → **Upload tool URDF (.zip)** (URDF + meshes). Set the Process, place the TCP(s), pick the contact faces, set the extension ranges → **Save to library**.
-3. **Targets**: click-select the faces to process, or **Import CSV** from a CAD/CAM tool (`x,y,z,nx,ny,nz[,group]`).
-4. Then the same steps as Example A. Save the project so it can be reloaded later.
+3. **Targets**: if the STL has long thin triangles, **Tessellate part mesh** first. Then click-select the faces to process and generate, brush the areas you want with *brush points*, add single points, or **Import CSV** from a CAD/CAM tool (`x,y,z,nx,ny,nz[,group]`).
+4. **Carrier** (optional): External Axis → build the rail or mobile robot from shapes or an STL and snap the robot onto it.
+5. Then the same steps as Example A. Save the project so it can be reloaded later.
 
 ---
 
@@ -280,12 +301,12 @@ The same job without the GUI is in `examples/headless_plan.py` (section 7).
 | `assets/robots/ur20/` | UR20 URDF, meshes, `spec.yaml` (DH, limits, payload curve), licences |
 | `assets/tools/`, `tools/*.yaml` | sample tool geometry and the tool library |
 | `assets/parts/` | test parts (STL) |
-| `examples/` | example project JSON and `headless_plan.py` |
+| `examples/` | example projects (`rail_long_part/`, `mobile_amr/`, regenerate with `scripts/make_examples.py`), `sander_mobile.json` (format sample) and `headless_plan.py` |
 | `workspace/` (not in git) | your project folders: `project.json`, uploads, `export/` |
 | `cache/` (not in git) | reachability maps |
 | `docs/PROJECT_PLAN.md` | the design plan |
 
-**Project file** (`project.json`): the robot and base pose, base mode and carrier, tool, part, targets and groups, optimizer settings, and the saved solutions. Joint solutions per point are not saved; re-run the plan to get them back (for example to export the CSV).
+**Project file** (`project.json`): the robot and base pose, base mode and carrier (its `bodies`: shape, size or mesh file, pose, attachment, mass), tool, part, targets and groups, optimizer settings, and the saved solutions. Older projects with `chassis` / `riser` / `track` still load; the External Axis tab converts them to bodies. Joint solutions per point are not saved; re-run the plan to get them back (for example to export the CSV).
 
 **TCP poses CSV** has one row per point, in station order:
 - `point_id, group, status, reason, station, carrier`;
@@ -331,7 +352,7 @@ plans = plan_stations(
 geo = optimize_tool(robot, ee, urdf, part_mesh, T_world_part, T_world_base, targets, footprint, Weights(), 1)
 ```
 
-For carriers, pass `sites=CarrierSites(Carrier(base), part_mesh, T_world_part)` to `plan_stations`. Build the collision scene with the carrier bodies: `bb, wb = sites.scene_bodies()`; `CollisionScene(..., base_bodies=bb, world_bodies=wb)`.
+For carriers, pass `sites=CarrierSites(Carrier(base), part_mesh, T_world_part)` to `plan_stations` (a carrier with mesh bodies resolves relative paths against the repo; pass `Carrier(base, resolve=fn)` to use another folder). `scripts/make_examples.py` shows how to build a carrier from bodies in code. Build the collision scene with the carrier bodies: `bb, wb = sites.scene_bodies()`; `CollisionScene(..., base_bodies=bb, world_bodies=wb)`.
 
 ---
 
@@ -351,7 +372,9 @@ For carriers, pass `sites=CarrierSites(Carrier(base), part_mesh, T_world_part)` 
 - Collisions are checked at each point only; the motion **between** points and stations is not checked. Travel distance ignores obstacles.
 - Payload checks are **static**: no acceleration loads. Beyond 800 mm COG offset the UR20 payload curve is a **linear extrapolation (estimate)**.
 - The part footprint for standoffs is a convex hull, which is conservative.
-- **Not yet confirmed in a real browser** (only in automated and headless tests): gizmo dragging, contact-face clicking, shift/ctrl modifiers, box select, file upload and download. Please report anything odd.
+- The **brush** works click by click (one dab per click): Viser reports clicks and box drags, not freehand mouse strokes. For big areas, select them and use **Fill selection with rows/columns**.
+- Mesh bodies on a carrier are used as-is for collision; an STL with millions of triangles slows the checks. Simplify it in CAD first.
+- **Not yet confirmed in a real browser** (only in automated and headless tests): gizmo dragging (parts, carrier bodies, robot mount), contact-face clicking, shift/ctrl modifiers, box select, brush and single-point clicks on the part, file upload (meshes, carrier STLs) and download. Please report anything odd.
 
 ---
 
@@ -366,6 +389,6 @@ $RUFF check . && $RUFF format --check .   # lint + format
 
 - `CLAUDE.md` holds the conventions (frames, units, cost), the milestone status with each done-when check, and design notes per module.
 - `core/` and `opt/` must not import the GUI.
-- Each milestone's acceptance test lives in `tests/` (for example `test_kinematics.py`, `test_feasibility.py`, `test_reachability.py`, `test_placement.py`, `test_tool_geometry.py`, `test_carriers.py`, `test_export.py`).
+- Each milestone's acceptance test lives in `tests/` (for example `test_kinematics.py`, `test_feasibility.py`, `test_reachability.py`, `test_placement.py`, `test_tool_geometry.py`, `test_carriers.py`, `test_export.py`). The carrier builder is covered by `test_carrier_builder.py` and `test_examples.py`, the brush / single points / tessellation by `test_point_tools.py`.
 
 UR robot models © 2023 Universal Robots A/S. Use hereof is subject to Universal Robots A/S' Terms and Conditions for Use of Graphical Documentation (see `assets/robots/ur20/meshes/LICENSE.txt`).

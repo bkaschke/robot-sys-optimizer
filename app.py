@@ -80,6 +80,7 @@ def build_app(server: viser.ViserServer, session: Session | None = None, dark: b
     with tab_handles["Targets"]:
         targets = TargetsTab(server, session)
     cell.on_part_click = targets.on_part_click
+    targets.tools.on_mesh_replaced = cell.refresh_part
     cell.part_listeners.append(targets.on_part_changed)
     cell.part_listeners.append(carrier.draw)
 
