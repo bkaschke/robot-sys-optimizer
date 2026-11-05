@@ -8,7 +8,7 @@ Full spec: `docs/PROJECT_PLAN.md`. It is the source of truth for scope and miles
 
 ## Status
 
-- **Current milestone:** M9 Carriers (next). M0–M8 are done and merged to `main`.
+- **Current milestone:** M10 Exports and report (next). M0–M9 are done and merged to `main`.
 - **IK speed:** use `core.ik.ur.solve_batch` (about 7 µs per pose, all 8 branches) for anything bulk. `URAnalyticIK.solve` (about 0.8 ms) is for one-off calls.
 - **Branch policy:** one branch per milestone (`m0-skeleton`, `m1-kinematics`, …); merge to `main` when its "done when" check passes.
 - **Last updated:** 2026-11-04
@@ -24,7 +24,7 @@ Full spec: `docs/PROJECT_PLAN.md`. It is the source of truth for scope and miles
 | M6 Reachability maps | **done** 2026-11-04 (tilted-plate scene: map peak = brute-force peak, 0 mm) | Heatmap peak within 50 mm of brute-force best base (flat plate) |
 | M7 Placement optimizer | **done** 2026-11-04 (long rail, 21 pts: 2 stations, 21/21 exact-verified; 1 station proven insufficient) | Two-station scene → finds 2 stations, full coverage |
 | M8 Tool-geometry optimizer | **done** 2026-11-04 (deep hole: L 259.7 mm vs analytic 260 mm; 3 mm shorter fails exact check) | Pocket scene → minimal L within 5 mm |
-| M9 Carriers | todo | Long rail: 1-axis rail respects 300 mm standoff, fewer stations than mobile base |
+| M9 Carriers | **done** 2026-11-04 (wall-side face of the 6 m rail: rail 4 stations vs mobile 5, 300 mm standoff held) | Long rail: 1-axis rail respects 300 mm standoff, fewer stations than mobile base |
 | M10 Exports and report | todo | CSV, updated EE URDF, HTML summary |
 
 ## Architecture rules
@@ -80,14 +80,14 @@ scripts/          make_golden_parts.py → assets/parts/*.stl; import_ur_descrip
 ui/               session (state ↔ project file), widgets (PoseWidgets, notify), cell, robot_view,
                   tool_setup, tool_view, targets_ui, optimize (feasibility run/inspect),
                   placement (heatmap), stations (planner panel), tool_opt (tool-geometry panel),
-                  results (Results tab), project_panel
+                  results (Results tab), carrier_ui (Cell → Base mode), project_panel
 core/             schema, golden_parts, robot, ik/{ur,opw,numeric}, transforms, urdf_import,
                   tool (parametric EE + library I/O), process (presets), mesh_select (pick + region grow),
                   targets (selection, normals, generators, CSV, target-set edits),
-                  collision (Coal via Pinocchio), payload (static torque), feasibility (per-point check);
-                  later: carrier, standoff
+                  collision (Coal via Pinocchio), payload (static torque), feasibility (per-point check),
+                  carrier (rail/gantry/mobile from primitives, URDF, tip-over), standoff (shapely zones)
 opt/              reachability (map, offset map, lookup, voting, coverage matrix), placement (stations),
-                  tool_geometry (L bisection + shape CMA-ES), cost
+                  sites (floor / carrier search spaces), tool_geometry (L bisection + shape CMA-ES), cost
 tools/            tool library (one YAML per EE)
 assets/robots/    robot registry (ur20/ in v1)
 assets/tools/     EE URDFs + meshes
@@ -231,6 +231,28 @@ $PY scripts/import_ur_description.py <clone> ur20   # re-import a UR model (see 
 - **GUI:** the Optimize tab's "Tool geometry" panel has max stations, L tolerance and the number of shape evaluations. It shows a coverage-vs-L table, adds its solution (with `tool_values`) to Results, and "Apply to tool" writes the values into the tool's nominal via `ToolSetupTab._commit`.
 - **Speed:** the deep hole with 1 target takes about 6 s; the rail-sized scenes take about 15 s per L sample.
 
+## Carriers (M9)
+
+- **`schema.Base`:**
+  - `mode` is static or movable; `carrier` is rail, gantry or mobile (positioner is rejected for now).
+  - `pose` is the track or gantry frame in the world.
+  - `chassis` is the moving body (mobile chassis or carriage) with its bottom on the carriage frame; `riser` sits on top of it; `track` is the static rail body, centred on the travel range.
+  - `T_mount`; `joints` holds the travel ranges.
+  - `keepouts` are world floor boxes.
+  - `standoff_m` holds the minimum, preferred and keep-out clearance; `localization_m` and `localization_deg` apply to mobile; `tip_over` and `tip_margin_m` too.
+  - The robot base pose is `T_world_carriage(dofs) · Tz(lift) · T_mount`.
+  - The DOFs are: rail s; gantry x, y; mobile x, y, yaw (+ lift). A `Station` stores its `carrier` DOF values.
+- **Static mode means exactly one base (k = 1)**, as in the plan: the planner places a single free-floor base. Several stations need movable mode with a carrier. The M7 GUI test now uses the default mobile base.
+- **`core/carrier.py`** handles the DOFs and bounds, `T_world_base`, `values_for_base` (inverse, for the GUI), the bodies, and the footprint (union of convex hulls). Travel is |Δs| for a rail, max(|Δx|, |Δy|) for a gantry (axes move together), and a straight line for a mobile base (v1). It also builds a carrier URDF (checked: Pinocchio FK of `mount` = `T_world_base`) and runs the **tip-over** check: the centre of pressure of the chassis, riser, arm (Pinocchio COM), tool and the part's reaction to the process force must lie inside the chassis footprint shrunk by the margin.
+- **`core/standoff.py`:** the part footprint is the **convex hull** of the projected mesh (conservative). The 2D check runs first and only failures are confirmed with a Coal **3D** distance, which lets an overhead gantry pass. The tolerance is 1 µm, because mesh float noise sits at exactly the minimum.
+- **`opt/sites.py`:** `FloorSites` (the old M7 behaviour, part AABB + margin) and `CarrierSites` (carrier + zones). Sites supply candidates, `T(v)`, `accept(v)` → (ok, preferred-standoff penalty), the travel metric, tip-over per point, and the **localization perturbations** (±m in x and y, ±deg yaw: 6 extra exact checks per point for a mobile base). The planner refines in DOF space (CMA-ES pads 1-D rails to 2-D). `cost` adds a `standoff` term (`Weights.standoff`).
+- **Carrier bodies in collision:** `CollisionScene(base_bodies=..., world_bodies=...)`. The carriage and riser are rigid in the base frame; the track is world-fixed and re-placed in `set_base`. They are checked against the arm from upper_arm on and against the tool, with `self_clearance`.
+- **Bug fixed in M7 code:** `min_stations` used the greedy count, which is an upper bound, so smaller station counts were never tried. It is now an exact CP-SAT minimum set cover.
+- **Done-when scene, and why it is this one:** with a UR20, the rail's *top* face needs 2 stations for both carriers; the single-station spans are rail 3.35 m and mobile 3.15 m, so the reach hides the difference. On the **wall-side face** with a wall keep-out (the robot must reach over the part), the spans are rail 2.05 m and mobile 1.55 m. The exact plan gives rail 4 stations against mobile 5 (mobile with ±10 mm / ±1° localization). Both carriers carry the robot at a 0.7 m mount. On the near face the mobile base is better (3.4 m against 1.6 m), so "rail beats mobile" is not universal.
+- **GUI:** Cell → "Base mode" panel (fields → **Apply** validates as `schema.Base`; "Load carrier defaults" for rail, gantry or mobile). It has DOF sliders that jog the carrier (driving the robot base), draws the bodies, the standoff shells (red minimum, amber preferred) and the keep-outs, and shows a live footprint-to-part distance.
+- **Viser gotcha:** setting `gizmo.visible = False` hides the gizmo's whole **subtree**; the robot hangs under the base gizmo and the part, targets and selection under the part gizmo. "Show gizmo" therefore toggles `disable_axes`, `disable_sliders` and `disable_rotations` (`PoseWidgets.set_handles`). This was broken since M2.
+- **Headless screenshots occasionally capture before the scene streams in** (an empty view with "Connected"). Re-take them, and use a fresh port after killing a server, because Viser silently moves to the next free port.
+
 ## Robot registry: UR20
 
 - `assets/robots/ur20/` contains `ur20.urdf` (generated from UR's ROS 2 description with xacro, mesh paths made relative), meshes, `spec.yaml` (DH, rated 20 kg, joint torques 738/738/433/107/107/107 N·m) and both licenses.
@@ -254,6 +276,7 @@ $PY scripts/import_ur_description.py <clone> ur20   # re-import a UR model (see 
 - 2026-11-04: Git: commit locally; **do not push** to `origin` unless the user asks.
 - 2026-11-04: The user approved fetching the UR20 description from Universal Robots' ROS 2 repo (BSD-3) in M1. Convert xacro → URDF with the pip `xacro` package.
 - 2026-11-04: The schema rejects unknown keys (`extra="forbid"`). Target normals are auto-normalized; zero normals are rejected. `Robot` takes a registry `name` or a raw `urdf`.
+- 2026-11-04 (M9): Static mode = one base (plan semantics). The done-when uses the wall-side face scene (see Carriers). Added `shapely`. The part footprint is a convex hull.
 - 2026-11-04 (M8): Straight tools reuse one flange map via `OffsetMap`. The L search is a coarse scan plus bisection (not CMA-ES on L), and shape tuning keeps the stations fixed.
 - 2026-11-04 (M7): Placement alternatives are the best solution for each station count (k_min..max) rather than near-duplicate no-good cuts. Added `ortools` and `cma` (pip) to environment.yml.
 - 2026-11-04 (M6): Base voting scores coverage plus the *worst* target's manipulability (maximin). Map defaults: 50 mm, 600 directions, 4 spins.

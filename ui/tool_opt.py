@@ -76,6 +76,9 @@ class ToolOptPanel:
             int(self.max_stations.value),
         )
         st = GeometrySettings(L_tol=self.tol.value / 1000, shape_evals=int(self.shape_evals.value))
+        sites = s.sites()
+        if sites is None:
+            args = (*args[:-1], 1)  # static base: one station
         self._cancel.clear()
         self.run.visible, self.stop.visible, self.progress.visible = False, True, True
         self.apply.disabled = True
@@ -86,7 +89,9 @@ class ToolOptPanel:
 
         def work() -> None:
             try:
-                self.result = optimize_tool(*args, st=st, progress=say, cancelled=self._cancel.is_set)
+                self.result = optimize_tool(
+                    *args, st=st, progress=say, cancelled=self._cancel.is_set, sites=sites
+                )
                 self._show()
             except Exception as err:
                 self.info.content = f"⚠ tool optimization failed: {err}"

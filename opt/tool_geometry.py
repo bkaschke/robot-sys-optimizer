@@ -31,6 +31,7 @@ from core.tool import ToolModel
 from opt.cost import cost_breakdown
 from opt.placement import PlannerSettings, Targets, plan_stations, verify
 from opt.reachability import map_for_tool
+from opt.sites import FloorSites
 
 SHAPE_VARS = ("theta_deg", "d", "roll_deg")
 
@@ -79,8 +80,10 @@ class _Evaluator:
         weights: Weights,
         max_stations: int,
         st: GeometrySettings,
+        sites=None,
     ):
         self.robot, self.ee, self.part = robot, ee, part
+        self.sites = sites  # None = free floor (opt.sites.FloorSites)
         self.T_part, self.T_base0 = T_world_part, T_world_base0
         self.t, self.fp, self.w = targets, footprint, weights
         self.max_stations, self.st = max_stations, st
@@ -98,7 +101,10 @@ class _Evaluator:
 
     def checker(self, v: ExtensionValues) -> FeasibilityChecker:
         tm = self.tool(v)
-        scene = CollisionScene(self.robot, tm, self.part, self.T_base0, self.T_part)
+        bb, wb = self.sites.scene_bodies() if hasattr(self.sites, "scene_bodies") else ([], [])
+        scene = CollisionScene(
+            self.robot, tm, self.part, self.T_base0, self.T_part, base_bodies=bb, world_bodies=wb
+        )
         return FeasibilityChecker(self.robot, self.ik, tm, scene, self.T_base0, self.T_part)
 
     def plan(self, v: ExtensionValues, cancelled=None):
@@ -117,6 +123,7 @@ class _Evaluator:
             self.tm.length(v),
             self.L_ref,
             cancelled=cancelled,
+            sites=self.sites,
         )
         full = [(s, r) for s, r in out if not s.unreached and len(s.stations) <= self.max_stations]
         if full:
@@ -128,10 +135,13 @@ class _Evaluator:
     def cost_at_stations(self, v: ExtensionValues, sol: Solution) -> tuple[float, Solution, dict]:
         checker = self.checker(v)
         xy = np.array([s.xyz[:2] for s in sol.stations])
-        z = sol.stations[0].xyz[2]
-        R = self.T_base0[:3, :3]
+        sites = self.sites or FloorSites(self.T_base0, self.fp, self.st.planner.footprint_margin, 0.0)
+        if sites.kind == "floor":
+            stations = [{"x": s.xyz[0], "y": s.xyz[1]} for s in sol.stations]
+        else:
+            stations = [{d: s.carrier[d] for d in sites.dofs} for s in sol.stations]
         pref = np.array([sol.assignment.get(int(i), 0) for i in self.t.ids])
-        assignment, res = verify(checker, self.t, xy, z, R, pref)
+        assignment, res = verify(checker, self.t, stations, sites, pref)
         unreached = sorted(p for p, r in res.items() if r.status == "unreachable")
         cost, terms = cost_breakdown(
             list(res.values()), len(unreached), xy, self.w, self.tm.length(v), self.L_ref, self.max_manip
@@ -162,11 +172,23 @@ def optimize_tool(
     st: GeometrySettings | None = None,
     progress: Callable[[str, float], None] | None = None,
     cancelled: Callable[[], bool] | None = None,
+    sites=None,
 ) -> GeometryResult:
     st = st or GeometrySettings()
     say = progress or (lambda m, f: None)
     ev = _Evaluator(
-        robot, ee, urdf, part, T_world_part, T_world_base0, targets, footprint, weights, max_stations, st
+        robot,
+        ee,
+        urdf,
+        part,
+        T_world_part,
+        T_world_base0,
+        targets,
+        footprint,
+        weights,
+        max_stations,
+        st,
+        sites=sites,
     )
     x = ee.extension
     base_v = ExtensionValues(

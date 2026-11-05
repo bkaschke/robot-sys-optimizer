@@ -105,3 +105,18 @@ def test_broken_project_leaves_session_untouched(tmp_path):
     with pytest.raises(FileNotFoundError):
         load_project(s, tmp_path)
     assert s.robot_name == "ur20" and s.part is None
+
+
+def test_hiding_gizmo_keeps_robot_and_part_visible(app):
+    _, state = app
+    cell = state["cell"]
+    cell.base.show.value = False
+    cell.part_pose.show.value = False
+    try:
+        assert cell.base.gizmo.visible and cell.base.gizmo.disable_axes  # handles off, subtree on
+        if state["session"].part is not None:
+            assert cell.part_pose.gizmo.visible and cell.part_pose.gizmo.disable_rotations
+    finally:
+        cell.base.show.value = True
+        cell.part_pose.show.value = True
+    assert not cell.base.gizmo.disable_axes

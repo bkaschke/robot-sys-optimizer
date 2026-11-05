@@ -50,7 +50,8 @@ class Session:
     feasibility: dict = field(default_factory=dict)  # point id -> feasibility.PointResult (not saved)
     results: list[schema.Solution] = field(default_factory=list)  # placement solutions, best first
     result_points: dict = field(default_factory=dict)  # solution label -> {id: PointResult} (not saved)
-    extra: dict = field(default_factory=dict)  # untouched project sections (EE, targets, ...)
+    base: schema.Base = field(default_factory=schema.Base)  # static or carrier (M9)
+    extra: dict = field(default_factory=dict)  # untouched project sections (optimizer)
 
     # --- assets ---------------------------------------------------------------
 
@@ -85,6 +86,15 @@ class Session:
 
     def T_world_flange(self) -> np.ndarray:
         return self.T_world_base @ self.robot.fk(self.q)
+
+    def sites(self):
+        """Planner search space: a carrier (movable mode) or one free floor base (static)."""
+        from core.carrier import Carrier
+        from opt.sites import CarrierSites
+
+        if self.base.mode != "movable" or self.part is None:
+            return None
+        return CarrierSites(Carrier(self.base, self.T_world_base), self.part_mesh(), self.part.T_world_part)
 
     def set_tool(self, ee: schema.EndEffector | None) -> None:
         """Select a tool and rebuild its geometry model (meshes are loaded once here)."""
@@ -133,6 +143,7 @@ class Session:
             end_effector=self.tool,
             targets=self.targets,
             results=self.results,
+            base=self.base,
             **self.extra,
         )
 
@@ -149,7 +160,8 @@ class Session:
         if project.part is not None:
             self.part = PartState(project.part.mesh, project.part.units, pose_to_matrix(project.part.pose))
             self.part_mesh()  # fail early if the mesh is missing or broken
-        self.extra = {k: getattr(project, k) for k in ("base", "optimizer")}
+        self.extra = {"optimizer": project.optimizer}
+        self.base = project.base
         self.results = list(project.results)
         self.targets = project.targets
         self.set_tool(project.end_effector)

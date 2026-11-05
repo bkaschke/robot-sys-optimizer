@@ -240,7 +240,8 @@ class CellTab:
             self.part_handle.remove()
             self.part_handle = None
         part = self.s.part
-        self.part_pose.gizmo.visible = part is not None and self.part_pose.show.value
+        self.part_pose.gizmo.visible = part is not None  # subtree: part mesh, targets
+        self.part_pose.set_handles(self.part_pose.show.value)
         if part is None:
             self.part_choice.value = "(none)"
             for fn in self.part_listeners:

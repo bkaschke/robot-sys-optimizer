@@ -136,19 +136,48 @@ class Standoffs(_Model):
 
 
 class Base(_Model):
+    """Robot base: static, or carried by a rail / gantry / mobile base (station mode).
+
+    Frames: ``pose`` is the carrier frame in the world (rail/gantry: the track frame;
+    mobile: ignored, the chassis pose is the DOF). Carrier DOFs (``joints`` ranges):
+      rail    s   -> x along the track frame's x axis
+      gantry  x,y -> carriage position in the gantry frame (mount usually inverted)
+      mobile  x,y,yaw -> chassis pose on the floor (world)
+    T_world_base = T_world_carriage(dofs) @ Tz(lift) @ T_mount.
+    ``chassis`` is the moving body (mobile chassis or rail/gantry carriage), bottom at the
+    carriage frame origin; ``riser`` sits on top of it; ``track`` is the static rail body,
+    centred on the travel range.
+    """
+
     mode: Literal["static", "movable"] = "static"
     carrier: Literal["pedestal", "rail", "gantry", "mobile", "positioner"] | None = None
+    pose: Pose = Field(default_factory=Pose)
     chassis: Primitive | None = None
     riser: Primitive | None = None
+    track: Primitive | None = None
     joints: CarrierJoints = Field(default_factory=CarrierJoints)
     T_mount: Pose = Field(default_factory=Pose)
     keepouts: list[Keepout] = Field(default_factory=list)
     standoff_m: Standoffs = Field(default_factory=Standoffs)
+    localization_m: float = Field(default=0.0, ge=0)  # mobile: position uncertainty
+    localization_deg: float = Field(default=0.0, ge=0)  # mobile: heading uncertainty
+    tip_over: bool = False  # mobile: static tip-over check (needs chassis kg)
+    tip_margin_m: float = Field(default=0.05, ge=0)
 
     @model_validator(mode="after")
     def _carrier(self) -> Base:
         if self.mode == "movable" and self.carrier in (None, "pedestal"):
             raise ValueError("movable base needs carrier: rail, gantry, mobile or positioner")
+        if self.mode == "movable" and self.carrier == "positioner":
+            raise ValueError("part positioners are not supported yet")
+        j = self.joints
+        need = {"rail": ("x",), "gantry": ("x", "y"), "mobile": ("x", "y")}.get(self.carrier or "", ())
+        if self.mode == "movable":
+            missing = [k for k in need if getattr(j, k) is None]
+            if missing:
+                raise ValueError(f"{self.carrier} needs travel ranges for {missing}")
+        if self.tip_over and (self.chassis is None or self.chassis.kg is None):
+            raise ValueError("tip-over check needs the chassis mass")
         return self
 
 
@@ -315,6 +344,7 @@ class Weights(_Model):
     clearance: float = Field(default=0.3, ge=0)
     limits: float = Field(default=0.2, ge=0)
     torque: float = Field(default=0.5, ge=0)
+    standoff: float = Field(default=1.0, ge=0)  # soft: carrier closer than the preferred standoff
 
 
 class Margins(_Model):
@@ -337,10 +367,11 @@ class Optimizer(_Model):
 
 
 class Station(_Model):
-    """One base stop: base_link pose in the world (x, y, z, yaw)."""
+    """One base stop: base_link position (world) and yaw, plus the carrier DOF values."""
 
     xyz: Vec3
     yaw: float = 0.0
+    carrier: dict[str, float] = Field(default_factory=dict)
 
 
 class Solution(_Model):

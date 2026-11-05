@@ -6,6 +6,7 @@ Pair categories and the margin each must keep (``Margins``):
     tool_robot              >= self_clearance   (wrist_3 excluded: the tool is mounted on it)
     robot_self              >= 0                (adjacent / always-touching pairs excluded)
     floor                   >= 0                (base and shoulder excluded)
+    carrier                 >= self_clearance   (arm from upper_arm on + tool vs carrier bodies)
 
 Contact geometry: a head link listed in a TCP's ``contact_links`` is skipped whole for
 that TCP. Picked ``contact_faces`` are skipped together with every face sharing a vertex
@@ -60,6 +61,7 @@ class _Pairs:
     tool_robot: list[int] = field(default_factory=list)
     robot_self: list[int] = field(default_factory=list)
     floor: list[int] = field(default_factory=list)
+    carrier: list[int] = field(default_factory=list)
 
 
 class CollisionScene:
@@ -73,6 +75,8 @@ class CollisionScene:
         margins: Margins | None = None,
         values: ExtensionValues | None = None,
         floor: bool = True,
+        base_bodies: list | None = None,
+        world_bodies: list | None = None,
     ):
         self.robot = robot
         self.margins = margins or Margins()
@@ -132,6 +136,19 @@ class CollisionScene:
                 "floor", 0, _se3(self.T_univ_world), coal.Halfspace(np.array([0, 0, 1.0]), 0.0)
             )
             self.floor_id = self.gm.addGeometryObject(go)
+        # carrier bodies: moving ones are rigid in the base frame, static ones (rail track)
+        # are world-fixed like the part. Each entry: (name, mesh, T) with T = T_base_body or
+        # T_world_body respectively.
+        self.carrier_ids: list[int] = []
+        self.world_body_T: dict[int, np.ndarray] = {}
+        for name, mesh, T_base_body in base_bodies or []:
+            go = pin.GeometryObject(f"carrier_{name}", 0, _se3(self.T_univ_base @ T_base_body), _bvh(mesh))
+            self.carrier_ids.append(self.gm.addGeometryObject(go))
+        for name, mesh, T_world_body in world_bodies or []:
+            go = pin.GeometryObject(f"carrier_{name}", 0, _se3(self.T_univ_world @ T_world_body), _bvh(mesh))
+            gid = self.gm.addGeometryObject(go)
+            self.carrier_ids.append(gid)
+            self.world_body_T[gid] = T_world_body
 
         self.pairs = _Pairs()
         P = self.pairs
@@ -157,12 +174,15 @@ class CollisionScene:
         if self.floor_id is not None:
             for i in [*self.robot_ids[2:], *self.tool_ids]:
                 add(i, self.floor_id, P.floor)
+        for c in self.carrier_ids:  # arm beyond the shoulder and the tool vs the carrier
+            for i in [*self.robot_ids[2:], *self.tool_ids]:
+                add(i, c, P.carrier)
 
         self.gd = pin.GeometryData(self.gm)
         margin_of = {}
         for k in P.robot_part + P.tool_part:
             margin_of[k] = self.margins.clearance
-        for k in P.tool_robot:
+        for k in P.tool_robot + P.carrier:
             margin_of[k] = self.margins.self_clearance
         for k, req in enumerate(self.gd.collisionRequests):
             req.security_margin = margin_of.get(k, 0.0)
@@ -176,6 +196,8 @@ class CollisionScene:
             self.gm.geometryObjects[self.part_id].placement = _se3(self.T_univ_world @ self.T_world_part)
         if self.floor_id is not None:
             self.gm.geometryObjects[self.floor_id].placement = _se3(self.T_univ_world)
+        for gid, T in self.world_body_T.items():
+            self.gm.geometryObjects[gid].placement = _se3(self.T_univ_world @ T)
 
     @staticmethod
     def _split_by_contact(tool: ToolModel, hl) -> list[tuple[frozenset, set[int]]]:

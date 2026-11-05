@@ -1,5 +1,6 @@
-"""M7 through the GUI: plan stations for the long rail from the Optimize tab, then inspect
-and apply a station from the Results tab; results survive a project save/load."""
+"""M7 (+ M9 base mode) through the GUI: plan mobile-base stations for the long rail from the
+Optimize tab, then inspect and apply a station from the Results tab; results survive a
+project save/load."""
 
 import numpy as np
 import pytest
@@ -24,6 +25,11 @@ def app():
     tab._set_selection(tg.select_by_normal(tab.mesh(), (0, 0, 1), 5.0), None)
     tab.spacing.value = 250.0
     tab.run_generate()
+    # several stations need a movable base (static mode = one base): plan-default mobile base
+    from ui.carrier_ui import DEFAULTS
+
+    state["carrier"].load(DEFAULTS["mobile"])
+    assert state["carrier"].commit()
     st = state["stations"]
     st.max_stations.value = 4
     st.start(block=True)
@@ -64,3 +70,15 @@ def test_results_saved_with_project(app, tmp_path):
     load_project(s2, tmp_path)
     assert [r.label for r in s2.results] == [r.label for r in s.results]
     assert s2.results[0].assignment == s.results[0].assignment
+
+
+def test_stations_carry_carrier_values_and_respect_standoff(app):
+    from core.carrier import Carrier
+    from core.standoff import footprint
+
+    s = app["session"]
+    c = Carrier(s.base)
+    part_fp = footprint(s.part_mesh(), s.part.T_world_part)
+    for st in s.results[0].stations:
+        assert set(st.carrier) >= {"x", "y", "yaw"}
+        assert c.footprint(st.carrier).distance(part_fp) >= s.base.standoff_m.carrier_part_min - 1e-6

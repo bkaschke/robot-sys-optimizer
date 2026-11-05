@@ -53,7 +53,14 @@ class PoseWidgets:
 
         @self.show.on_update
         def _(_e) -> None:
-            self.gizmo.visible = self.show.value
+            self.set_handles(self.show.value)
+
+    def set_handles(self, shown: bool) -> None:
+        """Show/hide only the drag handles. Never toggle ``gizmo.visible`` for this: in Viser
+        that hides the whole subtree (the robot under the base gizmo, the part under its)."""
+        self.gizmo.disable_axes = not shown
+        self.gizmo.disable_sliders = not shown
+        self.gizmo.disable_rotations = not shown
 
     def _from_fields(self) -> np.ndarray:
         return make_T(rpy_to_matrix(np.radians(self.rpy.value)), np.array(self.xyz.value) / 1000)

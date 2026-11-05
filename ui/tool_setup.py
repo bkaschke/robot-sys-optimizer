@@ -361,7 +361,7 @@ class ToolSetupTab:
         if ee is None:
             self.choice.value = NONE
             self.view.rebuild()
-            self.mount.gizmo.visible = self.tcp_pose.gizmo.visible = False
+            self.mount.gizmo.visible = self.tcp_pose.gizmo.visible = False  # no tool: nothing below them
             self.mass_info.content = self.contact_info.content = "_No tool loaded._"
             return
         self.choice.value = ee.name if ee.name in list_tools() else NONE
@@ -413,7 +413,8 @@ class ToolSetupTab:
         self.mass_override.value = ee.mass_kg is not None
         self.mass.value = ee.mass_kg or 0.0
         self.com.value = tuple(v * 1000 for v in (ee.com_head or (0.0, 0.0, 0.0)))
-        self.mount.gizmo.visible = self.mount.show.value
+        self.mount.gizmo.visible = True
+        self.mount.set_handles(self.mount.show.value)
         self.view.rebuild()
         self._show_tcp()
 
@@ -424,7 +425,8 @@ class ToolSetupTab:
         try:
             self.tcp_name.value = tcp.name
             self.tcp_pose.set(pose_to_matrix(tcp.T_head_tcp))
-            self.tcp_pose.gizmo.visible = self.tcp_pose.show.value
+            self.tcp_pose.gizmo.visible = True
+            self.tcp_pose.set_handles(self.tcp_pose.show.value)
             for link, cb in self._link_boxes.items():
                 cb.value = link in tcp.contact_links
         finally:

@@ -16,7 +16,7 @@ from core.ik import make_ik
 from core.robot import Robot
 from core.schema import Optimizer, TargetGroup
 from opt.placement import PlannerSettings, Targets, plan_stations
-from opt.reachability import ReachMap
+from opt.reachability import map_for_tool
 from ui.session import Session
 from ui.widgets import notify
 
@@ -50,6 +50,10 @@ class StationsPanel:
         with gui.add_folder("Station planner"):
             opt = self._optimizer()
             self.max_stations = gui.add_number("Max stations", opt.max_stations, min=1, max=12, step=1)
+            gui.add_markdown(
+                "_Static base mode places one base (k = 1); set a carrier in "
+                "Cell → Base mode for several stations._"
+            )
             self.step = gui.add_number("Candidate grid (mm)", 100.0, min=25.0, max=500.0, step=25.0)
             self.refine = gui.add_checkbox("Refine with exact check (CMA-ES)", True)
             self.run = gui.add_button("Plan stations", color="green")
@@ -70,8 +74,10 @@ class StationsPanel:
             return notify(event, "Cannot plan", "Need a tool, a part and targets")
         if s.robot.spec.ik != "ur_analytic":
             return notify(event, "Not supported", "Station planning needs a UR-type arm (v1)")
+        sites = s.sites()
+        static = sites is None
         settings = PlannerSettings(
-            max_stations=int(self.max_stations.value),
+            max_stations=1 if static else int(self.max_stations.value),
             candidate_step=self.step.value / 1000,
             refine=self.refine.value,
         )
@@ -101,8 +107,11 @@ class StationsPanel:
         def work() -> None:
             try:
                 say("loading reachability map (first time per tool length: ~1 min)", 0.0)
-                rmap = ReachMap.load_or_build(robot, s.tool_model.T_flange_tcp(tcp))
-                scene = CollisionScene(robot, s.tool_model, mesh, T_base0, T_part)
+                rmap = map_for_tool(robot, s.tool_model.T_flange_tcp(tcp))
+                bb, wb = sites.scene_bodies() if sites is not None else ([], [])
+                scene = CollisionScene(
+                    robot, s.tool_model, mesh, T_base0, T_part, base_bodies=bb, world_bodies=wb
+                )
                 checker = FeasibilityChecker(robot, make_ik(robot), s.tool_model, scene, T_base0, T_part)
                 out = plan_stations(
                     rmap,
@@ -117,6 +126,7 @@ class StationsPanel:
                     on_solution=streamed,
                     progress=say,
                     cancelled=self._cancel.is_set,
+                    sites=sites,
                 )
                 best = out[0][0] if out else None
                 self.status.content = (

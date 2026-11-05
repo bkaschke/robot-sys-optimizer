@@ -8,6 +8,7 @@ import time
 import viser
 
 from core.transforms import make_T
+from ui.carrier_ui import CarrierPanel
 from ui.cell import CellTab
 from ui.optimize import OptimizeTab
 from ui.placement import PlacementPanel
@@ -45,6 +46,8 @@ def build_app(server: viser.ViserServer, session: Session | None = None) -> dict
         state["cell"].refresh()
         state["tool"].refresh()
         state["targets"].refresh()
+        state["carrier"].load(session.base)
+        state["carrier"].refresh()
         state["results"].refresh()
 
     project = ProjectPanel(server, session, on_loaded=on_loaded)
@@ -52,6 +55,7 @@ def build_app(server: viser.ViserServer, session: Session | None = None) -> dict
     tab_handles = {name: tabs.add_tab(name) for name in TABS}
     with tab_handles["Cell"]:
         cell = CellTab(server, session)
+        carrier = CarrierPanel(server, session, set_base=cell.set_base)
     with tab_handles["Tool Setup"]:
         tool = ToolSetupTab(server, session)
     cell.listeners.append(tool.on_robot_moved)
@@ -59,6 +63,7 @@ def build_app(server: viser.ViserServer, session: Session | None = None) -> dict
         targets = TargetsTab(server, session)
     cell.on_part_click = targets.on_part_click
     cell.part_listeners.append(targets.on_part_changed)
+    cell.part_listeners.append(carrier.draw)
 
     def on_results() -> None:
         targets.color_by.value = "feasibility"
@@ -82,6 +87,7 @@ def build_app(server: viser.ViserServer, session: Session | None = None) -> dict
     state.update(
         tabs=tab_handles,
         cell=cell,
+        carrier=carrier,
         tool=tool,
         targets=targets,
         optimize=optimize,
