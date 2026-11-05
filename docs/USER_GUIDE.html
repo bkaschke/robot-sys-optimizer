@@ -130,9 +130,26 @@ $PY app.py --port 8080 [--dark]
 <pre><code class="language-bash">C:/Users/&lt;you&gt;/miniforge3/Scripts/conda.exe install -n base -c conda-forge conda-pack   # once
 $PY scripts/make_portable.py          # -&gt; dist/robot-sys-optimizer-portable-&lt;commit&gt;.zip (a few minutes)
 </code></pre>
+<p><strong>Get the zip from GitHub instead of a USB stick.</strong> The zip is too large for the repository itself (GitHub's limit is 100 MB per file), so it is attached to a <strong>GitHub Release</strong>. A <em>draft</em> release is visible only to you (the repo owner), and you can download from it like from a published one:</p>
+<ol>
+<li>On any computer or phone with GitHub access, sign in to GitHub as the repo owner and open <strong>https://github.com/bkaschke/robot-sys-optimizer/releases</strong>.</li>
+<li>Find the release named <strong>Portable Windows build (&lt;commit&gt;)</strong>. A draft shows a grey <strong>Draft</strong> label and is listed only while you are signed in. Pick the newest one, or the one matching the commit you want.</li>
+<li>Under <strong>Assets</strong>, click <strong><code>robot-sys-optimizer-portable-&lt;commit&gt;.zip</code></strong> (about 370 MB) to download it.
+<ul>
+<li>If the target PC itself can reach github.com, download it there directly.</li>
+<li>Otherwise download it on another computer and copy it over with a USB stick or a network share.</li>
+</ul>
+</li>
+<li>Optional check that the file is complete: in PowerShell on the target PC, <code>Get-FileHash .\robot-sys-optimizer-portable-&lt;commit&gt;.zip</code> should show the same SHA-256 the release page lists next to the asset.</li>
+</ol>
+<p>The draft link only works while you are signed in as the owner. To let colleagues download without signing in, open the draft → <strong>Edit</strong> → create a tag (e.g. <code>portable-&lt;commit&gt;</code>) → <strong>Publish release</strong>. The repository is public, so a published release can be downloaded by anyone.</p>
+<p><strong>To put a new zip on GitHub</strong> (on the set-up computer, after <code>make_portable.py</code>): upload it through <strong>Releases → Draft a new release</strong> (drag the zip into the assets box, then <strong>Save draft</strong>), or with the GitHub CLI:</p>
+<pre><code class="language-bash">gh release create portable-&lt;commit&gt; dist/robot-sys-optimizer-portable-&lt;commit&gt;.zip --draft --target &lt;full commit sha&gt; --title &quot;Portable Windows build (&lt;commit&gt;)&quot;
+</code></pre>
+<p><code>--target</code> needs the <strong>full</strong> commit SHA (<code>git rev-parse HEAD</code>); the short form is rejected.</p>
 <p><strong>On the target PC:</strong></p>
 <ol>
-<li>Copy the zip (USB stick, network share) and unzip it into a folder you can write to, for example <code>C:\Users\&lt;you&gt;\robot-sys-optimizer</code>. Avoid <code>Program Files</code>: the app saves projects and caches inside its own folder.</li>
+<li>Unzip the zip into a folder you can write to, for example <code>C:\Users\&lt;you&gt;\robot-sys-optimizer</code>. Avoid <code>Program Files</code>: the app saves projects and caches inside its own folder. (Right-click → <strong>Extract All…</strong> works; it takes a few minutes for the 55,000 files.) If Windows marks the files as downloaded from the internet and blocks the <code>.bat</code>, right-click the zip → <strong>Properties</strong> → tick <strong>Unblock</strong> before extracting.</li>
 <li>Double-click <strong><code>Start Robot Optimizer.bat</code></strong>. The first start prepares the bundled environment once (about a minute), then the app starts.</li>
 <li>Open <strong>http://localhost:8080</strong> in the browser. The browser only talks to this PC; the app makes no internet requests.</li>
 </ol>
