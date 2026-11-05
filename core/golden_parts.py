@@ -7,6 +7,8 @@ All parts are in meters, part frame z up, resting on z = 0 unless noted.
                 arc at z = R_TOP_Z. Outer-surface normal at angle a is (0, sin a, cos a).
 - open_box:     0.6 x 0.6 x 0.5 m box with a 0.4 x 0.4 x 0.45 m pocket (forces a long tool).
 - long_rail:    6.0 x 0.2 x 0.15 m bar a fixed robot cannot cover (forces stations).
+- deep_hole:    0.6 x 0.6 x 0.35 m block with a 0.1 x 0.1 m hole, 0.3 m deep (HOLE_*): narrower
+                than the UR20 wrist, so the minimal tool length is known analytically (M8).
 """
 
 from __future__ import annotations
@@ -102,6 +104,25 @@ def open_box() -> trimesh.Trimesh:
     return trimesh.util.concatenate(parts)
 
 
+HOLE_WIDTH = 0.1
+HOLE_DEPTH = 0.3
+HOLE_FLOOR = 0.05  # z of the hole bottom; rim at HOLE_FLOOR + HOLE_DEPTH
+
+
+def deep_hole() -> trimesh.Trimesh:
+    outer, w, h, f = 0.6, HOLE_WIDTH, HOLE_DEPTH, HOLE_FLOOR
+    side = (outer - w) / 2
+    zc = f + h / 2
+    parts = [
+        _box((outer, outer, f), (0, 0, f / 2)),
+        _box((outer, side, h), (0, (w + side) / 2, zc)),
+        _box((outer, side, h), (0, -(w + side) / 2, zc)),
+        _box((side, w, h), ((w + side) / 2, 0, zc)),
+        _box((side, w, h), (-(w + side) / 2, 0, zc)),
+    ]
+    return trimesh.util.concatenate(parts)
+
+
 def long_rail() -> trimesh.Trimesh:
     return _box((6.0, 0.2, 0.15), (0.0, 0.0, 0.075))
 
@@ -111,4 +132,5 @@ GOLDEN_PARTS: dict[str, Callable[[], trimesh.Trimesh]] = {
     "curved_panel": curved_panel,
     "open_box": open_box,
     "long_rail": long_rail,
+    "deep_hole": deep_hole,
 }

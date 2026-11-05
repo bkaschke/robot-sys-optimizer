@@ -16,6 +16,7 @@ from ui.results import ResultsTab
 from ui.session import PartState, Session
 from ui.stations import StationsPanel
 from ui.targets_ui import TargetsTab
+from ui.tool_opt import ToolOptPanel
 from ui.tool_setup import ToolSetupTab
 
 TABS = ("Tool Setup", "Cell", "Targets", "Optimize", "Results")
@@ -67,6 +68,12 @@ def build_app(server: viser.ViserServer, session: Session | None = None) -> dict
         optimize = OptimizeTab(server, session, on_results, show_q=cell.set_q)
         placement = PlacementPanel(server, session, set_base=cell.set_base)
         stations = StationsPanel(server, session, on_solution=lambda: state["results"].refresh())
+
+        def apply_values(v) -> None:
+            if tool._commit(lambda d: d["extension"]["nominal"].update(v.model_dump())):
+                tool._after(full=True)
+
+        tool_opt = ToolOptPanel(server, session, apply_values, on_solution=lambda: state["results"].refresh())
     with tab_handles["Results"]:
         results = ResultsTab(server, session, set_base=cell.set_base)
     state["results"] = results
@@ -80,6 +87,7 @@ def build_app(server: viser.ViserServer, session: Session | None = None) -> dict
         optimize=optimize,
         placement=placement,
         stations=stations,
+        tool_opt=tool_opt,
         project=project,
     )
     return state

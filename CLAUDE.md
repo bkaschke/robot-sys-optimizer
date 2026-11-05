@@ -8,7 +8,7 @@ Full spec: `docs/PROJECT_PLAN.md`. It is the source of truth for scope and miles
 
 ## Status
 
-- **Current milestone:** M8 Tool-geometry optimizer (next). M0–M7 are done and merged to `main`.
+- **Current milestone:** M9 Carriers (next). M0–M8 are done and merged to `main`.
 - **IK speed:** use `core.ik.ur.solve_batch` (about 7 µs per pose, all 8 branches) for anything bulk. `URAnalyticIK.solve` (about 0.8 ms) is for one-off calls.
 - **Branch policy:** one branch per milestone (`m0-skeleton`, `m1-kinematics`, …); merge to `main` when its "done when" check passes.
 - **Last updated:** 2026-11-04
@@ -23,7 +23,7 @@ Full spec: `docs/PROJECT_PLAN.md`. It is the source of truth for scope and miles
 | M5 Feasibility checker | **done** 2026-11-04 (6 golden scenes in tests/test_feasibility.py match hand expectations) | Golden-scene reachable counts match hand-verified values |
 | M6 Reachability maps | **done** 2026-11-04 (tilted-plate scene: map peak = brute-force peak, 0 mm) | Heatmap peak within 50 mm of brute-force best base (flat plate) |
 | M7 Placement optimizer | **done** 2026-11-04 (long rail, 21 pts: 2 stations, 21/21 exact-verified; 1 station proven insufficient) | Two-station scene → finds 2 stations, full coverage |
-| M8 Tool-geometry optimizer | todo | Pocket scene → minimal L within 5 mm |
+| M8 Tool-geometry optimizer | **done** 2026-11-04 (deep hole: L 259.7 mm vs analytic 260 mm; 3 mm shorter fails exact check) | Pocket scene → minimal L within 5 mm |
 | M9 Carriers | todo | Long rail: 1-axis rail respects 300 mm standoff, fewer stations than mobile base |
 | M10 Exports and report | todo | CSV, updated EE URDF, HTML summary |
 
@@ -79,14 +79,15 @@ scripts/          make_golden_parts.py → assets/parts/*.stl; import_ur_descrip
                   make_sample_tools.py → assets/tools/{orbital_sander,scanner} + tools/*.yaml
 ui/               session (state ↔ project file), widgets (PoseWidgets, notify), cell, robot_view,
                   tool_setup, tool_view, targets_ui, optimize (feasibility run/inspect),
-                  placement (heatmap), stations (planner panel), results (Results tab), project_panel
+                  placement (heatmap), stations (planner panel), tool_opt (tool-geometry panel),
+                  results (Results tab), project_panel
 core/             schema, golden_parts, robot, ik/{ur,opw,numeric}, transforms, urdf_import,
                   tool (parametric EE + library I/O), process (presets), mesh_select (pick + region grow),
                   targets (selection, normals, generators, CSV, target-set edits),
                   collision (Coal via Pinocchio), payload (static torque), feasibility (per-point check);
                   later: carrier, standoff
-opt/              reachability (map, lookup, voting, coverage matrix), placement (stations), cost;
-                  later: tool_geometry
+opt/              reachability (map, offset map, lookup, voting, coverage matrix), placement (stations),
+                  tool_geometry (L bisection + shape CMA-ES), cost
 tools/            tool library (one YAML per EE)
 assets/robots/    robot registry (ur20/ in v1)
 assets/tools/     EE URDFs + meshes
@@ -101,6 +102,7 @@ cache/            reachability maps (*.npz, gitignored, keyed by robot+TCP+setti
 - `curved_panel`: cylinder R = 1 m, axis x. Analytic helpers: `panel_outer_point` and `panel_outer_normal`.
 - `open_box`: 0.6 × 0.6 × 0.5 m with a 0.45 m deep pocket (forces a long tool). It is five concatenated boxes, so it is not watertight.
 - `long_rail`: 6 m (forces stations).
+- `deep_hole`: 0.6 m block with a 0.1 m square hole, 0.3 m deep. The hole is narrower than the UR20 wrist_3 (r 55.7 mm), so a straight probe has the analytic L_min = depth − standoff + clearance (M8 done-when).
 
 The STLs in `assets/parts/` are generated from these; regenerate them if the builders change.
 
@@ -220,6 +222,15 @@ $PY scripts/import_ur_description.py <clone> ur20   # re-import a UR model (see 
 - **GUI:** the Optimize tab has a "Station planner" panel (background thread, progress, cancel). The **Results** tab ranks solutions, shows a text cost-breakdown bar, colored station frames with labels, lines to the points each station serves, semi-transparent ghost UR20s (ViserUrdf with `mesh_color_override` RGBA) at each station's first solution, and "Move base to station".
 - **Planning time** for the rail (21–25 points, k = 2..4) is about 15–30 s including refinement, with the map already cached.
 
+## Tool geometry (M8)
+
+- **Shared flange map:** for a *straight* tool (`T_flange_tcp` a pure +z translation, `is_straight`), `map_for_tool` returns `OffsetMap(flange map, offset)`, which looks up p − offset·a. This is exact because reachability then depends only on the flange pose and |det J| doesn't depend on the reference point. **One map (TCP = flange, about 50 s) serves every L.** Bent shapes fall back to a dedicated cached map per geometry, which is slow the first time.
+- **Stage A (`opt/tool_geometry.py`):** coarse L scan (6 samples over the range) until the first L whose M7 plan reaches every target within `max_stations`, then bisection to `L_tol` (1 mm). It assumes coverage is monotone above L_min. The samples (`LSample`) form the coverage-vs-length table in the GUI. θ and d are pinned to the value in their range closest to 0 during stage A.
+- **Stage B:** CMA-ES in normalized [0, 1] coordinates over whichever of θ, d and roll have non-degenerate ranges (θ and d only for `bent`). The stage A stations stay fixed, and each candidate is scored with `verify` plus the full cost J. The result is never worse than stage A.
+- `_Evaluator` loads the head meshes once and swaps `tool_model.ee` per geometry; a `CollisionScene` is rebuilt per geometry because the capsule length changes.
+- **GUI:** the Optimize tab's "Tool geometry" panel has max stations, L tolerance and the number of shape evaluations. It shows a coverage-vs-L table, adds its solution (with `tool_values`) to Results, and "Apply to tool" writes the values into the tool's nominal via `ToolSetupTab._commit`.
+- **Speed:** the deep hole with 1 target takes about 6 s; the rail-sized scenes take about 15 s per L sample.
+
 ## Robot registry: UR20
 
 - `assets/robots/ur20/` contains `ur20.urdf` (generated from UR's ROS 2 description with xacro, mesh paths made relative), meshes, `spec.yaml` (DH, rated 20 kg, joint torques 738/738/433/107/107/107 N·m) and both licenses.
@@ -243,6 +254,7 @@ $PY scripts/import_ur_description.py <clone> ur20   # re-import a UR model (see 
 - 2026-11-04: Git: commit locally; **do not push** to `origin` unless the user asks.
 - 2026-11-04: The user approved fetching the UR20 description from Universal Robots' ROS 2 repo (BSD-3) in M1. Convert xacro → URDF with the pip `xacro` package.
 - 2026-11-04: The schema rejects unknown keys (`extra="forbid"`). Target normals are auto-normalized; zero normals are rejected. `Robot` takes a registry `name` or a raw `urdf`.
+- 2026-11-04 (M8): Straight tools reuse one flange map via `OffsetMap`. The L search is a coarse scan plus bisection (not CMA-ES on L), and shape tuning keeps the stations fixed.
 - 2026-11-04 (M7): Placement alternatives are the best solution for each station count (k_min..max) rather than near-duplicate no-good cuts. Added `ortools` and `cma` (pip) to environment.yml.
 - 2026-11-04 (M6): Base voting scores coverage plus the *worst* target's manipulability (maximin). Map defaults: 50 mm, 600 directions, 4 spins.
 - 2026-11-04 (M5): The feasibility check takes the first feasible pose in tilt order rather than optimizing per point, and the marginal clearance band is margin + 5 mm (a contact tool's body always sits close to the part).

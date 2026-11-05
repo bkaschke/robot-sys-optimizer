@@ -210,6 +210,48 @@ class ReachMap:
         return np.where(inside, score, 0.0), np.where(inside, mu, 0.0)
 
 
+class OffsetMap:
+    """A flange map (TCP = flange) reused for a straight tool whose TCP sits ``offset`` m out
+    along the flange z axis: the flange is at p - offset * a for TCP p and tool axis a.
+
+    Exact for such tools because reachability then depends only on the flange pose, and
+    |det J| does not depend on the reference point. One map serves every tool length L.
+    """
+
+    def __init__(self, flange_map: ReachMap, offset: float):
+        self.base = flange_map
+        self.offset = float(offset)
+        self.max_manip = flange_map.max_manip
+
+    def lookup(self, p_base: np.ndarray, axis_base: np.ndarray, cone_deg: float = 0.0):
+        a = np.asarray(axis_base, float)
+        a = a / np.linalg.norm(a, axis=1, keepdims=True)
+        return self.base.lookup(np.asarray(p_base, float) - self.offset * a, a, cone_deg)
+
+
+def is_straight(T_flange_tcp: np.ndarray, tol: float = 1e-6) -> bool:
+    """TCP on the flange z axis with the flange's orientation (straight tool, no bend)."""
+    return bool(
+        np.allclose(T_flange_tcp[:3, :3], np.eye(3), atol=tol)
+        and np.allclose(T_flange_tcp[:2, 3], 0, atol=tol)
+    )
+
+
+def map_for_tool(
+    robot: Robot,
+    T_flange_tcp: np.ndarray,
+    settings: MapSettings = DEFAULT_SETTINGS,
+    progress: Callable[[float], None] | None = None,
+    cache_dir: Path = CACHE_DIR,
+):
+    """Shared flange map for straight tools; a dedicated (cached) map otherwise."""
+    if is_straight(T_flange_tcp):
+        return OffsetMap(
+            ReachMap.load_or_build(robot, np.eye(4), settings, progress, cache_dir), T_flange_tcp[2, 3]
+        )
+    return ReachMap.load_or_build(robot, T_flange_tcp, settings, progress, cache_dir)
+
+
 # --- base voting ------------------------------------------------------------------------------
 
 
@@ -227,7 +269,7 @@ class VoteGrid:
 
 
 def vote_bases(
-    rmap: ReachMap,
+    rmap: ReachMap | OffsetMap,
     P_world: np.ndarray,
     N_world: np.ndarray,
     cone_deg: np.ndarray | float,
@@ -276,7 +318,7 @@ def vote_bases(
 
 
 def coverage_matrix(
-    rmap: ReachMap,
+    rmap: ReachMap | OffsetMap,
     P_world: np.ndarray,
     N_world: np.ndarray,
     cone_deg: np.ndarray | float,
