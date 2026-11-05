@@ -39,6 +39,8 @@ C:/Users/<you>/miniforge3/envs/rso/python.exe app.py      # add --dark for dark 
 
 Open **http://localhost:8080** in Chrome, Edge or Firefox. You will see a UR20 with an orbital sander and a flat test plate.
 
+This guide is built into the tool: **User guide** (top of the panel) → **📖 Open user guide** opens it in a new tab (served at http://localhost:8081, the app's port + 1).
+
 Then try a full job on the test plate:
 
 1. **Targets tab** → *Click on part* = `select surface` → click the top of the plate (it turns green).
@@ -164,6 +166,7 @@ The cost J weighs tool length, unreached points, extra stations, travel, manipul
 ### Top of the panel
 
 - **Dark mode**: switches the GUI and the floor grid. The `--dark` flag starts in dark mode.
+- **User guide**: **📖 Open user guide** opens this guide in a new browser tab. It is served by the app on its port + 1 (`--guide-port N` to change it) and also works from another PC on the network. **Download user guide (HTML)** saves the same page as a file.
 - **Project**: *Folder* (relative to the repo, or absolute), **Save** / **Load** (`<folder>/project.json`), **Download project.json**, **Open project.json** (upload). Loading never half-applies: a broken project leaves the current session untouched. *Examples* + **Open example** loads a shipped example project (copied to `workspace/examples/<name>/`).
 
 ### Tool Setup tab
@@ -293,7 +296,7 @@ Shortcut: **Project** → *Examples* `mobile_amr` → **Open example** (four whe
 
 | Path | Contents |
 | --- | --- |
-| `app.py` | GUI entry point (`--port`, `--host`, `--dark`) |
+| `app.py` | GUI entry point (`--port`, `--host`, `--dark`, `--guide-port`) |
 | `scripts/run_app.bat` | Windows launcher using the `rso` env |
 | `core/` | kinematics, IK, collision, tool model, targets, feasibility, carriers, exports (no GUI code) |
 | `opt/` | reachability maps, station planner, tool-geometry optimizer, cost |
@@ -304,6 +307,7 @@ Shortcut: **Project** → *Examples* `mobile_amr` → **Open example** (four whe
 | `examples/` | example projects (`rail_long_part/`, `mobile_amr/`, regenerate with `scripts/make_examples.py`), `sander_mobile.json` (format sample) and `headless_plan.py` |
 | `workspace/` (not in git) | your project folders: `project.json`, uploads, `export/` |
 | `cache/` (not in git) | reachability maps |
+| `docs/USER_GUIDE.md` / `.html` | this guide; the HTML is generated from the Markdown with `scripts/build_guide.py` |
 | `docs/PROJECT_PLAN.md` | the design plan |
 
 **Project file** (`project.json`): the robot and base pose, base mode and carrier (its `bodies`: shape, size or mesh file, pose, attachment, mass), tool, part, targets and groups, optimizer settings, and the saved solutions. Older projects with `chassis` / `riser` / `track` still load; the External Axis tab converts them to bodies. Joint solutions per point are not saved; re-run the plan to get them back (for example to export the CSV).
@@ -365,6 +369,7 @@ For carriers, pass `sites=CarrierSites(Carrier(base), part_mesh, T_world_part)` 
 | The first heatmap or plan takes ~1 min | The reachability map is being built (once per tool shape); later runs are fast. |
 | "Software WebGL rendering" banner | The browser has no GPU acceleration; enable hardware acceleration in its settings. |
 | Port already in use | `app.py --port 8090`. Viser may also pick the next free port by itself; check the console output. |
+| **Open user guide** does nothing or shows an error page | The guide server uses the app's port + 1; the console prints its address at start-up. If that port is blocked (firewall when opening from another PC), use **Download user guide (HTML)** or open `docs/USER_GUIDE.html` directly. |
 | The planner puts a mobile base under a raised part | Standoff is 3D; add the part's stand to the mesh or draw a keep-out. |
 
 **Known limitations (v1)**
@@ -389,6 +394,7 @@ $RUFF check . && $RUFF format --check .   # lint + format
 
 - `CLAUDE.md` holds the conventions (frames, units, cost), the milestone status with each done-when check, and design notes per module.
 - `core/` and `opt/` must not import the GUI.
+- **Edit `docs/USER_GUIDE.md`, then run `$PY scripts/build_guide.py`** to regenerate the HTML. `tests/test_guide.py` fails if the HTML is out of date.
 - Each milestone's acceptance test lives in `tests/` (for example `test_kinematics.py`, `test_feasibility.py`, `test_reachability.py`, `test_placement.py`, `test_tool_geometry.py`, `test_carriers.py`, `test_export.py`). The carrier builder is covered by `test_carrier_builder.py` and `test_examples.py`, the brush / single points / tessellation by `test_point_tools.py`.
 
 UR robot models © 2023 Universal Robots A/S. Use hereof is subject to Universal Robots A/S' Terms and Conditions for Use of Graphical Documentation (see `assets/robots/ur20/meshes/LICENSE.txt`).

@@ -1,0 +1,600 @@
+<!doctype html>
+<html lang='en'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Robot Cell &amp; End-Effector Optimizer: User Guide</title><style>
+:root{--bg:#fff;--fg:#1d1f23;--muted:#5f6670;--line:#e2e5ea;--code:#f4f6f8;--accent:#3d6fc4;--side:#f8f9fb}
+:root[data-theme=dark]{--bg:#16181c;--fg:#e6e8eb;--muted:#9aa0a8;--line:#2c3038;--code:#22262d;--accent:#7aa7f0;--side:#1b1e23}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#16181c;--fg:#e6e8eb;--muted:#9aa0a8;
+--line:#2c3038;--code:#22262d;--accent:#7aa7f0;--side:#1b1e23}}
+*{box-sizing:border-box}html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif}
+nav{position:fixed;top:0;left:0;bottom:0;width:270px;overflow:auto;padding:20px 16px;background:var(--side);
+border-right:1px solid var(--line);font-size:13.5px}
+nav .title{font-weight:600;font-size:15px;margin-bottom:12px}nav a{display:block;color:var(--muted);
+text-decoration:none;padding:3px 6px;border-radius:5px}nav a:hover{color:var(--fg);background:var(--line)}
+nav a.h3{padding-left:20px;font-size:12.5px}
+#theme{margin-top:14px;font:inherit;padding:4px 10px;border:1px solid var(--line);border-radius:6px;
+background:var(--bg);color:var(--fg);cursor:pointer}
+main{margin-left:270px;padding:24px 48px 80px;max-width:1060px}
+h1{font-size:28px;margin:8px 0 12px}h2{font-size:22px;margin:40px 0 10px;padding-bottom:6px;
+border-bottom:1px solid var(--line)}h3{font-size:17px;margin:26px 0 8px}h1,h2,h3{scroll-margin-top:12px}
+a{color:var(--accent)}hr{border:0;border-top:1px solid var(--line);margin:28px 0}
+code{background:var(--code);padding:1px 5px;border-radius:4px;font:13px/1.5 ui-monospace,Consolas,monospace}
+pre{background:var(--code);padding:12px 14px;border-radius:8px;overflow:auto}pre code{padding:0;background:none}
+table{border-collapse:collapse;width:100%;margin:10px 0 16px;font-size:14px;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:6px 9px;vertical-align:top;text-align:left}th{background:var(--side)}
+blockquote{margin:12px 0;padding:4px 14px;border-left:3px solid var(--accent);color:var(--muted)}
+.footer{color:var(--muted);font-size:12px;margin-top:40px}
+@media (max-width:860px){nav{position:static;width:auto;border-right:0;border-bottom:1px solid var(--line)}
+main{margin-left:0;padding:16px}}
+@media print{nav{display:none}main{margin:0;max-width:none}a{color:inherit}}
+</style></head><body>
+<nav><div class='title'>Robot Cell &amp; End-Effector Optimizer: User Guide</div><a class="h2" href="#1-quickstart-5-minutes">1. Quickstart (5 minutes)</a><a class="h2" href="#2-set-up-on-a-new-computer">2. Set up on a new computer</a><a class="h3" href="#21-prerequisites">2.1 Prerequisites</a><a class="h3" href="#22-clone-and-create-the-environment">2.2 Clone and create the environment</a><a class="h3" href="#23-check-the-installation">2.3 Check the installation</a><a class="h3" href="#24-first-launch">2.4 First launch</a><a class="h2" href="#3-how-it-works-concepts-and-conventions">3. How it works: concepts and conventions</a><a class="h3" href="#31-frames-and-units">3.1 Frames and units</a><a class="h3" href="#32-target-tolerances-per-group">3.2 Target tolerances (per group)</a><a class="h3" href="#33-the-parametric-end-effector">3.3 The parametric end effector</a><a class="h3" href="#34-what-feasible-means">3.4 What &quot;feasible&quot; means</a><a class="h3" href="#35-the-optimizer-in-three-layers">3.5 The optimizer in three layers</a><a class="h2" href="#4-tools-and-features-tab-by-tab">4. Tools and features, tab by tab</a><a class="h3" href="#top-of-the-panel">Top of the panel</a><a class="h3" href="#tool-setup-tab">Tool Setup tab</a><a class="h3" href="#cell-tab">Cell tab</a><a class="h3" href="#external-axis-tab">External Axis tab</a><a class="h3" href="#targets-tab">Targets tab</a><a class="h3" href="#optimize-tab">Optimize tab</a><a class="h3" href="#results-tab">Results tab</a><a class="h2" href="#5-worked-examples">5. Worked examples</a><a class="h3" href="#example-a-sand-a-flat-plate-from-one-base-static">Example A: sand a flat plate from one base (static)</a><a class="h3" href="#example-b-a-long-rail-part-with-a-7th-axis-rail-carrier">Example B: a long rail part with a 7th-axis rail carrier</a><a class="h3" href="#example-b2-design-a-mobile-robot-from-simple-shapes">Example B2: design a mobile robot from simple shapes</a><a class="h3" href="#example-c-the-shortest-probe-for-a-deep-hole">Example C: the shortest probe for a deep hole</a><a class="h3" href="#example-d-your-own-robot-cell">Example D: your own robot cell</a><a class="h2" href="#6-files-folders-and-formats">6. Files, folders and formats</a><a class="h2" href="#7-using-it-from-python-headless">7. Using it from Python (headless)</a><a class="h2" href="#8-troubleshooting-and-limitations">8. Troubleshooting and limitations</a><a class="h2" href="#9-for-developers">9. For developers</a><button id='theme' type='button'>Dark mode</button></nav>
+<main>
+<h1 id="robot-cell--end-effector-optimizer-user-guide">Robot Cell &amp; End-Effector Optimizer: User Guide</h1>
+<p>A browser-based tool that answers two questions for a robotic process (sanding, scanning, grinding, gripping, spraying):</p>
+<ol>
+<li><strong>Where should the robot base (or its carrier) stand?</strong></li>
+<li><strong>What is the shortest end effector that still reaches every target without collision or overload?</strong></li>
+</ol>
+<p>You load a robot, a tool and a part, mark the surfaces to work on, and the optimizer reports base stations, the tool geometry, a per-point feasibility report and export files. The design rationale is in <code>docs/PROJECT_PLAN.md</code>; developer conventions are in <code>CLAUDE.md</code>.</p>
+<hr />
+<h2 id="contents">Contents</h2>
+<ol>
+<li><a href="#1-quickstart-5-minutes">Quickstart (5 minutes)</a></li>
+<li><a href="#2-set-up-on-a-new-computer">Set up on a new computer</a></li>
+<li><a href="#3-how-it-works-concepts-and-conventions">How it works: concepts and conventions</a></li>
+<li><a href="#4-tools-and-features-tab-by-tab">Tools and features, tab by tab</a></li>
+<li><a href="#5-worked-examples">Worked examples</a></li>
+<li><a href="#6-files-folders-and-formats">Files, folders and formats</a></li>
+<li><a href="#7-using-it-from-python-headless">Using it from Python (headless)</a></li>
+<li><a href="#8-troubleshooting-and-limitations">Troubleshooting and limitations</a></li>
+<li><a href="#9-for-developers">For developers</a></li>
+</ol>
+<hr />
+<h2 id="1-quickstart-5-minutes">1. Quickstart (5 minutes)</h2>
+<p>On a computer that is already set up (see section 2 otherwise):</p>
+<pre><code class="language-bat">scripts\run_app.bat            :: or: scripts\run_app.bat --dark
+</code></pre>
+<p>or from any shell:</p>
+<pre><code class="language-bash">C:/Users/&lt;you&gt;/miniforge3/envs/rso/python.exe app.py      # add --dark for dark mode, --port N to change port
+</code></pre>
+<p>Open <strong>http://localhost:8080</strong> in Chrome, Edge or Firefox. You will see a UR20 with an orbital sander and a flat test plate.</p>
+<p>This guide is built into the tool: <strong>User guide</strong> (top of the panel) → <strong>📖 Open user guide</strong> opens it in a new tab (served at http://localhost:8081, the app's port + 1).</p>
+<p>Then try a full job on the test plate:</p>
+<ol>
+<li><strong>Targets tab</strong> → <em>Click on part</em> = <code>select surface</code> → click the top of the plate (it turns green).</li>
+<li>Set <em>Spacing / step (mm)</em> to <code>100</code> → <strong>Generate on selection</strong>. Points with normals appear.</li>
+<li><strong>Optimize tab</strong> → <strong>Check all targets</strong>. The points turn green, amber or red (reachable, marginal, unreachable).</li>
+<li><strong>Optimize tab</strong> → <em>Base placement</em> → <strong>Show base heatmap</strong> (the first run builds a reachability map, about 1 min) → <strong>Move base to best</strong>.</li>
+<li><strong>Optimize tab</strong> → <em>Station planner</em> → <strong>Plan stations</strong>. The result appears in the <strong>Results</strong> tab.</li>
+<li><strong>Optimize tab</strong> → <em>Tool geometry</em> → <strong>Find shortest tool</strong> → <strong>Apply to tool</strong>.</li>
+<li><strong>Results tab</strong> → <em>Export</em> → <strong>TCP poses (CSV)</strong>, <strong>Optimized tool URDF (zip)</strong>, <strong>HTML report</strong>. Files are downloaded and also saved to <code>workspace/default/export/</code>.</li>
+<li><strong>Project</strong> (top of the panel) → <strong>Save</strong> stores everything in <code>workspace/default/project.json</code>.</li>
+</ol>
+<p>Tick <strong>Dark mode</strong> at the top of the panel at any time.</p>
+<p><strong>Ready-made examples:</strong> <strong>Project</strong> → <em>Examples</em> → <code>rail_long_part</code> (UR20 on a 7th-axis rail) or <code>mobile_amr</code> (UR20 on a mobile robot built from simple shapes) → <strong>Open example</strong> → <strong>Optimize</strong> → <strong>Plan stations</strong>. The example is copied to <code>workspace/examples/&lt;name&gt;/</code> first, so saving never changes the shipped copy.</p>
+<hr />
+<h2 id="2-set-up-on-a-new-computer">2. Set up on a new computer</h2>
+<p>Tested on <strong>Windows 10/11</strong>. Linux and macOS should work with the same conda environment but have not been tested.</p>
+<h3 id="21-prerequisites">2.1 Prerequisites</h3>
+<table>
+<thead>
+<tr>
+<th>What</th>
+<th>Why</th>
+<th>Get it</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Git</td>
+<td>clone the repo</td>
+<td>https://git-scm.com</td>
+</tr>
+<tr>
+<td>Miniforge (conda)</td>
+<td>Pinocchio and Coal (kinematics and collision) are only packaged for Windows on conda-forge, not pip</td>
+<td>https://github.com/conda-forge/miniforge</td>
+</tr>
+<tr>
+<td>A modern browser</td>
+<td>the GUI runs in the browser</td>
+<td>Chrome / Edge / Firefox</td>
+</tr>
+</tbody>
+</table>
+<p>Install Miniforge <strong>for your user</strong> (default location <code>C:\Users\&lt;you&gt;\miniforge3</code>). You do not need to add it to PATH.</p>
+<h3 id="22-clone-and-create-the-environment">2.2 Clone and create the environment</h3>
+<pre><code class="language-bash">git clone https://github.com/bkaschke/robot-sys-optimizer.git
+cd robot-sys-optimizer
+C:/Users/&lt;you&gt;/miniforge3/Scripts/conda.exe env create -f environment.yml      # creates env &quot;rso&quot; (~5 min)
+</code></pre>
+<p>To update an existing environment after pulling changes:</p>
+<pre><code class="language-bash">C:/Users/&lt;you&gt;/miniforge3/Scripts/conda.exe env update -n rso -f environment.yml --prune
+</code></pre>
+<p><code>environment.yml</code> pins <strong>OpenBLAS</strong>. The default MKL build crashed numpy on the development machine, so keep that line.</p>
+<h3 id="23-check-the-installation">2.3 Check the installation</h3>
+<pre><code class="language-bash">PY=C:/Users/&lt;you&gt;/miniforge3/envs/rso/python.exe
+$PY -c &quot;import pinocchio, coal, viser; print('ok')&quot;
+$PY -m pytest -q                        # ~160 tests, ~8 min; the first run also builds reachability maps
+$PY examples/headless_plan.py           # end-to-end plan + exports without the GUI (~1 min)
+</code></pre>
+<h3 id="24-first-launch">2.4 First launch</h3>
+<pre><code class="language-bash">scripts\run_app.bat        # Windows double-click / cmd
+# or
+$PY app.py --port 8080 [--dark]
+</code></pre>
+<p>The first station plan or heatmap for a tool builds a <strong>reachability map</strong> (about 50–70 s), which is cached in <code>cache/reachability/</code>. Later runs reuse it in seconds. The cache is not in git; each computer builds its own.</p>
+<hr />
+<h2 id="3-how-it-works-concepts-and-conventions">3. How it works: concepts and conventions</h2>
+<h3 id="31-frames-and-units">3.1 Frames and units</h3>
+<table>
+<thead>
+<tr>
+<th>Frame</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>world</code></td>
+<td>cell origin, <strong>z up</strong></td>
+</tr>
+<tr>
+<td><code>base</code></td>
+<td>robot <code>base_link</code> (= carrier pose × mount)</td>
+</tr>
+<tr>
+<td><code>flange</code></td>
+<td>robot <code>tool0</code></td>
+</tr>
+<tr>
+<td><code>tcp</code></td>
+<td>one per contact region on the tool; <strong>z points out of the tool, toward the part</strong></td>
+</tr>
+<tr>
+<td><code>target</code></td>
+<td>one per surface point; <strong>z = outward surface normal</strong></td>
+</tr>
+</tbody>
+</table>
+<p>A target is reached when the TCP origin is on the point (plus any standoff along the normal) and <strong>tcp.z = −target.z</strong>, within the target's tolerances. Internally everything is metres and radians; the GUI shows <strong>mm and degrees</strong>.</p>
+<h3 id="32-target-tolerances-per-group">3.2 Target tolerances (per group)</h3>
+<ul>
+<li><strong>Spin</strong> about the normal: <code>free</code>, a half-width (e.g. <code>30</code>), or a range (e.g. <code>80,100</code>).</li>
+<li><strong>Tilt cone</strong>: the largest angle between the tool axis and the normal.</li>
+<li><strong>Standoff</strong>: the distance along the normal (0 = contact; a range for scanners).</li>
+</ul>
+<p>These come from the tool's process preset and can be edited per group.</p>
+<h3 id="33-the-parametric-end-effector">3.3 The parametric end effector</h3>
+<p>The tool is <strong>mount + extension + head</strong>: <code>T_flange_head = T_flange_mount · Rz(roll) · Tz(L) · Rx(θ) · Ty(d)</code>.</p>
+<ul>
+<li><strong>L</strong>: straight extension length; <strong>θ</strong>: one bend; <strong>d</strong>: lateral offset after the bend; <strong>roll</strong>: about the mount axis.</li>
+<li>The extension is a capsule of a given radius for collision, and has mass per metre.</li>
+<li>Each value has a <strong>range</strong> (the optimizer's bounds) and a <strong>rough placement</strong> (the value shown and used until optimized).</li>
+</ul>
+<h3 id="34-what-feasible-means">3.4 What &quot;feasible&quot; means</h3>
+<p>For each target, poses inside its tolerances are tried, starting with the least tilt. A pose is feasible when <strong>all</strong> of these pass:</p>
+<ol>
+<li><strong>IK</strong> exists.</li>
+<li><strong>Joint limits</strong>, with a margin (default 5°).</li>
+<li><strong>Static torque</strong>: gravity + tool + process force, at most 80 % of each joint limit.</li>
+<li><strong>Payload curve</strong>: tool mass against the distance of its centre of gravity from the flange, from the UR20 datasheet.</li>
+<li><strong>Collision</strong> with 10 mm clearance: robot, tool, part, floor and carrier. The tool's <strong>contact areas</strong> may touch the part.</li>
+</ol>
+<p>Status: <strong>reachable</strong>; <strong>marginal</strong> (feasible but tight: clearance &lt; margin + 5 mm, torque &gt; 90 % of its limit, or a joint within 15° of its limit); or <strong>unreachable</strong>, with the first check that failed.</p>
+<h3 id="35-the-optimizer-in-three-layers">3.5 The optimizer in three layers</h3>
+<ol>
+<li><strong>Tool geometry (outer):</strong> the shortest L by bisection, then θ / d / roll by CMA-ES.</li>
+<li><strong>Placement (middle):</strong> a cached <strong>reachability map</strong> scores base positions, an exact <strong>set cover</strong> picks the fewest stations, stations are ordered for short travel, then refined by CMA-ES against the exact checks.</li>
+<li><strong>Per point (inner):</strong> the feasibility check above.</li>
+</ol>
+<p>The cost J weighs tool length, unreached points, extra stations, travel, manipulability, clearance, joint-limit proximity, torque and the carrier's preferred-standoff penalty. The Results tab shows the breakdown.</p>
+<hr />
+<h2 id="4-tools-and-features-tab-by-tab">4. Tools and features, tab by tab</h2>
+<h3 id="top-of-the-panel">Top of the panel</h3>
+<ul>
+<li><strong>Dark mode</strong>: switches the GUI and the floor grid. The <code>--dark</code> flag starts in dark mode.</li>
+<li><strong>User guide</strong>: <strong>📖 Open user guide</strong> opens this guide in a new browser tab. It is served by the app on its port + 1 (<code>--guide-port N</code> to change it) and also works from another PC on the network. <strong>Download user guide (HTML)</strong> saves the same page as a file.</li>
+<li><strong>Project</strong>: <em>Folder</em> (relative to the repo, or absolute), <strong>Save</strong> / <strong>Load</strong> (<code>&lt;folder&gt;/project.json</code>), <strong>Download project.json</strong>, <strong>Open project.json</strong> (upload). Loading never half-applies: a broken project leaves the current session untouched. <em>Examples</em> + <strong>Open example</strong> loads a shipped example project (copied to <code>workspace/examples/&lt;name&gt;/</code>).</li>
+</ul>
+<h3 id="tool-setup-tab">Tool Setup tab</h3>
+<table>
+<thead>
+<tr>
+<th>Section</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Library</strong></td>
+<td><em>Tool</em> picks a saved tool (<code>tools/*.yaml</code>). <strong>Upload tool URDF (.zip)</strong> imports a URDF plus meshes; <code>package://</code> paths are resolved. <strong>Save to library</strong> stores the tool and copies its geometry into <code>assets/tools/&lt;name&gt;/</code>.</td>
+</tr>
+<tr>
+<td><strong>Process</strong></td>
+<td><em>Type</em> applies a preset: scanning, sanding, grinding, gripping, spraying or custom. You can then edit the force, tilt cone, standoff and spin. Contact-free processes (scanning, spraying) clear all contact areas.</td>
+</tr>
+<tr>
+<td><strong>Flange mount</strong></td>
+<td>Places the tool on the flange with a gizmo or typed values.</td>
+</tr>
+<tr>
+<td><strong>Extension</strong></td>
+<td>Straight or bent, with ranges for L, θ, d and roll, the capsule radius and mass per metre. <strong>Rough placement</strong> sliders set the current values.</td>
+</tr>
+<tr>
+<td><strong>TCPs</strong></td>
+<td>Add, rename or remove TCPs and place each with a gizmo. <strong>Pick contact faces (click tool)</strong>: tick it, then click the tool; one click selects the whole smooth face (<em>Region angle</em> sets how far it spreads), and clicking again removes it. <strong>Whole-link contact</strong> marks entire links.</td>
+</tr>
+<tr>
+<td><strong>Mass</strong></td>
+<td>Shows the total mass and COG relative to the flange. It can override the head mass and COG when the URDF has no inertials.</td>
+</tr>
+</tbody>
+</table>
+<p>Sample tools: <strong>orbital_sander</strong> (bent extension range, pad as the contact link) and <strong>scanner</strong> (contact-free). Both are simple stand-in geometry.</p>
+<h3 id="cell-tab">Cell tab</h3>
+<table>
+<thead>
+<tr>
+<th>Section</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Robot</strong></td>
+<td>Choose the UR20 from the registry, or <strong>Upload URDF (.zip)</strong> for another robot (numeric IK; planning features need a UR-type arm). The mount presets are floor, wall and ceiling. Move the base with the gizmo or the xyz/rpy fields. <em>Joints (deg)</em> sliders jog the arm; the readout shows the flange pose computed by Pinocchio.</td>
+</tr>
+<tr>
+<td><strong>Part</strong></td>
+<td>A test part (flat plate, curved panel, open box, long rail, deep hole) or <strong>Upload mesh (.stl/.obj/.ply)</strong> with <em>Units</em> (m / mm / in). Place it with the gizmo or the fields.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="external-axis-tab">External Axis tab</h3>
+<p>Build the carrier (external axis) the robot rides on, mount the robot on it, and set where it may go.</p>
+<table>
+<thead>
+<tr>
+<th>Section</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Axis type</strong></td>
+<td><em>Mode</em> <strong>static</strong> (one fixed base; the planner places one station) or <strong>movable</strong> (a carrier; the planner chooses its stops). <em>Carrier</em>: <strong>rail</strong> (travel <em>s</em> along the track frame's x axis), <strong>gantry</strong> (x/y carriage, robot usually upside down) or <strong>mobile</strong> (x, y, yaw on the floor). <strong>Load carrier defaults</strong> fills in a ready-made carrier of that kind. <em>Track/gantry frame</em>, <em>Travel</em>, <em>Yaw range</em> and <em>Lift range</em> (optional vertical axis) set the motion.</td>
+</tr>
+<tr>
+<td><strong>Bodies</strong></td>
+<td>The carrier's shapes. <strong>Add box</strong>, <strong>Add cylinder</strong>, or <strong>Add STL/OBJ/PLY body</strong> (choose <em>Mesh units</em> first; the file is stored in <code>&lt;project&gt;/assets/carriers/</code>). Pick a body in <em>Body</em> to edit its <em>Name</em>, size, <em>Position</em>, <em>Rotation</em> and <em>Mass</em>. <em>Attached to</em>: <strong>carriage (moves)</strong> for everything that travels with the axis (chassis, wheels, column), <strong>fixed (track / frame)</strong> for parts that stay put (rail track, gantry beam). Tick <strong>Drag body with gizmo</strong> to place it in 3D. <strong>Duplicate body</strong> / <strong>Remove body</strong>. The selected body is drawn in blue.</td>
+</tr>
+<tr>
+<td><strong>Robot mount</strong></td>
+<td><em>Mount on body</em> + <strong>Snap robot to top of body</strong> puts the robot base on the top centre of that body (keeps the yaw). Fine-tune with <em>Mount xyz / rpy</em> (robot base in the carriage frame) or <strong>Drag mount with gizmo</strong>.</td>
+</tr>
+<tr>
+<td><strong>Standoff and safety</strong></td>
+<td><em>Part standoff min / preferred</em>: carrier-to-part distance; the minimum is hard, closer than preferred adds a cost. It is measured in 3D, so a carrier may sit partly under a raised part: model fixtures and stands as part of the mesh or as keep-outs. <em>Keep-outs</em>: floor rectangles <code>x0,y0,x1,y1; ...</code> in mm. <em>Localization</em> (mobile): position/heading error every stop must tolerate. <em>Tip-over check</em> (mobile, needs a mass on at least one body).</td>
+</tr>
+<tr>
+<td><strong>Apply base settings</strong></td>
+<td>Commits the axis-type and safety fields. Body and mount edits apply immediately.</td>
+</tr>
+<tr>
+<td><strong>Carrier position</strong></td>
+<td>Sliders move the carrier, and the robot with it. The readout gives the footprint-to-part distance.</td>
+</tr>
+</tbody>
+</table>
+<p>Every body collides with the arm and tool (from the upper arm on), and counts for standoff and keep-outs. Bodies touching the floor form the <strong>support polygon</strong> for the tip-over check (e.g. the four wheels), and every body's mass counts. Drawing: red line = minimum standoff, amber = preferred, red boxes = keep-outs.</p>
+<h3 id="targets-tab">Targets tab</h3>
+<table>
+<thead>
+<tr>
+<th>Section</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Select surface</strong></td>
+<td><em>Click on part</em> = <code>select surface</code>: click selects a smooth region; <strong>shift-click</strong> adds, <strong>ctrl-click</strong> removes. <strong>Select by normal</strong> picks every face within an angle of a direction. <strong>Box select (drag in view)</strong> selects the faces inside a rectangle you drag. The point modes (<code>add single point</code>, <code>remove point</code>, <code>brush points</code>) are described under <em>Brush &amp; single points</em>.</td>
+</tr>
+<tr>
+<td><strong>Generate points</strong></td>
+<td>Methods run on the selection: <strong>Projected grid</strong> (spacing in mm, rays against the mean normal or a direction you give), <strong>Poisson (even)</strong> (even spacing on curved surfaces), <strong>Raster lines</strong> (step-over plus step along the line, alternating direction), <strong>Selection edges</strong> (along the borders, for deburring). Normals are <em>interpolated</em> by default (smooth), or <em>face</em>.</td>
+</tr>
+<tr>
+<td><strong>Brush &amp; single points</strong></td>
+<td>Set <em>Click on part</em> to: <strong>add single point</strong> (one target exactly where you click, normal from the surface); <strong>remove point</strong> (deletes the target nearest the click, within the brush radius); <strong>brush points</strong> (each click adds a &quot;dab&quot;: a grid of <em>Row spacing</em> × <em>Column spacing</em> inside the <em>Brush radius</em>; rows run along <em>Row direction</em>; the dab does not spill over edges sharper than <em>Brush max surface angle</em>). All dabs share one grid anchored at the part origin, and points that already exist are skipped, so overlapping dabs never double up. <strong>Fill selection with rows/columns</strong> applies the same grid to the whole selection. <strong>Undo last add</strong> removes the last click/dab/fill.</td>
+</tr>
+<tr>
+<td><strong>Refine part mesh</strong></td>
+<td><strong>Tessellate part mesh</strong> splits the part's triangles until no edge is longer than <em>Max edge length</em>. The shape does not change, but clicks, region growing, brushes and interpolated normals work on a finer mesh (useful for coarse CAD exports with long thin triangles). The refined mesh is saved as <code>&lt;project&gt;/assets/parts/&lt;name&gt;_refined_&lt;N&gt;mm.stl</code> and becomes the part; the selection and existing points are kept.</td>
+</tr>
+<tr>
+<td><strong>Groups &amp; tolerances</strong></td>
+<td>Each point belongs to a group, and each group has spin, tilt, standoff and an allowed TCP list. <strong>Apply to group</strong> saves them.</td>
+</tr>
+<tr>
+<td><strong>Edit points</strong></td>
+<td>Assign to group, flip normals, or delete the points on the selected surface; delete all. <strong>Import CSV</strong> reads <code>x,y,z,nx,ny,nz[,group]</code> in mm or m.</td>
+</tr>
+<tr>
+<td><strong>Display</strong></td>
+<td>Colour points by <em>group</em> or <em>feasibility</em>; show normals; <strong>Preview tool at point</strong> draws a see-through tool aimed into the surface at any point.</td>
+</tr>
+</tbody>
+</table>
+<p>Points are stored <strong>in the part frame</strong>, so moving the part moves them with it.</p>
+<h3 id="optimize-tab">Optimize tab</h3>
+<table>
+<thead>
+<tr>
+<th>Section</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Feasibility check</strong></td>
+<td><strong>Check all targets</strong> from the current base, with clearance, joint margin and torque limit as settings. The summary gives counts and reasons. <em>Inspect result</em> → <strong>Move robot to this solution</strong> jogs the arm to any point's solution.</td>
+</tr>
+<tr>
+<td><strong>Base placement (reachability)</strong></td>
+<td><strong>Show base heatmap</strong> draws where the base could stand on the floor (bright = all points reachable with the best worst-case manipulability) and marks the best spot. <strong>Move base to best</strong> moves it there. Ignores collisions: confirm with the feasibility check.</td>
+</tr>
+<tr>
+<td><strong>Station planner</strong></td>
+<td><strong>Plan stations</strong> finds the fewest stations that reach every point, within <em>Max stations</em> (static mode = 1). Each solution goes to the Results tab as soon as it finishes. <em>Candidate grid</em> sets the search resolution; <em>Refine</em> turns the exact fine-tuning on or off.</td>
+</tr>
+<tr>
+<td><strong>Tool geometry</strong></td>
+<td><strong>Find shortest tool</strong> first finds the shortest L that still reaches everything within the station limit, then tunes θ / d / roll. It shows a coverage-vs-length table. <strong>Apply to tool</strong> writes the values into Tool Setup.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="results-tab">Results tab</h3>
+<ul>
+<li>
+<p><strong>Solution</strong>: the ranked list (best cost first). It shows a summary, the cost breakdown bars and the station list.</p>
+</li>
+<li>
+<p><strong>Scene</strong>: coloured station markers, <strong>lines to served points</strong>, and <strong>ghost robots</strong> posed at a real solution.</p>
+</li>
+<li>
+<p><strong>Move base to station</strong>: puts the live robot at a station.</p>
+</li>
+<li>
+<p><strong>Export</strong>:</p>
+<ul>
+<li><strong>TCP poses (CSV)</strong></li>
+<li><strong>Optimized tool URDF (zip)</strong></li>
+<li><strong>HTML report</strong>: self-contained, printable to PDF, with an optional 3D snapshot.</li>
+</ul>
+<p>Files go to <code>&lt;project folder&gt;/export/</code> and also download in the browser.</p>
+</li>
+</ul>
+<hr />
+<h2 id="5-worked-examples">5. Worked examples</h2>
+<h3 id="example-a-sand-a-flat-plate-from-one-base-static">Example A: sand a flat plate from one base (static)</h3>
+<ol>
+<li>Cell → <em>Part</em> <code>flat_plate</code>, xyz <code>900, 0, 300</code> mm.</li>
+<li>Targets → click the plate top → <em>Spacing</em> <code>100</code> → <strong>Generate on selection</strong>.</li>
+<li>Optimize → <strong>Check all targets</strong>. Everything should be reachable from the origin.</li>
+<li>Optimize → <strong>Plan stations</strong> → Results: &quot;1 floor station: N/N reached&quot;.</li>
+<li>Optimize → <strong>Find shortest tool</strong>. On this plate the shortest straight tool is the bottom of the range (50 mm), and the bend stage may lower the cost further.</li>
+<li>Results → <strong>HTML report</strong>.</li>
+</ol>
+<p>The same job without the GUI is in <code>examples/headless_plan.py</code> (section 7).</p>
+<h3 id="example-b-a-long-rail-part-with-a-7th-axis-rail-carrier">Example B: a long rail part with a 7th-axis rail carrier</h3>
+<p>Shortcut: <strong>Project</strong> → <em>Examples</em> <code>rail_long_part</code> → <strong>Open example</strong>, then step 4.</p>
+<ol>
+<li>Cell → <em>Part</em> <code>long_rail</code>, xyz <code>0, 800, 500</code>.</li>
+<li>Targets → <em>Select by normal</em> <code>(0,0,1)</code> within <code>5</code> → <em>Spacing</em> <code>250</code> → <strong>Generate</strong>.</li>
+<li>External Axis → Carrier <code>rail</code> → <strong>Load carrier defaults</strong>. Set <em>Track/gantry frame xyz</em> to <code>0, 150, 0</code>, so the 0.5 m carriage sits exactly 300 mm from the part. Optionally add a wall keep-out <code>-5000,1300,5000,3000</code>. Click <strong>Apply base settings</strong>.</li>
+<li>Optimize → <em>Max stations</em> <code>5</code> → <strong>Plan stations</strong>. Expect 2 rail stations for the top face; the Results tab shows the carriage positions <em>s</em>.</li>
+<li>Try Carrier <code>mobile</code> with its defaults on the same targets and compare. Both need 2 stops on the top face. On the wall-side face (generate on the face pointing to the wall) the rail needs 4 and the mobile base 5.</li>
+</ol>
+<h3 id="example-b2-design-a-mobile-robot-from-simple-shapes">Example B2: design a mobile robot from simple shapes</h3>
+<p>Shortcut: <strong>Project</strong> → <em>Examples</em> <code>mobile_amr</code> → <strong>Open example</strong> (four wheels, chassis, battery box and a column with the UR20 on top; tip-over check on).</p>
+<ol>
+<li>External Axis → Carrier <code>mobile</code> → <strong>Load carrier defaults</strong> (a chassis and a riser).</li>
+<li>Select <em>Body</em> <code>chassis</code>, set <em>Box L W H</em> to <code>1100, 700, 300</code> and <em>Position</em> to <code>0, 0, 100</code> (raised for wheels).</li>
+<li><strong>Add cylinder</strong> → <em>Name</em> <code>wheel_fl</code>, radius/height <code>100, 80</code>, <em>Rotation</em> <code>90, 0, 0</code> (axle along y), <em>Position</em> <code>450, 390, 100</code>, <em>Mass</em> <code>10</code>. <strong>Duplicate body</strong> and move the copies to <code>450,-310,100</code>, <code>-450,390,100</code>, <code>-450,-310,100</code>.</li>
+<li><strong>Add box</strong> → a battery or cabinet, or <strong>Add STL/OBJ/PLY body</strong> for a CAD model of your AMR (set <em>Mesh units</em> first).</li>
+<li><em>Mount on body</em> <code>riser</code> (or your column) → <strong>Snap robot to top of body</strong>.</li>
+<li>Give the chassis a <em>Mass</em>, tick <em>Tip-over check</em>, <strong>Apply base settings</strong>, then Optimize → <strong>Plan stations</strong>.</li>
+</ol>
+<h3 id="example-c-the-shortest-probe-for-a-deep-hole">Example C: the shortest probe for a deep hole</h3>
+<ol>
+<li>Cell → <em>Part</em> <code>deep_hole</code>, xyz <code>800, 0, 0</code> (100 mm hole, 300 mm deep).</li>
+<li>Tool Setup → upload or define a slim straight tool. The test suite uses a probe with capsule radius 20 mm and no head; see <code>tests/test_tool_geometry.py::_probe</code>.</li>
+<li>Targets → <em>Click on part</em> <code>add single point</code> → click the hole bottom; group standoff <code>50</code> mm, tilt <code>0</code>.</li>
+<li>Optimize → <strong>Find shortest tool</strong>: L ≈ <strong>260 mm</strong> = depth − standoff + clearance (the wrist cannot enter the hole).</li>
+</ol>
+<h3 id="example-d-your-own-robot-cell">Example D: your own robot cell</h3>
+<ol>
+<li><strong>Part</strong>: Cell → <strong>Upload mesh</strong>, choose <em>Units</em> <code>mm</code> if your CAD exports in mm.</li>
+<li><strong>Tool</strong>: Tool Setup → <strong>Upload tool URDF (.zip)</strong> (URDF + meshes). Set the Process, place the TCP(s), pick the contact faces, set the extension ranges → <strong>Save to library</strong>.</li>
+<li><strong>Targets</strong>: if the STL has long thin triangles, <strong>Tessellate part mesh</strong> first. Then click-select the faces to process and generate, brush the areas you want with <em>brush points</em>, add single points, or <strong>Import CSV</strong> from a CAD/CAM tool (<code>x,y,z,nx,ny,nz[,group]</code>).</li>
+<li><strong>Carrier</strong> (optional): External Axis → build the rail or mobile robot from shapes or an STL and snap the robot onto it.</li>
+<li>Then the same steps as Example A. Save the project so it can be reloaded later.</li>
+</ol>
+<hr />
+<h2 id="6-files-folders-and-formats">6. Files, folders and formats</h2>
+<table>
+<thead>
+<tr>
+<th>Path</th>
+<th>Contents</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>app.py</code></td>
+<td>GUI entry point (<code>--port</code>, <code>--host</code>, <code>--dark</code>, <code>--guide-port</code>)</td>
+</tr>
+<tr>
+<td><code>scripts/run_app.bat</code></td>
+<td>Windows launcher using the <code>rso</code> env</td>
+</tr>
+<tr>
+<td><code>core/</code></td>
+<td>kinematics, IK, collision, tool model, targets, feasibility, carriers, exports (no GUI code)</td>
+</tr>
+<tr>
+<td><code>opt/</code></td>
+<td>reachability maps, station planner, tool-geometry optimizer, cost</td>
+</tr>
+<tr>
+<td><code>ui/</code></td>
+<td>the Viser GUI tabs</td>
+</tr>
+<tr>
+<td><code>assets/robots/ur20/</code></td>
+<td>UR20 URDF, meshes, <code>spec.yaml</code> (DH, limits, payload curve), licences</td>
+</tr>
+<tr>
+<td><code>assets/tools/</code>, <code>tools/*.yaml</code></td>
+<td>sample tool geometry and the tool library</td>
+</tr>
+<tr>
+<td><code>assets/parts/</code></td>
+<td>test parts (STL)</td>
+</tr>
+<tr>
+<td><code>examples/</code></td>
+<td>example projects (<code>rail_long_part/</code>, <code>mobile_amr/</code>, regenerate with <code>scripts/make_examples.py</code>), <code>sander_mobile.json</code> (format sample) and <code>headless_plan.py</code></td>
+</tr>
+<tr>
+<td><code>workspace/</code> (not in git)</td>
+<td>your project folders: <code>project.json</code>, uploads, <code>export/</code></td>
+</tr>
+<tr>
+<td><code>cache/</code> (not in git)</td>
+<td>reachability maps</td>
+</tr>
+<tr>
+<td><code>docs/USER_GUIDE.md</code> / <code>.html</code></td>
+<td>this guide; the HTML is generated from the Markdown with <code>scripts/build_guide.py</code></td>
+</tr>
+<tr>
+<td><code>docs/PROJECT_PLAN.md</code></td>
+<td>the design plan</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Project file</strong> (<code>project.json</code>): the robot and base pose, base mode and carrier (its <code>bodies</code>: shape, size or mesh file, pose, attachment, mass), tool, part, targets and groups, optimizer settings, and the saved solutions. Older projects with <code>chassis</code> / <code>riser</code> / <code>track</code> still load; the External Axis tab converts them to bodies. Joint solutions per point are not saved; re-run the plan to get them back (for example to export the CSV).</p>
+<p><strong>TCP poses CSV</strong> has one row per point, in station order:</p>
+<ul>
+<li><code>point_id, group, status, reason, station, carrier</code>;</li>
+<li>base pose (<code>base_x/y/z_mm, base_yaw_deg</code>);</li>
+<li>TCP in <strong>world</strong> (<code>tcp_world_x/y/z_mm</code>, quaternion <code>qw,qx,qy,qz</code>) and in the <strong>robot base frame</strong> (<code>tcp_base_*_mm</code>, <code>roll/pitch/yaw_deg</code>): use the base-frame values to program the robot at that station;</li>
+<li>joints <code>q1..q6_deg</code>;</li>
+<li><code>spin_deg, tilt_deg, standoff_mm, clearance_mm, manipulability, torque_util, limit_margin_deg</code>.</li>
+</ul>
+<p>Unreached points come last.</p>
+<p><strong>Optimized tool URDF</strong> (zip): <code>flange → mount → extension_k → head links → tcp_&lt;name&gt;</code>. The root link <code>flange</code> attaches to the robot's <code>tool0</code>. The extension is a cylinder with sphere caps and its own mass. Meshes are included.</p>
+<p><strong>HTML report</strong>: KPIs, cost breakdown, stations, a dimensioned tool sketch, coverage vs tool length (when it came from the tool optimizer), the point table, settings and notes. It is a single file with no internet access, and the browser can print it to PDF.</p>
+<hr />
+<h2 id="7-using-it-from-python-headless">7. Using it from Python (headless)</h2>
+<p>Every computation lives in <code>core/</code> and <code>opt/</code> and works without the GUI. <code>examples/headless_plan.py</code> is a complete, tested script:</p>
+<pre><code class="language-bash">$PY examples/headless_plan.py workspace/headless_example
+# 77 targets
+# feasibility from the origin: {'reachable': 77, 'marginal': 0, 'unreachable': 0}
+# plan: 1 floor station: 77/77 reached ...
+# tool: minimal L = 50.0 mm ...
+# wrote ['report.html', 'tcp_poses.csv', 'tool']
+</code></pre>
+<p>The essential calls:</p>
+<pre><code class="language-python">robot = Robot.from_registry(&quot;ur20&quot;)
+ee = load_tool(&quot;orbital_sander&quot;)
+tool = ToolModel(ee, ROOT / ee.urdf)
+scene = CollisionScene(robot, tool, part_mesh, T_world_base, T_world_part)
+checker = FeasibilityChecker(robot, make_ik(robot), tool, scene, T_world_base, T_world_part)
+results = checker.check_all(project_targets)  # per-point feasibility
+rmap = map_for_tool(robot, tool.T_flange_tcp(&quot;pad&quot;))  # cached reachability map
+plans = plan_stations(
+    rmap, checker, targets, T_world_base, footprint, Weights(), PlannerSettings(max_stations=3)
+)
+geo = optimize_tool(robot, ee, urdf, part_mesh, T_world_part, T_world_base, targets, footprint, Weights(), 1)
+</code></pre>
+<p>For carriers, pass <code>sites=CarrierSites(Carrier(base), part_mesh, T_world_part)</code> to <code>plan_stations</code> (a carrier with mesh bodies resolves relative paths against the repo; pass <code>Carrier(base, resolve=fn)</code> to use another folder). <code>scripts/make_examples.py</code> shows how to build a carrier from bodies in code. Build the collision scene with the carrier bodies: <code>bb, wb = sites.scene_bodies()</code>; <code>CollisionScene(..., base_bodies=bb, world_bodies=wb)</code>.</p>
+<hr />
+<h2 id="8-troubleshooting-and-limitations">8. Troubleshooting and limitations</h2>
+<table>
+<thead>
+<tr>
+<th>Symptom</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>conda env create</code> fails or <code>import pinocchio</code> errors</td>
+<td>Use Miniforge (conda-forge), not pip. Keep the OpenBLAS line in <code>environment.yml</code>.</td>
+</tr>
+<tr>
+<td>Python crashes silently on matrix maths</td>
+<td>The MKL BLAS problem: run <code>conda install -n rso &quot;libblas=*=*openblas&quot;</code>.</td>
+</tr>
+<tr>
+<td>The first heatmap or plan takes ~1 min</td>
+<td>The reachability map is being built (once per tool shape); later runs are fast.</td>
+</tr>
+<tr>
+<td>&quot;Software WebGL rendering&quot; banner</td>
+<td>The browser has no GPU acceleration; enable hardware acceleration in its settings.</td>
+</tr>
+<tr>
+<td>Port already in use</td>
+<td><code>app.py --port 8090</code>. Viser may also pick the next free port by itself; check the console output.</td>
+</tr>
+<tr>
+<td><strong>Open user guide</strong> does nothing or shows an error page</td>
+<td>The guide server uses the app's port + 1; the console prints its address at start-up. If that port is blocked (firewall when opening from another PC), use <strong>Download user guide (HTML)</strong> or open <code>docs/USER_GUIDE.html</code> directly.</td>
+</tr>
+<tr>
+<td>The planner puts a mobile base under a raised part</td>
+<td>Standoff is 3D; add the part's stand to the mesh or draw a keep-out.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Known limitations (v1)</strong></p>
+<ul>
+<li>Planning features (heatmap, station planner, tool optimizer) need a <strong>UR-type arm</strong> (analytic IK and a full-turn base joint). Other uploaded robots can be displayed, jogged and feasibility-checked with numeric IK.</li>
+<li>Collisions are checked at each point only; the motion <strong>between</strong> points and stations is not checked. Travel distance ignores obstacles.</li>
+<li>Payload checks are <strong>static</strong>: no acceleration loads. Beyond 800 mm COG offset the UR20 payload curve is a <strong>linear extrapolation (estimate)</strong>.</li>
+<li>The part footprint for standoffs is a convex hull, which is conservative.</li>
+<li>The <strong>brush</strong> works click by click (one dab per click): Viser reports clicks and box drags, not freehand mouse strokes. For big areas, select them and use <strong>Fill selection with rows/columns</strong>.</li>
+<li>Mesh bodies on a carrier are used as-is for collision; an STL with millions of triangles slows the checks. Simplify it in CAD first.</li>
+<li><strong>Not yet confirmed in a real browser</strong> (only in automated and headless tests): gizmo dragging (parts, carrier bodies, robot mount), contact-face clicking, shift/ctrl modifiers, box select, brush and single-point clicks on the part, file upload (meshes, carrier STLs) and download. Please report anything odd.</li>
+</ul>
+<hr />
+<h2 id="9-for-developers">9. For developers</h2>
+<pre><code class="language-bash">PY=C:/Users/&lt;you&gt;/miniforge3/envs/rso/python.exe
+RUFF=C:/Users/&lt;you&gt;/miniforge3/envs/rso/Library/bin/ruff.exe
+$PY -m pytest -q                         # all tests (~8 min)
+$RUFF check . &amp;&amp; $RUFF format --check .   # lint + format
+</code></pre>
+<ul>
+<li><code>CLAUDE.md</code> holds the conventions (frames, units, cost), the milestone status with each done-when check, and design notes per module.</li>
+<li><code>core/</code> and <code>opt/</code> must not import the GUI.</li>
+<li><strong>Edit <code>docs/USER_GUIDE.md</code>, then run <code>$PY scripts/build_guide.py</code></strong> to regenerate the HTML. <code>tests/test_guide.py</code> fails if the HTML is out of date.</li>
+<li>Each milestone's acceptance test lives in <code>tests/</code> (for example <code>test_kinematics.py</code>, <code>test_feasibility.py</code>, <code>test_reachability.py</code>, <code>test_placement.py</code>, <code>test_tool_geometry.py</code>, <code>test_carriers.py</code>, <code>test_export.py</code>). The carrier builder is covered by <code>test_carrier_builder.py</code> and <code>test_examples.py</code>, the brush / single points / tessellation by <code>test_point_tools.py</code>.</li>
+</ul>
+<p>UR robot models © 2023 Universal Robots A/S. Use hereof is subject to Universal Robots A/S' Terms and Conditions for Use of Graphical Documentation (see <code>assets/robots/ur20/meshes/LICENSE.txt</code>).</p>
+
+<p class='footer'>Generated from docs/USER_GUIDE.md by scripts/build_guide.py.</p></main>
+<script>
+(function(){var r=document.documentElement,k='rso-guide-theme',b=document.getElementById('theme');
+try{var t=localStorage.getItem(k);if(t)r.setAttribute('data-theme',t)}catch(e){}
+function dark(){var t=r.getAttribute('data-theme');return t?t==='dark':matchMedia('(prefers-color-scheme: dark)').matches}
+function label(){b.textContent=dark()?'Light mode':'Dark mode'}label();
+b.onclick=function(){var t=dark()?'light':'dark';r.setAttribute('data-theme',t);try{localStorage.setItem(k,t)}catch(e){}label()};
+})();
+</script>
+</body></html>

@@ -4,7 +4,7 @@ A browser-based tool for robotic process cells (sanding, scanning, grinding, gri
 
 Built in Python: a [Viser](https://viser.studio) GUI, Pinocchio and Coal for kinematics and collision, and OR-Tools and CMA-ES for optimization. It ships with a UR20 model.
 
-**Start here: [docs/USER_GUIDE.md](docs/USER_GUIDE.md)** (setup on a new computer, quickstart, features, examples).
+**Start here: [docs/USER_GUIDE.md](docs/USER_GUIDE.md)** (setup on a new computer, quickstart, features, examples). Inside the running tool: **User guide → 📖 Open user guide** (the same guide as HTML, `docs/USER_GUIDE.html`).
 
 ```bash
 # after setup (Miniforge env "rso", see the guide)

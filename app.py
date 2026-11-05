@@ -10,6 +10,7 @@ import viser
 from core.transforms import make_T
 from ui.carrier_ui import CarrierPanel
 from ui.cell import CellTab
+from ui.guide import GuideServer, add_guide_panel
 from ui.optimize import OptimizeTab
 from ui.placement import PlacementPanel
 from ui.project_panel import ProjectPanel
@@ -22,7 +23,7 @@ from ui.tool_setup import ToolSetupTab
 
 TABS = ("Tool Setup", "Cell", "External Axis", "Targets", "Optimize", "Results")
 UR_NOTICE = (
-    "_UR robot models © 2023 Universal Robots A/S. Use hereof is subject to Universal Robots A/S' "
+    "_UR robot models Â© 2023 Universal Robots A/S. Use hereof is subject to Universal Robots A/S' "
     "Terms and Conditions for Use of Graphical Documentation._"
 )
 
@@ -42,8 +43,14 @@ def apply_theme(server: viser.ViserServer, dark: bool) -> None:
     )
 
 
-def build_app(server: viser.ViserServer, session: Session | None = None, dark: bool = False) -> dict:
-    """Populate the scene and GUI. Returns handles for tests and later milestones."""
+def build_app(
+    server: viser.ViserServer,
+    session: Session | None = None,
+    dark: bool = False,
+    guide_port: int | None = None,
+) -> dict:
+    """Populate the scene and GUI. Returns handles for tests and later milestones.
+    ``guide_port``: port of the running user-guide server (ui.guide), for the panel link."""
     if session is None:
         session = Session()
         session.part = PartState("assets/parts/flat_plate.stl", "m", make_T(p=(1.0, 0.0, 0.5)))
@@ -58,6 +65,7 @@ def build_app(server: viser.ViserServer, session: Session | None = None, dark: b
     state: dict = {"session": session}
     dark_toggle = server.gui.add_checkbox("Dark mode", dark)
     dark_toggle.on_update(lambda e: apply_theme(server, dark_toggle.value))
+    guide = add_guide_panel(server, guide_port)
 
     def on_loaded() -> None:
         state["cell"].refresh()
@@ -116,6 +124,7 @@ def build_app(server: viser.ViserServer, session: Session | None = None, dark: b
         tool_opt=tool_opt,
         project=project,
         dark_toggle=dark_toggle,
+        guide=guide,
     )
     return state
 
@@ -125,15 +134,24 @@ def main() -> None:
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8080)
     parser.add_argument("--dark", action="store_true", help="start in dark mode (also a checkbox in the GUI)")
+    parser.add_argument("--guide-port", type=int, default=None, help="user guide port (default: --port + 1)")
     args = parser.parse_args()
 
     server = viser.ViserServer(host=args.host, port=args.port, label="Robot Cell Optimizer")
-    build_app(server, dark=args.dark)
+    guide = None
+    try:
+        guide = GuideServer(args.host, args.guide_port or server.get_port() + 1)
+        print(f"User guide: http://localhost:{guide.port}/", flush=True)
+    except OSError as err:  # the app still works; the panel keeps the download button
+        print(f"User guide server not started: {err}")
+    build_app(server, dark=args.dark, guide_port=guide.port if guide else None)
     try:
         while True:
             time.sleep(1.0)
     except KeyboardInterrupt:
         server.stop()
+        if guide is not None:
+            guide.stop()
 
 
 if __name__ == "__main__":

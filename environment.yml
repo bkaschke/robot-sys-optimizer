@@ -16,6 +16,7 @@ dependencies:
   - pillow             # PNG snapshots in the HTML report
   - pytest>=8
   - ruff>=0.8
+  - markdown-it-py>=3   # docs/USER_GUIDE.md -> USER_GUIDE.html (scripts/build_guide.py)
   - pip
   - pip:
       - viser>=1.1
