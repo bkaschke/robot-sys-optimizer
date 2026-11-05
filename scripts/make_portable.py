@@ -1,6 +1,6 @@
 """Build a portable zip for a PC without conda or internet access.
 
-    python scripts/make_portable.py [--env rso] [--out dist]
+    python scripts/make_portable.py [--prefix ENV_FOLDER] [--out dist]
 
 The zip holds the committed repo files (``git archive HEAD``) plus the conda environment packed
 with conda-pack under ``env/``. On the target PC: unzip anywhere writable and double-click
@@ -63,7 +63,9 @@ def copy_entries(src: zipfile.ZipFile, dst: zipfile.ZipFile, prefix: str) -> int
 
 def main(argv: list[str] | None = None) -> Path:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--env", default="rso", help="conda environment to pack (default rso)")
+    ap.add_argument(
+        "--prefix", default=sys.prefix, help="conda env folder to pack (default: the running one)"
+    )
     ap.add_argument("--out", type=Path, default=ROOT / "dist", help="output folder (default dist/)")
     a = ap.parse_args(argv)
 
@@ -75,9 +77,9 @@ def main(argv: list[str] | None = None) -> Path:
 
     with tempfile.TemporaryDirectory() as tmp:
         env_zip, repo_zip = Path(tmp) / "env.zip", Path(tmp) / "repo.zip"
-        print(f"Packing conda env '{a.env}' (a few minutes)...", flush=True)
+        print(f"Packing conda env {a.prefix} (a few minutes)...", flush=True)
         subprocess.run(
-            [find_conda_pack(), "-n", a.env, "-o", str(env_zip), "--format", "zip", "--quiet"], check=True
+            [find_conda_pack(), "-p", a.prefix, "-o", str(env_zip), "--format", "zip", "--quiet"], check=True
         )
         subprocess.run(["git", "archive", "--format=zip", "-o", str(repo_zip), "HEAD"], cwd=ROOT, check=True)
         print(f"Writing {final} ...", flush=True)
