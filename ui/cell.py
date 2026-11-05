@@ -162,6 +162,10 @@ class CellTab:
                 self.s.mount = "custom"
         self._update_readout()
 
+    def set_base(self, T: np.ndarray) -> None:
+        """Programmatic base move (placement optimizer): same path as a user edit."""
+        self.base._apply(T, source="code")
+
     def _on_part_pose(self, T: np.ndarray) -> None:
         if self.s.part is not None:
             self.s.part.T_world_part = T

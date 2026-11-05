@@ -8,8 +8,8 @@ Full spec: `docs/PROJECT_PLAN.md`. It is the source of truth for scope and miles
 
 ## Status
 
-- **Current milestone:** M6 Reachability maps (next). M0–M5 are done and merged to `main`.
-- **Known perf item for M6:** UR analytic IK takes ~0.8 ms per pose in pure Python. Vectorize it (batch numpy) or JIT it before building reachability maps.
+- **Current milestone:** M7 Placement optimizer (next). M0–M6 are done and merged to `main`.
+- **IK speed:** use `core.ik.ur.solve_batch` (about 7 µs per pose, all 8 branches) for anything bulk. `URAnalyticIK.solve` (about 0.8 ms) is for one-off calls.
 - **Branch policy:** one branch per milestone (`m0-skeleton`, `m1-kinematics`, …); merge to `main` when its "done when" check passes.
 - **Last updated:** 2026-11-04
 
@@ -21,7 +21,7 @@ Full spec: `docs/PROJECT_PLAN.md`. It is the source of truth for scope and miles
 | M3 Tool Setup page | **done** 2026-11-04 (GUI L slider → capsule span L+2r, TCP Δ = ΔL·z_mount, 1e-9) | Changing L stretches the collision capsule and moves the TCP correctly |
 | M4 Targets | **done** 2026-11-04 (click-select → 10 mm grid on rotated panel, worst normal < 1°) | 10 mm grid on the curved panel has normals within 1° of analytic |
 | M5 Feasibility checker | **done** 2026-11-04 (6 golden scenes in tests/test_feasibility.py match hand expectations) | Golden-scene reachable counts match hand-verified values |
-| M6 Reachability maps | todo | Heatmap peak within 50 mm of brute-force best base (flat plate) |
+| M6 Reachability maps | **done** 2026-11-04 (tilted-plate scene: map peak = brute-force peak, 0 mm) | Heatmap peak within 50 mm of brute-force best base (flat plate) |
 | M7 Placement optimizer | todo | Two-station scene → finds 2 stations, full coverage |
 | M8 Tool-geometry optimizer | todo | Pocket scene → minimal L within 5 mm |
 | M9 Carriers | todo | Long rail: 1-axis rail respects 300 mm standoff, fewer stations than mobile base |
@@ -78,20 +78,21 @@ docs/             PROJECT_PLAN.md (the spec)
 scripts/          make_golden_parts.py → assets/parts/*.stl; import_ur_description.py;
                   make_sample_tools.py → assets/tools/{orbital_sander,scanner} + tools/*.yaml
 ui/               session (state ↔ project file), widgets (PoseWidgets, notify), cell, robot_view,
-                  tool_setup, tool_view, targets_ui, optimize (feasibility run/inspect), project_panel;
-                  later: results
+                  tool_setup, tool_view, targets_ui, optimize (feasibility run/inspect),
+                  placement (heatmap), project_panel; later: results
 core/             schema, golden_parts, robot, ik/{ur,opw,numeric}, transforms, urdf_import,
                   tool (parametric EE + library I/O), process (presets), mesh_select (pick + region grow),
                   targets (selection, normals, generators, CSV, target-set edits),
                   collision (Coal via Pinocchio), payload (static torque), feasibility (per-point check);
                   later: carrier, standoff
-opt/              reachability, placement, tool_geometry, cost
+opt/              reachability (map, lookup, base voting); later: placement, tool_geometry, cost
 tools/            tool library (one YAML per EE)
 assets/robots/    robot registry (ur20/ in v1)
 assets/tools/     EE URDFs + meshes
 assets/parts/     test parts
 examples/         ready-to-run project files
 tests/            pytest + golden scenes
+cache/            reachability maps (*.npz, gitignored, keyed by robot+TCP+settings hash)
 ```
 
 **Golden parts** (`core/golden_parts.py`, built procedurally so tests can compare against analytic geometry), used in every milestone's tests:
@@ -190,7 +191,15 @@ $PY scripts/import_ur_description.py <clone> ur20   # re-import a UR model (see 
 - **Checks, in order:** IK → joint limits − margin (the best 2π copy is kept) → static torque (τ = g + J_comᵀ(−mg) + Jᵀ F with F = −force·n; utilization ≤ limit; mass ≤ rated) → collision. An unreachable point reports the first stage nothing got past (`no_ik`, `joint_limits`, `torque`, `collision`). `marginal` means clearance < margin + 5 mm, torque > 90 % of its limit, or a joint within 15° of its limit.
 - **Payload:** joint torque limits come from spec.yaml, with URDF effort as fallback. Payload-diagram and wrist-moment checks are reported as *skipped* until spec.yaml has them. `Robot.set_mount(R_world_base)` rotates gravity for wall and ceiling mounts.
 - **GUI (Optimize tab):** the check runs in a thread on a **separate `Robot` instance**, because Pinocchio data is not thread-safe. Results go in `session.feasibility` (not saved, and stale after edits until re-run). Targets switch to "Color points by: feasibility". The inspector moves the robot to the chosen solution.
-- **Speed:** reachable points take about 10 ms; unreachable points try every candidate (up to 13 tilts × 12 spins × 3 standoffs). The pure-Python IK dominates; vectorize it in M6.
+- **Speed:** reachable points take about 10 ms; unreachable points try every candidate (up to 13 tilts × 12 spins × 3 standoffs). The checker still uses the scalar IK; switch it to `solve_batch` when M7 needs throughput.
+
+## Reachability (M6)
+
+- **Batch IK:** `solve_batch(ik, T[N,4,4]) → q[N,8,6], valid[N,8]`, with branch index 4·i1 + 2·i5 + i3. Wrist-singular poses are marked invalid. `ur_manipulability` is the closed form |a2·a3·s3·s5·(a2·c2 + a3·c23 + d5·s234)| = |det J|, the same for any TCP offset and frame (verified against Pinocchio).
+- **Map (`opt/reachability.py`):** IK + joint limits (with margin) only; no collision or torque. It relies on the **symmetry about base z**, which is valid when joint 1 turns a full revolution (every UR). It is stored on a 2D (r, z) grid × 600 Fibonacci tool-axis directions in the radial frame, taking any of 4 spins. `reach` is a boolean and `manip` the best |det J|. Defaults: 50 mm cells, about 70 s to build for UR20 + sander, then cached in `cache/reachability/<hash>.npz`. The hash covers the URDF bytes, DH, limits, `T_flange_tcp` and the settings, so **every tool length L gets its own map**. Non-UR robots raise `NotImplementedError`.
+- **Lookup** is bilinear in (r, z). The tilt cone is applied **around the actual target axis** at query time; if the cone holds no direction, the nearest one is used. Dilating per direction bin instead (cone + half a bin) made the map optimistic and moved the optimum by 175 mm, and 200 directions were too few for a 10° cone.
+- **Voting:** `vote_bases(map, P, N, cones, xs, ys, base_z, R_world_base, quality="min")`. Score = coverage + the worst target's normalized manipulability. **Base yaw has no effect**, by the symmetry. The "mean" quality is nearly flat, so its peak position is poorly defined; "min" (maximin) gives a sharp optimum. For the done-when the scene must not be mirror-symmetric, otherwise there are two equal optima.
+- **GUI:** the "Base placement" panel in the Optimize tab draws the heatmap as an RGBA `add_image` on the floor and marks the best base. "Move base to best" goes through `CellTab.set_base`. **Viser image orientation:** columns run along +x, and **row 0 is at −y** (checked with a 2×2 test image), so the (ny, nx) vote grid is drawn unflipped.
 
 ## Robot registry: UR20
 
@@ -215,6 +224,7 @@ $PY scripts/import_ur_description.py <clone> ur20   # re-import a UR model (see 
 - 2026-11-04: Git: commit locally; **do not push** to `origin` unless the user asks.
 - 2026-11-04: The user approved fetching the UR20 description from Universal Robots' ROS 2 repo (BSD-3) in M1. Convert xacro → URDF with the pip `xacro` package.
 - 2026-11-04: The schema rejects unknown keys (`extra="forbid"`). Target normals are auto-normalized; zero normals are rejected. `Robot` takes a registry `name` or a raw `urdf`.
+- 2026-11-04 (M6): Base voting scores coverage plus the *worst* target's manipulability (maximin). Map defaults: 50 mm, 600 directions, 4 spins.
 - 2026-11-04 (M5): The feasibility check takes the first feasible pose in tilt order rather than optimizing per point, and the marginal clearance band is margin + 5 mm (a contact tool's body always sits close to the part).
 - 2026-11-04 (M4): Added a separate Targets tab. Click picking plus region growing in Viser works on the curved test panel. Whether it works on real part meshes stays open until the user supplies one; PyVista remains the fallback.
 - 2026-11-04 (M3): The extension model is fixed as Rz(roll)·Tz(L)·Rx(θ)·Ty(d) with capsule collision. This answers the plan's open question "straight or one bend": both are supported, and `type` selects which.

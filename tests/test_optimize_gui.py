@@ -69,3 +69,18 @@ def test_missing_inputs_reported(app):
         assert s.feasibility == before
     finally:
         s.targets = saved
+
+
+def test_heatmap_and_move_base(app):
+    s, pl = app["session"], app["placement"]
+    pl.compute()  # uses the cached map for the sander TCP
+    v = pl.votes
+    n = len(s.targets.points)
+    assert v.coverage.max() == pytest.approx(n)
+    assert len(pl._handles) == 2  # heatmap image + best-base marker
+    x, y = v.best()
+    T = s.T_world_base.copy()
+    T[:2, 3] = (x, y)
+    app["cell"].set_base(T)
+    assert np.allclose(s.T_world_base[:2, 3], (x, y))
+    assert np.allclose(app["cell"].base.gizmo.position[:2], (x, y))

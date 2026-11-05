@@ -127,3 +127,86 @@ def _dedupe(sols: np.ndarray, tol: float = 1e-9) -> np.ndarray:
         if not any(np.max(np.abs(wrap_to_pi(s - k))) < tol for k in keep):
             keep.append(s)
     return np.array(keep)
+
+
+# --- vectorized solver (reachability maps) ---------------------------------------------------
+
+
+def _inv_batch(T: np.ndarray) -> np.ndarray:
+    R = T[..., :3, :3]
+    Ti = np.zeros_like(T)
+    Ti[..., :3, :3] = np.swapaxes(R, -1, -2)
+    Ti[..., :3, 3] = -np.einsum("...ji,...j->...i", R, T[..., :3, 3])
+    Ti[..., 3, 3] = 1.0
+    return Ti
+
+
+def _dh_batch(theta: np.ndarray, d: float, a: float, alpha: float) -> np.ndarray:
+    ct, st = np.cos(theta), np.sin(theta)
+    ca, sa = np.cos(alpha), np.sin(alpha)
+    T = np.zeros(theta.shape + (4, 4))
+    T[..., 0, 0], T[..., 0, 1], T[..., 0, 2], T[..., 0, 3] = ct, -st * ca, st * sa, a * ct
+    T[..., 1, 0], T[..., 1, 1], T[..., 1, 2], T[..., 1, 3] = st, ct * ca, -ct * sa, a * st
+    T[..., 2, 1], T[..., 2, 2], T[..., 2, 3] = sa, ca, d
+    T[..., 3, 3] = 1.0
+    return T
+
+
+def solve_batch(ik: URAnalyticIK, T_base_flange: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """All 8 branches for N poses at once.
+
+    Returns ``q`` (N, 8, 6) wrapped to (-pi, pi] and ``valid`` (N, 8). Branch index
+    b = 4*i1 + 2*i5 + i3 (shoulder, wrist, elbow choice). Wrist-singular poses (|s5| tiny)
+    are marked invalid here; use ``ik.solve`` for those few.
+    """
+    T = ik.T_0_b @ np.asarray(T_base_flange, float) @ ik.T_f_6  # (N,4,4) in DH frames
+    n = T.shape[0]
+    p5 = T[:, :3, 3] - ik.d6 * T[:, :3, 2]
+    r = np.hypot(p5[:, 0], p5[:, 1])
+    ok_r = r >= abs(ik.d4) + 1e-12
+    psi = np.arctan2(p5[:, 1], p5[:, 0])
+    asn = np.arcsin(np.clip(ik.d4 / np.where(ok_r, r, 1.0), -1, 1))
+    q = np.zeros((n, 8, 6))
+    valid = np.zeros((n, 8), bool)
+    for i1, q1 in enumerate((psi + asn, psi + np.pi - asn)):
+        T16 = _inv_batch(_dh_batch(q1, ik.d1, 0.0, np.pi / 2)) @ T
+        R = T16[:, :3, :3]
+        c5 = np.clip(R[:, 2, 2], -1, 1)
+        for i5, sgn in enumerate((1.0, -1.0)):
+            q5 = sgn * np.arccos(c5)
+            s5 = np.sin(q5)
+            ok5 = np.abs(s5) > 1e-9
+            s5s = np.where(ok5, s5, 1.0)
+            q6 = np.arctan2(-R[:, 2, 1] / s5s, R[:, 2, 0] / s5s)
+            phi = np.arctan2(-R[:, 1, 2] / s5s, -R[:, 0, 2] / s5s)
+            A56 = _dh_batch(q5, ik.d5, 0.0, -np.pi / 2) @ _dh_batch(q6, ik.d6, 0.0, 0.0)
+            T14 = T16 @ _inv_batch(A56)
+            x, y = T14[:, 0, 3], T14[:, 1, 3]
+            c3 = (x * x + y * y - ik.a2**2 - ik.a3**2) / (2 * ik.a2 * ik.a3)
+            ok3 = np.abs(c3) <= 1 + 1e-9
+            c3 = np.clip(c3, -1, 1)
+            for i3, sg3 in enumerate((1.0, -1.0)):
+                q3 = sg3 * np.arccos(c3)
+                q2 = np.arctan2(y, x) - np.arctan2(ik.a3 * np.sin(q3), ik.a2 + ik.a3 * np.cos(q3))
+                q4 = phi - q2 - q3
+                b = 4 * i1 + 2 * i5 + i3
+                q[:, b] = wrap_to_pi(np.stack([q1, q2, q3, q4, q5, q6], axis=1))
+                valid[:, b] = ok_r & ok5 & ok3
+    return q, valid
+
+
+def ur_manipulability(ik: URAnalyticIK, q: np.ndarray) -> np.ndarray:
+    """Yoshikawa measure |det J| of a UR arm, vectorized over (..., 6).
+
+    For a square Jacobian this equals sqrt(det(J J^T)) and is independent of the
+    reference point and frame, so it holds for any TCP offset.
+    """
+    q = np.asarray(q, float)
+    q2, q3, q4, q5 = q[..., 1], q[..., 2], q[..., 3], q[..., 4]
+    return np.abs(
+        ik.a2
+        * ik.a3
+        * np.sin(q3)
+        * np.sin(q5)
+        * (ik.a2 * np.cos(q2) + ik.a3 * np.cos(q2 + q3) + ik.d5 * np.sin(q2 + q3 + q4))
+    )

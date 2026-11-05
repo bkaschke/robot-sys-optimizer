@@ -10,6 +10,7 @@ import viser
 from core.transforms import make_T
 from ui.cell import CellTab
 from ui.optimize import OptimizeTab
+from ui.placement import PlacementPanel
 from ui.project_panel import ProjectPanel
 from ui.session import PartState, Session
 from ui.targets_ui import TargetsTab
@@ -61,12 +62,21 @@ def build_app(server: viser.ViserServer, session: Session | None = None) -> dict
 
     with tab_handles["Optimize"]:
         optimize = OptimizeTab(server, session, on_results, show_q=cell.set_q)
+        placement = PlacementPanel(server, session, set_base=cell.set_base)
     for name in ("Results",):
         with tab_handles[name]:
             server.gui.add_markdown(f"_{name}: not built yet (see CLAUDE.md milestones)._")
     server.gui.add_markdown(UR_NOTICE)
 
-    state.update(tabs=tab_handles, cell=cell, tool=tool, targets=targets, optimize=optimize, project=project)
+    state.update(
+        tabs=tab_handles,
+        cell=cell,
+        tool=tool,
+        targets=targets,
+        optimize=optimize,
+        placement=placement,
+        project=project,
+    )
     return state
 
 

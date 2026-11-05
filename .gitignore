@@ -1,11 +1,11 @@
-.venv/
-__pycache__/
+*.egg-info/
 *.pyc
+.claude-flow/
+.hive-mind/
 .pytest_cache/
 .ruff_cache/
-*.egg-info/
-cache/
-.claude-flow/
 .swarm/
-.hive-mind/
+.venv/
+__pycache__/
+cache/
 workspace/
