@@ -12,7 +12,9 @@ from ui.cell import CellTab
 from ui.optimize import OptimizeTab
 from ui.placement import PlacementPanel
 from ui.project_panel import ProjectPanel
+from ui.results import ResultsTab
 from ui.session import PartState, Session
+from ui.stations import StationsPanel
 from ui.targets_ui import TargetsTab
 from ui.tool_setup import ToolSetupTab
 
@@ -42,6 +44,7 @@ def build_app(server: viser.ViserServer, session: Session | None = None) -> dict
         state["cell"].refresh()
         state["tool"].refresh()
         state["targets"].refresh()
+        state["results"].refresh()
 
     project = ProjectPanel(server, session, on_loaded=on_loaded)
     tabs = server.gui.add_tab_group()
@@ -63,9 +66,10 @@ def build_app(server: viser.ViserServer, session: Session | None = None) -> dict
     with tab_handles["Optimize"]:
         optimize = OptimizeTab(server, session, on_results, show_q=cell.set_q)
         placement = PlacementPanel(server, session, set_base=cell.set_base)
-    for name in ("Results",):
-        with tab_handles[name]:
-            server.gui.add_markdown(f"_{name}: not built yet (see CLAUDE.md milestones)._")
+        stations = StationsPanel(server, session, on_solution=lambda: state["results"].refresh())
+    with tab_handles["Results"]:
+        results = ResultsTab(server, session, set_base=cell.set_base)
+    state["results"] = results
     server.gui.add_markdown(UR_NOTICE)
 
     state.update(
@@ -75,6 +79,7 @@ def build_app(server: viser.ViserServer, session: Session | None = None) -> dict
         targets=targets,
         optimize=optimize,
         placement=placement,
+        stations=stations,
         project=project,
     )
     return state

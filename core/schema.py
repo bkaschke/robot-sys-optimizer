@@ -333,6 +333,36 @@ class Optimizer(_Model):
     margins: Margins = Field(default_factory=Margins)
 
 
+# --- Results -------------------------------------------------------------------
+
+
+class Station(_Model):
+    """One base stop: base_link pose in the world (x, y, z, yaw)."""
+
+    xyz: Vec3
+    yaw: float = 0.0
+
+
+class Solution(_Model):
+    """A placement result: stations in visiting order and which station serves each point."""
+
+    label: str = ""
+    stations: list[Station] = Field(min_length=1)
+    assignment: dict[int, int] = Field(default_factory=dict)  # point id -> station index
+    unreached: list[int] = Field(default_factory=list)
+    cost: float = 0.0
+    breakdown: dict[str, float] = Field(default_factory=dict)
+    tool_values: ExtensionValues | None = None
+
+    @model_validator(mode="after")
+    def _station_refs(self) -> Solution:
+        k = len(self.stations)
+        bad = [i for i, s in self.assignment.items() if not 0 <= s < k]
+        if bad:
+            raise ValueError(f"points {bad[:5]} assigned to unknown stations")
+        return self
+
+
 # --- Project -------------------------------------------------------------------
 
 
@@ -345,7 +375,7 @@ class Project(_Model):
     part: Part | None = None
     targets: Targets = Field(default_factory=Targets)
     optimizer: Optimizer = Field(default_factory=Optimizer)
-    results: list[dict] = Field(default_factory=list)  # typed in M7
+    results: list[Solution] = Field(default_factory=list)
 
     @field_validator("version")
     @classmethod

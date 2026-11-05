@@ -48,6 +48,8 @@ class Session:
     tool_model: ToolModel | None = None
     targets: schema.Targets = field(default_factory=schema.Targets)
     feasibility: dict = field(default_factory=dict)  # point id -> feasibility.PointResult (not saved)
+    results: list[schema.Solution] = field(default_factory=list)  # placement solutions, best first
+    result_points: dict = field(default_factory=dict)  # solution label -> {id: PointResult} (not saved)
     extra: dict = field(default_factory=dict)  # untouched project sections (EE, targets, ...)
 
     # --- assets ---------------------------------------------------------------
@@ -126,7 +128,12 @@ class Session:
                 pose=matrix_to_pose(self.part.T_world_part),
             )
         return schema.Project(
-            robot=robot, part=part, end_effector=self.tool, targets=self.targets, **self.extra
+            robot=robot,
+            part=part,
+            end_effector=self.tool,
+            targets=self.targets,
+            results=self.results,
+            **self.extra,
         )
 
     def apply_project(self, project: schema.Project, project_dir: Path) -> None:
@@ -142,7 +149,8 @@ class Session:
         if project.part is not None:
             self.part = PartState(project.part.mesh, project.part.units, pose_to_matrix(project.part.pose))
             self.part_mesh()  # fail early if the mesh is missing or broken
-        self.extra = {k: getattr(project, k) for k in ("base", "optimizer", "results")}
+        self.extra = {k: getattr(project, k) for k in ("base", "optimizer")}
+        self.results = list(project.results)
         self.targets = project.targets
         self.set_tool(project.end_effector)
 

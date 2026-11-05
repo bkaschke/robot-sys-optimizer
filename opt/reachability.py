@@ -273,3 +273,31 @@ def vote_bases(
     qual = qual / max(1, len(P)) if quality == "mean" else np.where(np.isfinite(qual), qual, 0.0)
     shape = gx.shape
     return VoteGrid(xs, ys, cov.reshape(shape), qual.reshape(shape), (cov + qual).reshape(shape))
+
+
+def coverage_matrix(
+    rmap: ReachMap,
+    P_world: np.ndarray,
+    N_world: np.ndarray,
+    cone_deg: np.ndarray | float,
+    bases: np.ndarray,
+    R_world_base: np.ndarray | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Per-base, per-target (score, manipulability), each (B, T). Bases are (B, 3) positions."""
+    R = np.eye(3) if R_world_base is None else np.asarray(R_world_base, float)
+    P = np.asarray(P_world, float)
+    A = -np.asarray(N_world, float) @ R
+    cones = np.broadcast_to(np.asarray(cone_deg, float), (len(P),))
+    B, T = len(bases), len(P)
+    score = np.zeros((B, T))
+    mu = np.zeros((B, T))
+    for cone in np.unique(cones):
+        cols = np.flatnonzero(cones == cone)
+        for s in range(0, B, 1024):
+            b = bases[s : s + 1024]
+            pb = ((P[cols][None] - b[:, None]) @ R).reshape(-1, 3)
+            ab = np.broadcast_to(A[cols][None], (len(b), len(cols), 3)).reshape(-1, 3)
+            sc, m = rmap.lookup(pb, ab, cone)
+            score[s : s + len(b), cols] = sc.reshape(len(b), -1)
+            mu[s : s + len(b), cols] = m.reshape(len(b), -1)
+    return score, mu

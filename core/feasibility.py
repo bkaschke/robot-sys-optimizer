@@ -133,8 +133,8 @@ class FeasibilityChecker:
     ):
         self.robot, self.ik, self.tool, self.scene = robot, ik, tool, scene
         self.settings = settings or CheckSettings()
-        self.T_base_part = np.linalg.inv(T_world_base) @ T_world_part
-        robot.set_mount(T_world_base[:3, :3])
+        self.T_world_part = T_world_part
+        self.set_base(T_world_base)
         m = np.radians(self.settings.joint_margin_deg)
         self.lo, self.hi = robot.lower + m, robot.upper - m
         mp = tool.mass_properties()
@@ -143,12 +143,21 @@ class FeasibilityChecker:
         self.T_flange_tcp = {t.name: tool.T_flange_tcp(t.name) for t in tool.ee.tcps}
         self._T_tcp_flange = {k: np.linalg.inv(v) for k, v in self.T_flange_tcp.items()}
 
-    def check_point(self, pid: int, p, n, group: TargetGroup) -> PointResult:
+    def set_base(self, T_world_base: np.ndarray) -> None:
+        """Evaluate from another base pose (stations, refinement) without rebuilding."""
+        self.T_base_part = np.linalg.inv(T_world_base) @ self.T_world_part
+        self.robot.set_mount(T_world_base[:3, :3])
+        self.scene.set_base(T_world_base)
+
+    def check_point(self, pid: int, p, n, group: TargetGroup, max_poses: int | None = None) -> PointResult:
+        """``max_poses`` caps the candidate TCP poses tried (fast screening in optimizers)."""
         tcps = group.tcps or list(self.T_flange_tcp)
         passed = 0  # number of STAGES some candidate got past
         R_bp = self.T_base_part[:3, :3]
         force_base = -self.force * (R_bp @ np.asarray(n, float))  # tool pushes into the surface
-        for tcp, spin, tilt, so, T_part_tcp in candidate_poses(p, n, group, tcps):
+        for k, (tcp, spin, tilt, so, T_part_tcp) in enumerate(candidate_poses(p, n, group, tcps)):
+            if max_poses is not None and k >= max_poses:
+                break
             T_base_flange = self.T_base_part @ T_part_tcp @ self._T_tcp_flange[tcp]
             sols = self.ik.solve(T_base_flange)
             if len(sols) == 0:

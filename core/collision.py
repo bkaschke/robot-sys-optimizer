@@ -86,8 +86,9 @@ class CollisionScene:
 
         # world <-> pinocchio universe (URDF root)
         pin.framesForwardKinematics(model, robot.data, pin.neutral(model))
-        T_univ_base = np.asarray(robot.data.oMf[robot.base_frame_id].homogeneous)
-        self.T_univ_world = T_univ_base @ np.linalg.inv(T_world_base)
+        self.T_univ_base = np.asarray(robot.data.oMf[robot.base_frame_id].homogeneous)
+        self.T_univ_world = self.T_univ_base @ np.linalg.inv(T_world_base)
+        self.T_world_part = T_world_part
 
         # tool geometry, attached to the flange's parent joint
         self.tool_ids: list[int] = []
@@ -167,6 +168,14 @@ class CollisionScene:
             req.security_margin = margin_of.get(k, 0.0)
             req.enable_contact = False
         self._drop_always_colliding()
+
+    def set_base(self, T_world_base: np.ndarray) -> None:
+        """Move the robot base: re-place the world-fixed geometry (part, floor)."""
+        self.T_univ_world = self.T_univ_base @ np.linalg.inv(T_world_base)
+        if self.part_id is not None:
+            self.gm.geometryObjects[self.part_id].placement = _se3(self.T_univ_world @ self.T_world_part)
+        if self.floor_id is not None:
+            self.gm.geometryObjects[self.floor_id].placement = _se3(self.T_univ_world)
 
     @staticmethod
     def _split_by_contact(tool: ToolModel, hl) -> list[tuple[frozenset, set[int]]]:

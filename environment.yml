@@ -22,3 +22,5 @@ dependencies:
       - pydantic>=2.10
       - trimesh>=4.5
       - xacro>=2.0       # one-time xacro -> URDF conversion (scripts/import_ur_description.py)
+      - ortools>=9.10    # station set cover (CP-SAT)
+      - cma>=3.3         # CMA-ES refinement

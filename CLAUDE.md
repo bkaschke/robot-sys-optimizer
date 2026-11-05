@@ -8,7 +8,7 @@ Full spec: `docs/PROJECT_PLAN.md`. It is the source of truth for scope and miles
 
 ## Status
 
-- **Current milestone:** M7 Placement optimizer (next). M0–M6 are done and merged to `main`.
+- **Current milestone:** M8 Tool-geometry optimizer (next). M0–M7 are done and merged to `main`.
 - **IK speed:** use `core.ik.ur.solve_batch` (about 7 µs per pose, all 8 branches) for anything bulk. `URAnalyticIK.solve` (about 0.8 ms) is for one-off calls.
 - **Branch policy:** one branch per milestone (`m0-skeleton`, `m1-kinematics`, …); merge to `main` when its "done when" check passes.
 - **Last updated:** 2026-11-04
@@ -22,7 +22,7 @@ Full spec: `docs/PROJECT_PLAN.md`. It is the source of truth for scope and miles
 | M4 Targets | **done** 2026-11-04 (click-select → 10 mm grid on rotated panel, worst normal < 1°) | 10 mm grid on the curved panel has normals within 1° of analytic |
 | M5 Feasibility checker | **done** 2026-11-04 (6 golden scenes in tests/test_feasibility.py match hand expectations) | Golden-scene reachable counts match hand-verified values |
 | M6 Reachability maps | **done** 2026-11-04 (tilted-plate scene: map peak = brute-force peak, 0 mm) | Heatmap peak within 50 mm of brute-force best base (flat plate) |
-| M7 Placement optimizer | todo | Two-station scene → finds 2 stations, full coverage |
+| M7 Placement optimizer | **done** 2026-11-04 (long rail, 21 pts: 2 stations, 21/21 exact-verified; 1 station proven insufficient) | Two-station scene → finds 2 stations, full coverage |
 | M8 Tool-geometry optimizer | todo | Pocket scene → minimal L within 5 mm |
 | M9 Carriers | todo | Long rail: 1-axis rail respects 300 mm standoff, fewer stations than mobile base |
 | M10 Exports and report | todo | CSV, updated EE URDF, HTML summary |
@@ -79,13 +79,14 @@ scripts/          make_golden_parts.py → assets/parts/*.stl; import_ur_descrip
                   make_sample_tools.py → assets/tools/{orbital_sander,scanner} + tools/*.yaml
 ui/               session (state ↔ project file), widgets (PoseWidgets, notify), cell, robot_view,
                   tool_setup, tool_view, targets_ui, optimize (feasibility run/inspect),
-                  placement (heatmap), project_panel; later: results
+                  placement (heatmap), stations (planner panel), results (Results tab), project_panel
 core/             schema, golden_parts, robot, ik/{ur,opw,numeric}, transforms, urdf_import,
                   tool (parametric EE + library I/O), process (presets), mesh_select (pick + region grow),
                   targets (selection, normals, generators, CSV, target-set edits),
                   collision (Coal via Pinocchio), payload (static torque), feasibility (per-point check);
                   later: carrier, standoff
-opt/              reachability (map, lookup, base voting); later: placement, tool_geometry, cost
+opt/              reachability (map, lookup, voting, coverage matrix), placement (stations), cost;
+                  later: tool_geometry
 tools/            tool library (one YAML per EE)
 assets/robots/    robot registry (ur20/ in v1)
 assets/tools/     EE URDFs + meshes
@@ -201,6 +202,24 @@ $PY scripts/import_ur_description.py <clone> ur20   # re-import a UR model (see 
 - **Voting:** `vote_bases(map, P, N, cones, xs, ys, base_z, R_world_base, quality="min")`. Score = coverage + the worst target's normalized manipulability. **Base yaw has no effect**, by the symmetry. The "mean" quality is nearly flat, so its peak position is poorly defined; "min" (maximin) gives a sharp optimum. For the done-when the scene must not be mirror-symmetric, otherwise there are two equal optima.
 - **GUI:** the "Base placement" panel in the Optimize tab draws the heatmap as an RGBA `add_image` on the floor and marks the best base. "Move base to best" goes through `CellTab.set_base`. **Viser image orientation:** columns run along +x, and **row 0 is at −y** (checked with a 2×2 test image), so the (ny, nx) vote grid is drawn unflipped.
 
+## Station planner (M7)
+
+- **Pipeline (`opt/placement.py`):**
+  1. Candidate bases on a floor grid (100 mm) around the targets, minus the part's world-xy AABB grown by 0.25 m.
+  2. Map coverage matrix (B × T), with "covered" meaning map score ≥ 0.5. Pruned to about 400 candidates: the best overall plus the 5 best per target.
+  3. **CP-SAT** for each k from k_min to max_stations: maximize coverage ≫ Σ assigned manipulability ≫ fewer bases. The greedy cover is the fallback and sets k_min.
+  4. Open-TSP order: brute force for k ≤ 7, otherwise nearest neighbour.
+  5. **CMA-ES** per station (≤ 24 evaluations, σ 80 mm, within 0.3 m), scored by the exact checker on that station's targets with a 40-pose screening budget (`check_point(max_poses=...)`).
+  6. `verify`: each target is checked exactly from its preferred station, then from every other one.
+  7. Cost via `opt/cost.py` (the plan's J; μ normalized by the map max; c_ref 50 mm; D_ref 1 m; limits relative to 30°).
+
+  Solutions are streamed through `on_solution` and returned sorted by cost.
+- `FeasibilityChecker.set_base` / `CollisionScene.set_base` re-place the part and floor without rebuilding the geometry, which keeps refinement cheap (verified identical to a fresh build).
+- **Results** are typed (`schema.Station`, `schema.Solution`; assignment = point id → station index) and saved in `project.results`. The per-point joint solutions (`session.result_points`, used for ghost robots) are kept only in memory.
+- Travel is the straight-line distance between stations; obstacles are ignored in v1, so stations may sit on opposite sides of the part. Base yaw is kept from the current base.
+- **GUI:** the Optimize tab has a "Station planner" panel (background thread, progress, cancel). The **Results** tab ranks solutions, shows a text cost-breakdown bar, colored station frames with labels, lines to the points each station serves, semi-transparent ghost UR20s (ViserUrdf with `mesh_color_override` RGBA) at each station's first solution, and "Move base to station".
+- **Planning time** for the rail (21–25 points, k = 2..4) is about 15–30 s including refinement, with the map already cached.
+
 ## Robot registry: UR20
 
 - `assets/robots/ur20/` contains `ur20.urdf` (generated from UR's ROS 2 description with xacro, mesh paths made relative), meshes, `spec.yaml` (DH, rated 20 kg, joint torques 738/738/433/107/107/107 N·m) and both licenses.
@@ -224,6 +243,7 @@ $PY scripts/import_ur_description.py <clone> ur20   # re-import a UR model (see 
 - 2026-11-04: Git: commit locally; **do not push** to `origin` unless the user asks.
 - 2026-11-04: The user approved fetching the UR20 description from Universal Robots' ROS 2 repo (BSD-3) in M1. Convert xacro → URDF with the pip `xacro` package.
 - 2026-11-04: The schema rejects unknown keys (`extra="forbid"`). Target normals are auto-normalized; zero normals are rejected. `Robot` takes a registry `name` or a raw `urdf`.
+- 2026-11-04 (M7): Placement alternatives are the best solution for each station count (k_min..max) rather than near-duplicate no-good cuts. Added `ortools` and `cma` (pip) to environment.yml.
 - 2026-11-04 (M6): Base voting scores coverage plus the *worst* target's manipulability (maximin). Map defaults: 50 mm, 600 directions, 4 spins.
 - 2026-11-04 (M5): The feasibility check takes the first feasible pose in tilt order rather than optimizing per point, and the marginal clearance band is margin + 5 mm (a contact tool's body always sits close to the part).
 - 2026-11-04 (M4): Added a separate Targets tab. Click picking plus region growing in Viser works on the curved test panel. Whether it works on real part meshes stays open until the user supplies one; PyVista remains the fallback.
