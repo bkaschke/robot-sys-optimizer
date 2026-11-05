@@ -239,7 +239,6 @@ def test_carrier_plan_is_valid_and_optimal(rail_scene, task, kind):
     assert len(best.assignment) == len(t.ids)
 
     # standoff, keep-out and travel range at every station
-    part_fp = footprint(part, T_part)
     c = sites.c
     wall = box(-5, 1.3, 5, 3.0)
     for st in best.stations:

@@ -18,7 +18,12 @@ ROOT = "/results"
 STATION_COLORS = [(230, 60, 60), (40, 120, 230), (240, 170, 20), (150, 70, 200), (20, 170, 170), (90, 90, 90)]
 
 
-def station_T(st) -> np.ndarray:
+def station_T(st, session: Session | None = None) -> np.ndarray:
+    """Base pose of a station: exact from the carrier DOFs when a session is given."""
+    if session is not None:
+        from core.export import station_pose
+
+        return station_pose(session.base, st, session.T_world_base)
     return make_T(rpy_to_matrix((0.0, 0.0, st.yaw)), st.xyz)
 
 
@@ -39,6 +44,10 @@ class ResultsTab:
         self.show_lines = gui.add_checkbox("Lines to served points", True)
         self.show_ghosts = gui.add_checkbox("Ghost robots", True)
         self.clear = gui.add_button("Clear from scene")
+        from ui.export_ui import ExportPanel
+
+        self.export = ExportPanel(server, session, self.selected, length_samples=self._length_samples)
+        self.tool_opt = None  # set by app.py: the tool-geometry panel (coverage-vs-L samples)
 
         for w in (self.choice, self.show_lines, self.show_ghosts):
             w.on_update(lambda e: None if self._busy else self.draw())
@@ -49,11 +58,17 @@ class ResultsTab:
             if sol is None or self.station.value == "-":
                 return
             k = int(self.station.value.split()[0][1:]) - 1
-            self.set_base(station_T(sol.stations[k]))
+            self.set_base(station_T(sol.stations[k], self.s))
 
         @self.clear.on_click
         def _(e) -> None:
             self._drop()
+
+    def _length_samples(self, sol) -> list:
+        r = getattr(self.tool_opt, "result", None)
+        if r is not None and r.solution is not None and r.solution.label == sol.label:
+            return r.samples
+        return []
 
     def selected(self):
         labels = [self._label(i, s) for i, s in enumerate(self.s.results)]
@@ -113,7 +128,7 @@ class ResultsTab:
         where = {int(i): k for k, i in enumerate(ids)}
         res = self.s.result_points.get(sol.label, {})
         for k, st in enumerate(sol.stations):
-            T = station_T(st)
+            T = station_T(st, self.s)
             color = STATION_COLORS[k % len(STATION_COLORS)]
             self._handles.append(
                 self.server.scene.add_frame(

@@ -197,3 +197,32 @@ def test_gui_finds_and_applies_shortest_tool():
         assert s.tool_model.T_flange_tcp("tip")[2, 3] == pytest.approx(panel.result.values.L)
     finally:
         server.stop()
+
+
+def test_shape_stage_single_variable_does_not_crash(robot):
+    """Regression (found in the M10 smoke run): with only theta active, CMA-ES got a 1-D
+    problem, which it does not support; it crashed depending on the random step sizes."""
+    ee = load_tool("orbital_sander")
+    T_part = make_T(p=(0.9, 0.0, 0.3))
+    part = gp.flat_plate()
+    g = TargetGroup(name="top", tilt_deg=10.0)
+    Pp = np.array([(x, 0.0, 0.02) for x in (-0.3, 0.0, 0.3)])
+    Np = np.tile([0, 0, 1.0], (3, 1))
+    t = Targets(np.arange(3), Pp + T_part[:3, 3], Np, Pp, Np, [g] * 3, np.full(3, 10.0))
+    b = part.bounds
+    fp = np.array([b[0, :2] + T_part[:2, 3], b[1, :2] + T_part[:2, 3]])
+    for evals in (6, 30):
+        res = optimize_tool(
+            robot,
+            ee,
+            REPO / ee.urdf,
+            part,
+            T_part,
+            np.eye(4),
+            t,
+            fp,
+            Weights(),
+            1,
+            GeometrySettings(coarse_samples=3, shape_evals=evals),
+        )
+        assert res.feasible and 0.0 <= res.values.theta_deg <= 45.0

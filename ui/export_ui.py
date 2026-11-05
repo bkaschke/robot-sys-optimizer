@@ -1,0 +1,157 @@
+"""Results tab → Export (M10): TCP-pose CSV, optimized tool URDF (zip with meshes), and the
+HTML report for the selected solution. Files go to <project>/export/ and are also sent to
+the browser that clicked as downloads."""
+
+from __future__ import annotations
+
+import io
+import zipfile
+from collections.abc import Callable
+from pathlib import Path
+
+import viser
+
+from core import export as ex
+from core.report import ReportInput, build_report, png_data_uri
+from core.robot import Robot
+from ui.session import Session
+from ui.widgets import notify
+
+
+class ExportPanel:
+    def __init__(
+        self,
+        server: viser.ViserServer,
+        session: Session,
+        selected: Callable[[], object],
+        length_samples: Callable[[object], list] | None = None,
+    ):
+        self.s = session
+        self.selected = selected
+        self.length_samples = length_samples or (lambda sol: [])
+        gui = server.gui
+        with gui.add_folder("Export"):
+            self.screenshot = gui.add_checkbox("Include 3D view snapshot in report", True)
+            self.csv = gui.add_button("TCP poses (CSV)")
+            self.urdf = gui.add_button("Optimized tool URDF (zip)")
+            self.report = gui.add_button("HTML report")
+            self.info = gui.add_markdown("_Files are saved to the project folder's export/ directory._")
+        self.csv.on_click(lambda e: self._run(e, self.export_csv))
+        self.urdf.on_click(lambda e: self._run(e, self.export_urdf))
+        self.report.on_click(lambda e: self._run(e, self.export_report))
+
+    # --- helpers ---------------------------------------------------------------------------------
+
+    @property
+    def out_dir(self) -> Path:
+        return self.s.project_dir / "export"
+
+    def _run(self, event, fn) -> None:
+        sol = self.selected()
+        if sol is None:
+            return notify(event, "Nothing to export", "Plan stations first and select a solution")
+        try:
+            path, data = fn(sol, getattr(event, "client", None))
+        except (OSError, ValueError, KeyError) as err:
+            return notify(event, "Export failed", str(err))
+        self.info.content = f"Saved `{path}`"
+        client = getattr(event, "client", None)
+        if client is not None:
+            client.send_file_download(path.name, data)
+        notify(event, "Exported", str(path), ok=True)
+
+    def _tool(self, sol):
+        tm = self.s.tool_model
+        if tm is None:
+            raise ValueError("no tool loaded")
+        return tm
+
+    def rows(self, sol) -> list[dict]:
+        s = self.s
+        return ex.tcp_rows(
+            sol,
+            s.result_points.get(sol.label, {}),
+            s.targets,
+            Robot(s.robot.spec),
+            self._tool(sol),
+            s.base,
+            s.T_world_base,
+        )
+
+    # --- exports -----------------------------------------------------------------------------------
+
+    def export_csv(self, sol, client=None) -> tuple[Path, bytes]:
+        data = ex.rows_to_csv(self.rows(sol)).encode("utf-8")
+        self.out_dir.mkdir(parents=True, exist_ok=True)
+        path = self.out_dir / "tcp_poses.csv"
+        path.write_bytes(data)
+        return path, data
+
+    def export_urdf(self, sol, client=None) -> tuple[Path, bytes]:
+        s = self.s
+        tool = s.tool
+        if tool is None:
+            raise ValueError("no tool loaded")
+        head = s.resolve(tool.urdf) if tool.urdf else None
+        folder = self.out_dir / f"{tool.name}_optimized"
+        ex.export_tool(tool, sol.tool_values, head, folder)
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+            for f in folder.rglob("*"):
+                if f.is_file():
+                    z.write(f, f.relative_to(folder.parent).as_posix())
+        zpath = self.out_dir / f"{tool.name}_optimized.zip"
+        zpath.write_bytes(buf.getvalue())
+        return zpath, buf.getvalue()
+
+    def export_report(self, sol, client=None) -> tuple[Path, bytes]:
+        s = self.s
+        tm = self._tool(sol)
+        rows = self.rows(sol)
+        images = []
+        notes = []
+        if self.screenshot.value and client is not None:
+            try:
+                img = client.camera.get_render(720, 1280, transport_format="png", timeout=10.0)
+                images.append(("3D view at export time", png_data_uri(img)))
+            except Exception as err:  # renderer unavailable / timed out: the report still works
+                notes.append(f"3D snapshot not included ({type(err).__name__}).")
+        # per-point notes carry "payload curve ... extrapolated (estimate)" only where it applied
+        flagged = sorted(
+            {n for r in s.result_points.get(sol.label, {}).values() for n in getattr(r, "notes", [])}
+        )
+        notes += flagged
+        if not s.result_points.get(sol.label):
+            notes.append(
+                "Per-point joint solutions are not stored for this solution (loaded from a project): "
+                "re-run the plan for the full point table."
+            )
+        tool = s.tool
+        report = ReportInput(
+            title=f"Cell plan: {sol.label}",
+            robot=s.robot.spec.name,
+            tool=tool.name if tool else "-",
+            process=tool.process if tool else "-",
+            base_mode=f"{s.base.mode}" + (f" ({s.base.carrier})" if s.base.mode == "movable" else ""),
+            solution=sol,
+            rows=rows,
+            station_poses=[ex.station_pose(s.base, st, s.T_world_base) for st in sol.stations],
+            envelope_svg=ex.envelope_svg(tm, sol.tool_values),
+            images=images,
+            length_samples=self.length_samples(sol),
+            notes=notes,
+            settings={
+                "part": s.part.mesh_path if s.part else "-",
+                "targets": f"{len(s.targets.points)} points in {len(s.targets.groups)} group(s)",
+                "standoff min / preferred (m)": f"{s.base.standoff_m.carrier_part_min} / "
+                f"{s.base.standoff_m.carrier_part_preferred}",
+                "tool values": sol.tool_values.model_dump()
+                if sol.tool_values
+                else tool.extension.nominal.model_dump(),
+            },
+        )
+        data = build_report(report).encode("utf-8")
+        self.out_dir.mkdir(parents=True, exist_ok=True)
+        path = self.out_dir / "report.html"
+        path.write_bytes(data)
+        return path, data

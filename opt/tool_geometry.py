@@ -276,6 +276,8 @@ def optimize_tool(
                 for i, k in enumerate(active)
             ]
         )
+        if len(u0) == 1:  # CMA-ES does not support 1-D: pad with a coordinate values() ignores
+            u0 = np.append(u0, 0.5)
         es = cma.CMAEvolutionStrategy(
             u0, 0.25, {"bounds": [0, 1], "maxfevals": st.shape_evals, "verbose": -9, "seed": 2, "popsize": 6}
         )

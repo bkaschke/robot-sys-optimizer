@@ -82,6 +82,7 @@ def build_app(server: viser.ViserServer, session: Session | None = None) -> dict
     with tab_handles["Results"]:
         results = ResultsTab(server, session, set_base=cell.set_base)
     state["results"] = results
+    results.tool_opt = tool_opt
     server.gui.add_markdown(UR_NOTICE)
 
     state.update(

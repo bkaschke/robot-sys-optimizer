@@ -13,6 +13,7 @@ dependencies:
   - scipy>=1.13
   - rtree>=1.3          # trimesh ray casting / nearest-point queries
   - pyyaml
+  - pillow             # PNG snapshots in the HTML report
   - pytest>=8
   - ruff>=0.8
   - pip

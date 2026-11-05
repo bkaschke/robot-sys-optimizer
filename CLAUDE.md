@@ -8,10 +8,10 @@ Full spec: `docs/PROJECT_PLAN.md`. It is the source of truth for scope and miles
 
 ## Status
 
-- **Current milestone:** M10 Exports and report (next). M0–M9 are done and merged to `main`.
+- **Current milestone:** none. v1 (M0–M10) is complete; see "Current state".
 - **IK speed:** use `core.ik.ur.solve_batch` (about 7 µs per pose, all 8 branches) for anything bulk. `URAnalyticIK.solve` (about 0.8 ms) is for one-off calls.
 - **Branch policy:** one branch per milestone (`m0-skeleton`, `m1-kinematics`, …); merge to `main` when its "done when" check passes.
-- **Last updated:** 2026-11-04 (paused before M10, see "Next session: start here")
+- **Last updated:** 2026-11-05 (M10 done, v1 complete, pushed)
 
 | Milestone | State | Done when |
 | --- | --- | --- |
@@ -24,59 +24,23 @@ Full spec: `docs/PROJECT_PLAN.md`. It is the source of truth for scope and miles
 | M6 Reachability maps | **done** 2026-11-04 (tilted-plate scene: map peak = brute-force peak, 0 mm) | Heatmap peak within 50 mm of brute-force best base (flat plate) |
 | M7 Placement optimizer | **done** 2026-11-04 (long rail, 21 pts: 2 stations, 21/21 exact-verified; 1 station proven insufficient) | Two-station scene → finds 2 stations, full coverage |
 | M8 Tool-geometry optimizer | **done** 2026-11-04 (deep hole: L 259.7 mm vs analytic 260 mm; 3 mm shorter fails exact check) | Pocket scene → minimal L within 5 mm |
-| M9 Carriers | **done** 2026-11-04; check revised with user: both carriers, 2 tasks: full exact coverage, 3D standoff, keep-outs, travel, optimal k, counts no worse than rail 2/4, mobile 2/5 | Long rail: 1-axis rail respects 300 mm standoff, fewer stations than mobile base |
-| M10 Exports and report | todo | CSV, updated EE URDF, HTML summary |
+| M9 Carriers | **done** 2026-11-04; check revised with user: both carriers, 2 tasks: full exact coverage, 3D standoff, keep-outs, travel, optimal k, counts no worse than rail 2/4, mobile 2/5 | Long rail, rail + mobile: valid, standoff-respecting, optimal-k plans (revised) |
+| M10 Exports and report | **done** 2026-11-05 (CSV rows reproduce targets to 1 um; URDF TCP frames = model; self-contained HTML; GUI) | CSV, updated EE URDF, HTML summary (done-when defined in tests/test_export.py) |
 
-## Next session: start here (handoff 2026-11-04)
+## Current state (2026-11-05)
 
-The session paused after M9 because of the usage limit. **M10 has not been started.** `main` = M9 commit `d10eb6a`. The tree is clean and nothing has been pushed (the user's rule: no push unless asked).
+**v1 is complete.** M0–M10 are done and merged to `main`, which is pushed to `origin` (the user authorized the push on 2026-11-04). The user guide is in `docs/USER_GUIDE.md` (setup on a new computer, quickstart, features, examples).
 
-**Resume checklist**
-1. `cd C:/Users/Ben/Documents/AI/Claude/robot-sys-optimizer && git log --oneline | head` should show `d10eb6a M9 carriers ...` on top.
-2. `$PY -m pytest -q` should report 144 passed in about 5 min. Reachability maps rebuild into `cache/` if missing: about 50 s for the flange map, about 70 s for the sander map.
-3. `git checkout -b m10-exports`, then work through the M10 plan below.
-
-**M10 scope (plan § Milestones):** CSV of TCP poses per station, an updated EE URDF with the optimal geometry, and an HTML summary with screenshots. There is no numeric done-when; define and test one. Suggested plan:
-- `core/export.py` (no viewer imports):
-  - `tcp_poses_csv(solution, point_results, targets, tool_model, carrier)`: one row per point with station index, carrier DOFs, point id, TCP xyz (mm) + quaternion or rpy in **world and robot-base frames**, joint values (deg), TCP name, spin, tilt and clearance. Test: re-parse it and check that FK(q) · T_flange_tcp equals the row pose.
-  - `tool_urdf(ee, values)`: the head URDF plus a generated extension link (capsule as cylinder + spheres, or a mesh) and the mount and TCP frames as fixed joints. Test: yourdfpy/Pinocchio loads it, and the FK of each TCP frame equals `ToolModel.T_flange_tcp`.
-  - Project JSON export already exists (Project panel); keep it.
-- **HTML report (`opt/report.py` or `ui/report.py`):** self-contained HTML (inline CSS, base64 PNGs) with scene, cost breakdown, per-station table, unreached points and reasons, coverage-vs-L table (from the M8 `LSample`s), tool geometry, settings, and the UR copyright line. Screenshots via Viser `client.get_render()` (`CameraHandle.get_render` exists) when a client is connected; otherwise use the headless Edge command in the Viewer section, or skip images with a note.
-- **GUI:** an "Export" folder in the Results tab: CSV for the selected solution, tool URDF (`send_file_download`) plus a save into the project folder, and the HTML report.
-- PDF is out of scope unless asked: the browser can print the HTML.
-
-**User decisions (2026-11-04, after M9). Do these before M10 in the next session.**
-1. **M9 done-when was a plan oversight:** the rail does *not* need fewer stops than a mobile base. Recommended replacement (proposed to the user, who is open to recommendations; confirm briefly, then implement):
-   - **Invariants on two scenes** (rail top face and wall-side face), for both the rail and the mobile carrier:
-     - full coverage, exact-verified;
-     - every station ≥ 300 mm (minimum standoff) from the part and outside the keep-outs;
-     - carrier DOFs within their travel ranges;
-     - mobile results robust to ±10 mm / ±1°.
-   - **Optimality:** the planner's station count equals the exact minimum set cover on the map (CP-SAT) for each carrier.
-   - **Regression numbers, not requirements:** current counts are top face rail 2 / mobile 2, wall-side face rail 4 / mobile 5. Assert they don't get worse.
-   - Rename `test_rail_needs_fewer_stations_than_mobile`, and update the M9 row in Status and the Carriers notes.
-2. **Payload curve** (from `docs/ur20_data_sheet.pdf`, user-confirmed 800 mm point): full performance 20 kg up to 200 mm COG offset, linear to **7 kg at 800 mm**. **Beyond 800 mm, extrapolate linearly** (the user's estimate: −13/600 kg/mm, reaching 0 kg at about 1123 mm). Flag it as an estimate in spec.yaml and in the UI. Implement:
-   - `payload.curve_mm_kg: [[0,20],[200,20],[800,7]]` plus `curve_extrapolate: linear`;
-   - check the tool mass against the COG distance from the flange in `core/payload.py`;
-   - replace the "wrist moments skipped" note.
-
-   No wrist-moment or joint-torque numbers exist in the datasheet; keep joint torques from joint_limits.yaml.
-3. **Real part mesh:** the user will try their own STL in the browser (Cell → Part → Upload; Targets → click). The Viser vs PyVista decision follows from that; it doesn't block M10.
-4. **M10 outputs agreed:** URDF + CSV + HTML report with a dimensioned SVG side view of the tool (the "envelope sketch"). STEP is deferred (CadQuery later if the designer asks).
-5. **Datasheet PDF:** marked proprietary; still untracked. Ask once whether to commit it or `.gitignore` it; don't push it.
-
-**Still waiting on the user**
-- OK on the M9 replacement check above (or another proposal).
-- **UR20 datasheet** (`docs/ur20_data_sheet.pdf`, Dec 2024, added by the user; **untracked, marked "PROPRIETARY AND CONFIDENTIAL": do not commit or push it without the user's OK**). It has *no* wrist-moment or joint-torque limits. It does have the **payload curve** (full performance: 20 kg flat to a 200 mm COG offset, then roughly linear to about 8 kg at 800 mm; expanded 25 kg under manual conditions). The curve is read off a plot, so it is approximate; get the user to confirm the points. Proposal: replace the wrist-moment check with a payload-curve check (tool mass against COG offset from the flange) using `payload.curve: [[0,20],[200,20],[800,8]]` (mm, kg) in spec.yaml. The datasheet confirms the DH lengths (236.3 / 862 / 728.7 / 201 / 159.3) and the 1750 mm reach. It lists the elbow as ±360°; we keep the ROS ±180° limit because the arm self-collides beyond it.
-- Results from the user's own part mesh in the browser (Viser picking good enough?).
-- Push to `origin` (github.com/bkaschke/robot-sys-optimizer)? Not done; only on request.
-
-**Not verified in a real browser yet** (all tests are code-level plus headless screenshots): gizmo dragging, contact-face clicking, shift/ctrl-click modifier strings, box select (OpenCV camera assumption), upload buttons, file downloads.
+**Still open with the user**
+- Their own part mesh in the browser, to decide Viser picking vs PyVista.
+- Whether to commit `docs/ur20_data_sheet.pdf` (marked proprietary; untracked and listed in `.gitignore`).
+- Features not yet tried in a real browser: gizmo dragging, contact-face clicks, shift/ctrl modifiers, box select (OpenCV camera assumption), uploads and downloads.
+- Next ideas (plan § Later): additional robots (OPW IK), coordinated gantry, STEP import/export, collision-free paths, cycle time, dynamic payload.
 
 **Working notes for this repo**
-- In Git Bash, multi-line heredocs containing backticks or quotes sometimes fail to parse. Write patch scripts to the scratchpad with the Write tool and run them with `$PY -I script.py <repo>`.
+- In Git Bash, heredocs containing backticks or quotes sometimes fail to parse. Write patch scripts with the Write tool into the scratchpad and run them with `$PY -I script.py <repo>`.
 - Ruff reformats long calls, so string-replace patches must match the *formatted* text; read the file first.
-- Ruflo is used lightly: memory key `robot-sys-optimizer-m0` … `-m9` in namespace `patterns` holds per-milestone lessons.
+- Ruflo memory: keys `robot-sys-optimizer-*` in namespace `patterns` hold per-milestone lessons.
 
 ## Architecture rules
 
@@ -304,6 +268,21 @@ $PY scripts/import_ur_description.py <clone> ur20   # re-import a UR model (see 
 - **GUI:** Cell → "Base mode" panel (fields → **Apply** validates as `schema.Base`; "Load carrier defaults" for rail, gantry or mobile). It has DOF sliders that jog the carrier (driving the robot base), draws the bodies, the standoff shells (red minimum, amber preferred) and the keep-outs, and shows a live footprint-to-part distance.
 - **Viser gotcha:** setting `gizmo.visible = False` hides the gizmo's whole **subtree**; the robot hangs under the base gizmo and the part, targets and selection under the part gizmo. "Show gizmo" therefore toggles `disable_axes`, `disable_sliders` and `disable_rotations` (`PoseWidgets.set_handles`). This was broken since M2.
 - **Headless screenshots occasionally capture before the scene streams in** (an empty view with "Connected"). Re-take them, and use a fresh port after killing a server, because Viser silently moves to the next free port.
+
+## Exports (M10)
+
+- **`core/export.py`:**
+  - `station_pose(base, station, T0)` gives the exact base pose: carrier stations recompute it from the DOFs, which keeps inverted gantry mounts right; floor stations keep the planned orientation.
+  - `tcp_rows` / `rows_to_csv`: one row per point in station order, unreached points last. Columns are documented in `CSV_COLUMNS`. TCP poses are in the world (mm + quaternion wxyz) and base (mm + rpy) frames, plus joints (deg), spin, tilt, standoff, clearance, manipulability, torque and limit margin. Each pose is recomputed from the stored joint solution.
+  - `tool_urdf` / `export_tool`: the chain flange → mount → extension_k (cylinder + sphere caps, mass per m) → head links (copied from the head URDF) → `tcp_<name>`. The head mesh folders are copied next to the URDF.
+  - `envelope_svg`: a dimensioned side view in the bend plane.
+- **`core/report.py`:** `build_report(ReportInput)` builds a self-contained HTML page with inline CSS, inline SVG and data-URI PNGs. It has no `<script>` and no `<link>`, and the test checks that every `src`/`href` is a data URI.
+- **`ui/export_ui.py`** (Results tab → Export): CSV, a URDF zip and the HTML report go to `<project>/export/` and are sent to the clicking browser. The report snapshot uses `client.camera.get_render` (PNG, 10 s timeout) and is skipped with a note when unavailable. The coverage-vs-L table appears when the selected solution came from the tool-geometry panel (`ResultsTab.tool_opt`).
+- **Bug found by the M10 end-to-end smoke run:** stage B of the tool optimizer could hand CMA-ES a 1-D problem (only θ active), which CMA-ES does not support. It now pads to 2-D, and `test_shape_stage_single_variable_does_not_crash` covers it.
+- **Payload curve (`PayloadSpec.curve_mm_kg`):**
+  - UR20: 20 kg up to 200 mm, 7 kg at 800 mm, linear estimate beyond (0 kg at about 1123 mm).
+  - `core/payload.py` fails tools over the curve and notes when the estimate was used.
+  - `is_complete()` accepts the curve in place of wrist moments.
 
 ## Robot registry: UR20
 
