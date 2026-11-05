@@ -14,6 +14,8 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from core.schema_work import PointResultData, WorkState  # noqa: F401 (re-exported)
+
 SCHEMA_VERSION = 1
 
 Vec3 = tuple[float, float, float]
@@ -467,6 +469,7 @@ class Project(_Model):
     targets: Targets = Field(default_factory=Targets)
     optimizer: Optimizer = Field(default_factory=Optimizer)
     results: list[Solution] = Field(default_factory=list)
+    work: WorkState = Field(default_factory=WorkState)
 
     @field_validator("version")
     @classmethod

@@ -5,9 +5,11 @@ from __future__ import annotations
 import argparse
 import time
 
+import numpy as np
 import viser
 
 from core.transforms import make_T
+from ui import settings as ui_settings
 from ui.carrier_ui import CarrierPanel
 from ui.cell import CellTab
 from ui.guide import GuideServer, add_guide_panel
@@ -15,7 +17,7 @@ from ui.optimize import OptimizeTab
 from ui.placement import PlacementPanel
 from ui.project_panel import ProjectPanel
 from ui.results import ResultsTab
-from ui.session import PartState, Session
+from ui.session import PartState, Session, last_project
 from ui.stations import StationsPanel
 from ui.targets_ui import TargetsTab
 from ui.tool_opt import ToolOptPanel
@@ -48,9 +50,13 @@ def build_app(
     session: Session | None = None,
     dark: bool = False,
     guide_port: int | None = None,
+    remember: bool = False,
+    autosave_thread: bool = False,
 ) -> dict:
     """Populate the scene and GUI. Returns handles for tests and later milestones.
-    ``guide_port``: port of the running user-guide server (ui.guide), for the panel link."""
+    ``guide_port``: port of the running user-guide server (ui.guide), for the panel link.
+    ``remember`` / ``autosave_thread``: record the last project folder and run the autosave
+    loop (the real app; tests leave both off and call ``project.autosave_tick``)."""
     if session is None:
         session = Session()
         session.part = PartState("assets/parts/flat_plate.stl", "m", make_T(p=(1.0, 0.0, 0.5)))
@@ -74,8 +80,31 @@ def build_app(
         state["carrier"].load(session.base)
         state["carrier"].refresh()
         state["results"].refresh()
+        restore_work()
 
-    project = ProjectPanel(server, session, on_loaded=on_loaded)
+    def restore_work() -> None:
+        """Bring back where the user left off: selection, then panel settings."""
+        t = state["targets"]
+        sel = session.selection
+        if sel and session.part is not None and sel[0] == session.part.mesh_path:
+            m = t.mesh()
+            faces = np.asarray(sel[1], dtype=int)
+            if m is not None and (len(faces) == 0 or faces.max() < len(m.faces)):
+                t.selection = faces
+        ui_settings.apply(state, session.ui)
+        t.refresh()
+
+    def collect_work() -> None:
+        """before_save hook: copy GUI-side state into the session."""
+        t = state["targets"]
+        part = session.part
+        session.selection = (part.mesh_path, [int(f) for f in t.selection]) if part is not None else None
+        session.ui = ui_settings.collect(state)
+
+    session.before_save.append(collect_work)
+    project = ProjectPanel(
+        server, session, on_loaded=on_loaded, remember=remember, autosave_thread=autosave_thread
+    )
     tabs = server.gui.add_tab_group()
     tab_handles = {name: tabs.add_tab(name) for name in TABS}
     with tab_handles["Cell"]:
@@ -135,6 +164,9 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=8080)
     parser.add_argument("--dark", action="store_true", help="start in dark mode (also a checkbox in the GUI)")
     parser.add_argument("--guide-port", type=int, default=None, help="user guide port (default: --port + 1)")
+    parser.add_argument(
+        "--fresh", action="store_true", help="start with the default cell, not the last project"
+    )
     args = parser.parse_args()
 
     server = viser.ViserServer(host=args.host, port=args.port, label="Robot Cell Optimizer")
@@ -144,7 +176,17 @@ def main() -> None:
         print(f"User guide: http://localhost:{guide.port}/", flush=True)
     except OSError as err:  # the app still works; the panel keeps the download button
         print(f"User guide server not started: {err}")
-    build_app(server, dark=args.dark, guide_port=guide.port if guide else None)
+    state = build_app(
+        server, dark=args.dark, guide_port=guide.port if guide else None, remember=True, autosave_thread=True
+    )
+    last = None if args.fresh else last_project()
+    if last is not None:
+        if state["project"]._load(None, last):
+            print(f"Reopened last project: {last}", flush=True)
+        else:
+            print(f"Could not reopen {last}; starting with the default cell", flush=True)
+        if args.dark:
+            state["dark_toggle"].value = True  # the flag wins over the saved setting
     try:
         while True:
             time.sleep(1.0)

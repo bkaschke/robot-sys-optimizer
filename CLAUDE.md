@@ -11,7 +11,7 @@ Full spec: `docs/PROJECT_PLAN.md`. It is the source of truth for scope and miles
 - **Current milestone:** none. v1 (M0–M10) is complete; see "Current state".
 - **IK speed:** use `core.ik.ur.solve_batch` (about 7 µs per pose, all 8 branches) for anything bulk. `URAnalyticIK.solve` (about 0.8 ms) is for one-off calls.
 - **Branch policy:** one branch per milestone (`m0-skeleton`, `m1-kinematics`, …); merge to `main` when its "done when" check passes.
-- **Last updated:** 2026-11-05 (post-v1: External Axis tab, examples, brush/single points/tessellation, HTML user guide; merged to main)
+- **Last updated:** 2026-11-05 (post-v1: External Axis tab, examples, brush/single points/tessellation, HTML user guide, work state + autosave + reopen)
 
 | Milestone | State | Done when |
 | --- | --- | --- |
@@ -290,6 +290,13 @@ $PY scripts/import_ur_description.py <clone> ur20   # re-import a UR model (see 
   - UR20: 20 kg up to 200 mm, 7 kg at 800 mm, linear estimate beyond (0 kg at about 1123 mm).
   - `core/payload.py` fails tools over the curve and notes when the estimate was used.
   - `is_complete()` accepts the curve in place of wrist moments.
+
+## Work state, autosave, reopen (post-v1)
+
+- **`Project.work` (`core/schema_work.py`, re-exported by core.schema):** joint pose `q`, the selection (+ the mesh path it belongs to), `feasibility` and `result_points` as `PointResultData` (clearance inf ↔ None; `core.feasibility.result_to_data` / `result_from_data`), and `ui` panel settings. Optional, so older files load. On restore, results are kept only for known point ids / solution labels, `q` only if the joint count matches, and the selection only on the same mesh with valid indices.
+- **Save path:** `Session.snapshot()` runs the `before_save` hooks (app.py `collect_work`: selection + `ui.settings.collect`) and then `to_project()`. `save_project` writes atomically (tmp + replace). `load_project` keeps the session's hooks across the `__dict__` swap. After load, app.py `restore_work` sets the selection and applies `ui.settings` (allowlist `SAVED`, keys "panel.attr", bad values skipped).
+- **Autosave / reopen (`ui/project_panel.py`):** `autosave_tick` compares the snapshot text with the last saved text (`_dump` = the exact save format) and writes when it changed and the interval passed; a daemon thread ticks every 5 s (`autosave_thread=True`, the real app only). `remember=True` (the real app only, **never in tests**, or a pytest temp folder would be reopened) records the folder in `workspace/last_project.txt`; `main()` reopens `last_project()` unless `--fresh`, and `--dark` overrides the saved dark setting.
+- `ui.robot_view.quiet_remove` silences Viser's harmless "Attempted to remove already removed node" warnings when ViserUrdf models are removed (every project load).
 
 ## Carrier builder (post-v1, External Axis tab)
 

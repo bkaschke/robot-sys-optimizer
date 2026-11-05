@@ -68,7 +68,7 @@ main{margin-left:0;padding:16px}}
 <li><strong>Optimize tab</strong> → <em>Station planner</em> → <strong>Plan stations</strong>. The result appears in the <strong>Results</strong> tab.</li>
 <li><strong>Optimize tab</strong> → <em>Tool geometry</em> → <strong>Find shortest tool</strong> → <strong>Apply to tool</strong>.</li>
 <li><strong>Results tab</strong> → <em>Export</em> → <strong>TCP poses (CSV)</strong>, <strong>Optimized tool URDF (zip)</strong>, <strong>HTML report</strong>. Files are downloaded and also saved to <code>workspace/default/export/</code>.</li>
-<li><strong>Project</strong> (top of the panel) → <strong>Save</strong> stores everything in <code>workspace/default/project.json</code>.</li>
+<li><strong>Project</strong> (top of the panel) → <strong>Save</strong> stores everything in <code>workspace/default/project.json</code>. Autosave also does this every 2 minutes, and the next start reopens the project where you left off.</li>
 </ol>
 <p>Tick <strong>Dark mode</strong> at the top of the panel at any time.</p>
 <p><strong>Ready-made examples:</strong> <strong>Project</strong> → <em>Examples</em> → <code>rail_long_part</code> (UR20 on a 7th-axis rail) or <code>mobile_amr</code> (UR20 on a mobile robot built from simple shapes) → <strong>Open example</strong> → <strong>Optimize</strong> → <strong>Plan stations</strong>. The example is copied to <code>workspace/examples/&lt;name&gt;/</code> first, so saving never changes the shipped copy.</p>
@@ -195,7 +195,13 @@ $PY app.py --port 8080 [--dark]
 <ul>
 <li><strong>Dark mode</strong>: switches the GUI and the floor grid. The <code>--dark</code> flag starts in dark mode.</li>
 <li><strong>User guide</strong>: <strong>📖 Open user guide</strong> opens this guide in a new browser tab. It is served by the app on its port + 1 (<code>--guide-port N</code> to change it) and also works from another PC on the network. <strong>Download user guide (HTML)</strong> saves the same page as a file.</li>
-<li><strong>Project</strong>: <em>Folder</em> (relative to the repo, or absolute), <strong>Save</strong> / <strong>Load</strong> (<code>&lt;folder&gt;/project.json</code>), <strong>Download project.json</strong>, <strong>Open project.json</strong> (upload). Loading never half-applies: a broken project leaves the current session untouched. <em>Examples</em> + <strong>Open example</strong> loads a shipped example project (copied to <code>workspace/examples/&lt;name&gt;/</code>).</li>
+<li><strong>Project</strong>: <em>Folder</em> (relative to the repo, or absolute), <strong>Save</strong> / <strong>Load</strong> (<code>&lt;folder&gt;/project.json</code>), <strong>Download project.json</strong>, <strong>Open project.json</strong> (upload). Loading never half-applies: a broken project leaves the current session untouched.
+<ul>
+<li><strong>Autosave</strong> (on by default) saves to the current project folder every <em>Autosave every (min)</em> minutes (default 2) when something changed. The line under it shows the last save time.</li>
+<li><strong>Reopen where you left off</strong>: the app remembers the last project you saved, loaded or autosaved, and opens it at the next start. Start with <code>--fresh</code> (e.g. <code>scripts\run_app.bat --fresh</code>) for the default cell instead.</li>
+<li>A project brings back the whole cell <strong>and</strong> where you were: the arm's joint pose, the surface selection, feasibility colours, every plan's joint solutions (ghost robots, CSV export without re-planning), the selected solution, and the panel settings (spacing, brush, check and planner settings, display options, dark mode). <em>Examples</em> + <strong>Open example</strong> loads a shipped example project (copied to <code>workspace/examples/&lt;name&gt;/</code>).</li>
+</ul>
+</li>
 </ul>
 <h3 id="tool-setup-tab">Tool Setup tab</h3>
 <table>
@@ -435,7 +441,7 @@ $PY app.py --port 8080 [--dark]
 <tbody>
 <tr>
 <td><code>app.py</code></td>
-<td>GUI entry point (<code>--port</code>, <code>--host</code>, <code>--dark</code>, <code>--guide-port</code>)</td>
+<td>GUI entry point (<code>--port</code>, <code>--host</code>, <code>--dark</code>, <code>--guide-port</code>, <code>--fresh</code>)</td>
 </tr>
 <tr>
 <td><code>scripts/run_app.bat</code></td>
@@ -487,7 +493,7 @@ $PY app.py --port 8080 [--dark]
 </tr>
 </tbody>
 </table>
-<p><strong>Project file</strong> (<code>project.json</code>): the robot and base pose, base mode and carrier (its <code>bodies</code>: shape, size or mesh file, pose, attachment, mass), tool, part, targets and groups, optimizer settings, and the saved solutions. Older projects with <code>chassis</code> / <code>riser</code> / <code>track</code> still load; the External Axis tab converts them to bodies. Joint solutions per point are not saved; re-run the plan to get them back (for example to export the CSV).</p>
+<p><strong>Project file</strong> (<code>project.json</code>): the robot and base pose, base mode and carrier (its <code>bodies</code>: shape, size or mesh file, pose, attachment, mass), tool, part, targets and groups, optimizer settings, and the saved solutions. Older projects with <code>chassis</code> / <code>riser</code> / <code>track</code> still load; the External Axis tab converts them to bodies. The <code>work</code> section holds where you left off: joint pose, selection, per-point joint solutions of the feasibility check and of each plan, and panel settings. Saves are atomic (written to a temporary file, then renamed). <code>workspace/last_project.txt</code> records the folder to reopen.</p>
 <p><strong>TCP poses CSV</strong> has one row per point, in station order:</p>
 <ul>
 <li><code>point_id, group, status, reason, station, carrier</code>;</li>
@@ -556,6 +562,10 @@ geo = optimize_tool(robot, ee, urdf, part_mesh, T_world_part, T_world_base, targ
 <tr>
 <td><strong>Open user guide</strong> does nothing or shows an error page</td>
 <td>The guide server uses the app's port + 1; the console prints its address at start-up. If that port is blocked (firewall when opening from another PC), use <strong>Download user guide (HTML)</strong> or open <code>docs/USER_GUIDE.html</code> directly.</td>
+</tr>
+<tr>
+<td>The app opens an old project at start</td>
+<td>It reopens the last project. Use <strong>Project → Load</strong> for another one, or start with <code>--fresh</code>.</td>
 </tr>
 <tr>
 <td>The planner puts a mobile base under a raised part</td>

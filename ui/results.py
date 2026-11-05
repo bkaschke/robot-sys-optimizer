@@ -12,6 +12,7 @@ from viser.extras import ViserUrdf
 
 from core import targets as tg
 from core.transforms import make_T, matrix_to_wxyz, rpy_to_matrix
+from ui.robot_view import quiet_remove
 from ui.session import HOME_Q, Session
 
 ROOT = "/results"
@@ -95,7 +96,7 @@ class ResultsTab:
 
     def _drop(self) -> None:
         for h in self._handles + self._ghosts:
-            h.remove()
+            quiet_remove(h)
         self._handles, self._ghosts = [], []
 
     def draw(self) -> None:

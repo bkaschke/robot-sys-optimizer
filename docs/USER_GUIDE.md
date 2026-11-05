@@ -50,7 +50,7 @@ Then try a full job on the test plate:
 5. **Optimize tab** → *Station planner* → **Plan stations**. The result appears in the **Results** tab.
 6. **Optimize tab** → *Tool geometry* → **Find shortest tool** → **Apply to tool**.
 7. **Results tab** → *Export* → **TCP poses (CSV)**, **Optimized tool URDF (zip)**, **HTML report**. Files are downloaded and also saved to `workspace/default/export/`.
-8. **Project** (top of the panel) → **Save** stores everything in `workspace/default/project.json`.
+8. **Project** (top of the panel) → **Save** stores everything in `workspace/default/project.json`. Autosave also does this every 2 minutes, and the next start reopens the project where you left off.
 
 Tick **Dark mode** at the top of the panel at any time.
 
@@ -167,7 +167,10 @@ The cost J weighs tool length, unreached points, extra stations, travel, manipul
 
 - **Dark mode**: switches the GUI and the floor grid. The `--dark` flag starts in dark mode.
 - **User guide**: **📖 Open user guide** opens this guide in a new browser tab. It is served by the app on its port + 1 (`--guide-port N` to change it) and also works from another PC on the network. **Download user guide (HTML)** saves the same page as a file.
-- **Project**: *Folder* (relative to the repo, or absolute), **Save** / **Load** (`<folder>/project.json`), **Download project.json**, **Open project.json** (upload). Loading never half-applies: a broken project leaves the current session untouched. *Examples* + **Open example** loads a shipped example project (copied to `workspace/examples/<name>/`).
+- **Project**: *Folder* (relative to the repo, or absolute), **Save** / **Load** (`<folder>/project.json`), **Download project.json**, **Open project.json** (upload). Loading never half-applies: a broken project leaves the current session untouched.
+  - **Autosave** (on by default) saves to the current project folder every *Autosave every (min)* minutes (default 2) when something changed. The line under it shows the last save time.
+  - **Reopen where you left off**: the app remembers the last project you saved, loaded or autosaved, and opens it at the next start. Start with `--fresh` (e.g. `scripts\run_app.bat --fresh`) for the default cell instead.
+  - A project brings back the whole cell **and** where you were: the arm's joint pose, the surface selection, feasibility colours, every plan's joint solutions (ghost robots, CSV export without re-planning), the selected solution, and the panel settings (spacing, brush, check and planner settings, display options, dark mode). *Examples* + **Open example** loads a shipped example project (copied to `workspace/examples/<name>/`).
 
 ### Tool Setup tab
 
@@ -296,7 +299,7 @@ Shortcut: **Project** → *Examples* `mobile_amr` → **Open example** (four whe
 
 | Path | Contents |
 | --- | --- |
-| `app.py` | GUI entry point (`--port`, `--host`, `--dark`, `--guide-port`) |
+| `app.py` | GUI entry point (`--port`, `--host`, `--dark`, `--guide-port`, `--fresh`) |
 | `scripts/run_app.bat` | Windows launcher using the `rso` env |
 | `core/` | kinematics, IK, collision, tool model, targets, feasibility, carriers, exports (no GUI code) |
 | `opt/` | reachability maps, station planner, tool-geometry optimizer, cost |
@@ -310,7 +313,7 @@ Shortcut: **Project** → *Examples* `mobile_amr` → **Open example** (four whe
 | `docs/USER_GUIDE.md` / `.html` | this guide; the HTML is generated from the Markdown with `scripts/build_guide.py` |
 | `docs/PROJECT_PLAN.md` | the design plan |
 
-**Project file** (`project.json`): the robot and base pose, base mode and carrier (its `bodies`: shape, size or mesh file, pose, attachment, mass), tool, part, targets and groups, optimizer settings, and the saved solutions. Older projects with `chassis` / `riser` / `track` still load; the External Axis tab converts them to bodies. Joint solutions per point are not saved; re-run the plan to get them back (for example to export the CSV).
+**Project file** (`project.json`): the robot and base pose, base mode and carrier (its `bodies`: shape, size or mesh file, pose, attachment, mass), tool, part, targets and groups, optimizer settings, and the saved solutions. Older projects with `chassis` / `riser` / `track` still load; the External Axis tab converts them to bodies. The `work` section holds where you left off: joint pose, selection, per-point joint solutions of the feasibility check and of each plan, and panel settings. Saves are atomic (written to a temporary file, then renamed). `workspace/last_project.txt` records the folder to reopen.
 
 **TCP poses CSV** has one row per point, in station order:
 - `point_id, group, status, reason, station, carrier`;
@@ -370,6 +373,7 @@ For carriers, pass `sites=CarrierSites(Carrier(base), part_mesh, T_world_part)` 
 | "Software WebGL rendering" banner | The browser has no GPU acceleration; enable hardware acceleration in its settings. |
 | Port already in use | `app.py --port 8090`. Viser may also pick the next free port by itself; check the console output. |
 | **Open user guide** does nothing or shows an error page | The guide server uses the app's port + 1; the console prints its address at start-up. If that port is blocked (firewall when opening from another PC), use **Download user guide (HTML)** or open `docs/USER_GUIDE.html` directly. |
+| The app opens an old project at start | It reopens the last project. Use **Project → Load** for another one, or start with `--fresh`. |
 | The planner puts a mobile base under a raised part | Standoff is 3D; add the part's stand to the mesh or draw a keep-out. |
 
 **Known limitations (v1)**

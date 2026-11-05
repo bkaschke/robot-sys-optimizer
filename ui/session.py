@@ -52,6 +52,9 @@ class Session:
     result_points: dict = field(default_factory=dict)  # solution label -> {id: PointResult} (not saved)
     base: schema.Base = field(default_factory=schema.Base)  # static or carrier (M9)
     extra: dict = field(default_factory=dict)  # untouched project sections (optimizer)
+    selection: tuple[str, list[int]] | None = None  # (part mesh path, face ids): saved selection
+    ui: dict = field(default_factory=dict)  # saved panel settings ("panel.widget" -> value)
+    before_save: list = field(default_factory=list)  # GUI hooks that copy their state in here
 
     # --- assets ---------------------------------------------------------------
 
@@ -124,6 +127,29 @@ class Session:
 
     # --- project file -----------------------------------------------------------
 
+    def snapshot(self) -> schema.Project:
+        """Project including GUI state: runs the ``before_save`` hooks, then to_project()."""
+        for fn in self.before_save:
+            fn()
+        return self.to_project()
+
+    def work_state(self) -> schema.WorkState:
+        from core.feasibility import result_to_data
+
+        sel_mesh, sel = self.selection if self.selection else (None, [])
+        return schema.WorkState(
+            q=None if self.q is None else [float(v) for v in self.q],
+            selection_mesh=sel_mesh,
+            selection=[int(f) for f in sel],
+            feasibility=[result_to_data(r) for r in self.feasibility.values()],
+            result_points={
+                label: [result_to_data(r) for r in pts.values()]
+                for label, pts in self.result_points.items()
+                if label in {sol.label for sol in self.results}
+            },
+            ui=dict(self.ui),
+        )
+
     def to_project(self) -> schema.Project:
         r = self.robot
         robot = schema.Robot(
@@ -149,6 +175,7 @@ class Session:
             targets=self.targets,
             results=self.results,
             base=self.base,
+            work=self.work_state(),
             **self.extra,
         )
 
@@ -170,6 +197,23 @@ class Session:
         self.results = list(project.results)
         self.targets = project.targets
         self.set_tool(project.end_effector)
+        self._apply_work(project.work)
+
+    def _apply_work(self, w: schema.WorkState) -> None:
+        from core.feasibility import result_from_data
+
+        if w.q is not None and self.robot is not None and len(w.q) == self.robot.nq:
+            self.q = np.clip(np.array(w.q, float), self.robot.lower, self.robot.upper)
+        ids = {p.id for p in self.targets.points}
+        self.feasibility = {d.id: result_from_data(d) for d in w.feasibility if d.id in ids}
+        labels = {sol.label for sol in self.results}
+        self.result_points = {
+            label: {d.id: result_from_data(d) for d in pts}
+            for label, pts in w.result_points.items()
+            if label in labels
+        }
+        self.selection = (w.selection_mesh, list(w.selection)) if w.selection_mesh else None
+        self.ui = dict(w.ui)
 
 
 def load_mesh(path: Path, units: str = "m") -> trimesh.Trimesh:
@@ -187,7 +231,10 @@ def save_project(session: Session, project_dir: Path | None = None) -> Path:
         session.project_dir = project_dir
     session.project_dir.mkdir(parents=True, exist_ok=True)
     path = session.project_dir / "project.json"
-    schema.save_project(session.to_project(), path)
+    project = session.snapshot()
+    tmp = path.with_suffix(".json.tmp")  # write-then-rename: a crash never leaves half a file
+    schema.save_project(project, tmp)
+    tmp.replace(path)
     return path
 
 
@@ -196,4 +243,27 @@ def load_project(session: Session, project_dir: Path) -> None:
     project = schema.load_project(project_dir / "project.json")
     fresh = Session()
     fresh.apply_project(project, project_dir)
+    hooks = session.before_save
     session.__dict__.update(fresh.__dict__)
+    session.before_save = hooks  # GUI hooks belong to the app, not to the loaded project
+
+
+LAST_PROJECT = REPO / "workspace" / "last_project.txt"
+
+
+def remember_last(project_dir: Path) -> None:
+    """Record the project folder so the app can reopen it on the next start."""
+    try:
+        LAST_PROJECT.parent.mkdir(parents=True, exist_ok=True)
+        LAST_PROJECT.write_text(str(Path(project_dir).resolve()), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def last_project() -> Path | None:
+    """The last saved/loaded project folder, if it still has a project.json."""
+    try:
+        d = Path(LAST_PROJECT.read_text(encoding="utf-8").strip())
+    except OSError:
+        return None
+    return d if (d / "project.json").is_file() else None

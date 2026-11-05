@@ -7,6 +7,7 @@ Scene tree:  <parent> (base_link pose in world)
 
 from __future__ import annotations
 
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -66,5 +67,14 @@ class RobotView:
         return _handle_T(self.root) @ T
 
     def remove(self) -> None:
-        self.urdf.remove()
-        self.root.remove()
+        quiet_remove(self.urdf)
+        quiet_remove(self.root)
+
+
+def quiet_remove(handle) -> None:
+    """Remove a scene handle without Viser's "Attempted to remove already removed node"
+    warnings: ViserUrdf removes child nodes after their parent frame is already gone,
+    which is harmless but floods the console on every project load."""
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message="Attempted to remove already removed node")
+        handle.remove()

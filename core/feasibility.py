@@ -233,3 +233,43 @@ class FeasibilityChecker:
             if progress is not None:
                 progress(k + 1, len(targets.points))
         return out
+
+
+def result_to_data(r: PointResult):
+    """PointResult -> schema.PointResultData (for the project file)."""
+    from core.schema import PointResultData
+
+    finite = r.clearance is not None and np.isfinite(r.clearance)
+    return PointResultData(
+        id=int(r.id),
+        status=r.status,
+        reason=r.reason,
+        q=None if r.q is None else [float(v) for v in r.q],
+        tcp=r.tcp,
+        spin_deg=float(r.spin_deg),
+        tilt_deg=float(r.tilt_deg),
+        standoff=float(r.standoff),
+        clearance=float(r.clearance) if finite else None,
+        manipulability=float(r.manipulability),
+        torque_util=float(r.torque_util),
+        limit_margin_deg=float(r.limit_margin_deg),
+        notes=[str(n) for n in r.notes],
+    )
+
+
+def result_from_data(d) -> PointResult:
+    return PointResult(
+        id=d.id,
+        status=d.status,
+        reason=d.reason,
+        q=None if d.q is None else np.array(d.q, float),
+        tcp=d.tcp,
+        spin_deg=d.spin_deg,
+        tilt_deg=d.tilt_deg,
+        standoff=d.standoff,
+        clearance=float("inf") if d.clearance is None else d.clearance,
+        manipulability=d.manipulability,
+        torque_util=d.torque_util,
+        limit_margin_deg=d.limit_margin_deg,
+        notes=list(d.notes),
+    )
