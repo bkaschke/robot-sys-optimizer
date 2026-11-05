@@ -11,7 +11,7 @@ Full spec: `docs/PROJECT_PLAN.md`. It is the source of truth for scope and miles
 - **Current milestone:** M10 Exports and report (next). M0–M9 are done and merged to `main`.
 - **IK speed:** use `core.ik.ur.solve_batch` (about 7 µs per pose, all 8 branches) for anything bulk. `URAnalyticIK.solve` (about 0.8 ms) is for one-off calls.
 - **Branch policy:** one branch per milestone (`m0-skeleton`, `m1-kinematics`, …); merge to `main` when its "done when" check passes.
-- **Last updated:** 2026-11-04
+- **Last updated:** 2026-11-04 (paused before M10, see "Next session: start here")
 
 | Milestone | State | Done when |
 | --- | --- | --- |
@@ -26,6 +26,38 @@ Full spec: `docs/PROJECT_PLAN.md`. It is the source of truth for scope and miles
 | M8 Tool-geometry optimizer | **done** 2026-11-04 (deep hole: L 259.7 mm vs analytic 260 mm; 3 mm shorter fails exact check) | Pocket scene → minimal L within 5 mm |
 | M9 Carriers | **done** 2026-11-04 (wall-side face of the 6 m rail: rail 4 stations vs mobile 5, 300 mm standoff held) | Long rail: 1-axis rail respects 300 mm standoff, fewer stations than mobile base |
 | M10 Exports and report | todo | CSV, updated EE URDF, HTML summary |
+
+## Next session: start here (handoff 2026-11-04)
+
+The session paused after M9 because of the usage limit. **M10 has not been started.** `main` = M9 commit `d10eb6a`. The tree is clean and nothing has been pushed (the user's rule: no push unless asked).
+
+**Resume checklist**
+1. `cd C:/Users/Ben/Documents/AI/Claude/robot-sys-optimizer && git log --oneline | head` should show `d10eb6a M9 carriers ...` on top.
+2. `$PY -m pytest -q` should report 144 passed in about 5 min. Reachability maps rebuild into `cache/` if missing: about 50 s for the flange map, about 70 s for the sander map.
+3. `git checkout -b m10-exports`, then work through the M10 plan below.
+
+**M10 scope (plan § Milestones):** CSV of TCP poses per station, an updated EE URDF with the optimal geometry, and an HTML summary with screenshots. There is no numeric done-when; define and test one. Suggested plan:
+- `core/export.py` (no viewer imports):
+  - `tcp_poses_csv(solution, point_results, targets, tool_model, carrier)`: one row per point with station index, carrier DOFs, point id, TCP xyz (mm) + quaternion or rpy in **world and robot-base frames**, joint values (deg), TCP name, spin, tilt and clearance. Test: re-parse it and check that FK(q) · T_flange_tcp equals the row pose.
+  - `tool_urdf(ee, values)`: the head URDF plus a generated extension link (capsule as cylinder + spheres, or a mesh) and the mount and TCP frames as fixed joints. Test: yourdfpy/Pinocchio loads it, and the FK of each TCP frame equals `ToolModel.T_flange_tcp`.
+  - Project JSON export already exists (Project panel); keep it.
+- **HTML report (`opt/report.py` or `ui/report.py`):** self-contained HTML (inline CSS, base64 PNGs) with scene, cost breakdown, per-station table, unreached points and reasons, coverage-vs-L table (from the M8 `LSample`s), tool geometry, settings, and the UR copyright line. Screenshots via Viser `client.get_render()` (`CameraHandle.get_render` exists) when a client is connected; otherwise use the headless Edge command in the Viewer section, or skip images with a note.
+- **GUI:** an "Export" folder in the Results tab: CSV for the selected solution, tool URDF (`send_file_download`) plus a save into the project folder, and the HTML report.
+- PDF is out of scope unless asked: the browser can print the HTML.
+
+**Still waiting on the user**
+- Confirm the M9 done-when scene (rail wall-side face; see Carriers), or name another one.
+- UR20 wrist-moment / payload-diagram limits in `assets/robots/ur20/spec.yaml`; those checks show as "skipped" until then.
+- A real part mesh, to settle the open picking decision (Viser vs PyVista).
+- The designer output format for M10 (open decision): envelope sketch, URDF, or STEP stub. Default to URDF + CSV + HTML.
+- Push to `origin` (github.com/bkaschke/robot-sys-optimizer)? Not done; only on request.
+
+**Not verified in a real browser yet** (all tests are code-level plus headless screenshots): gizmo dragging, contact-face clicking, shift/ctrl-click modifier strings, box select (OpenCV camera assumption), upload buttons, file downloads.
+
+**Working notes for this repo**
+- In Git Bash, multi-line heredocs containing backticks or quotes sometimes fail to parse. Write patch scripts to the scratchpad with the Write tool and run them with `$PY -I script.py <repo>`.
+- Ruff reformats long calls, so string-replace patches must match the *formatted* text; read the file first.
+- Ruflo is used lightly: memory key `robot-sys-optimizer-m0` … `-m9` in namespace `patterns` holds per-milestone lessons.
 
 ## Architecture rules
 
