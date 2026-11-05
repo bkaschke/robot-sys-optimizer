@@ -45,11 +45,30 @@ The session paused after M9 because of the usage limit. **M10 has not been start
 - **GUI:** an "Export" folder in the Results tab: CSV for the selected solution, tool URDF (`send_file_download`) plus a save into the project folder, and the HTML report.
 - PDF is out of scope unless asked: the browser can print the HTML.
 
+**User decisions (2026-11-04, after M9). Do these before M10 in the next session.**
+1. **M9 done-when was a plan oversight:** the rail does *not* need fewer stops than a mobile base. Recommended replacement (proposed to the user, who is open to recommendations; confirm briefly, then implement):
+   - **Invariants on two scenes** (rail top face and wall-side face), for both the rail and the mobile carrier:
+     - full coverage, exact-verified;
+     - every station ≥ 300 mm (minimum standoff) from the part and outside the keep-outs;
+     - carrier DOFs within their travel ranges;
+     - mobile results robust to ±10 mm / ±1°.
+   - **Optimality:** the planner's station count equals the exact minimum set cover on the map (CP-SAT) for each carrier.
+   - **Regression numbers, not requirements:** current counts are top face rail 2 / mobile 2, wall-side face rail 4 / mobile 5. Assert they don't get worse.
+   - Rename `test_rail_needs_fewer_stations_than_mobile`, and update the M9 row in Status and the Carriers notes.
+2. **Payload curve** (from `docs/ur20_data_sheet.pdf`, user-confirmed 800 mm point): full performance 20 kg up to 200 mm COG offset, linear to **7 kg at 800 mm**. **Beyond 800 mm, extrapolate linearly** (the user's estimate: −13/600 kg/mm, reaching 0 kg at about 1123 mm). Flag it as an estimate in spec.yaml and in the UI. Implement:
+   - `payload.curve_mm_kg: [[0,20],[200,20],[800,7]]` plus `curve_extrapolate: linear`;
+   - check the tool mass against the COG distance from the flange in `core/payload.py`;
+   - replace the "wrist moments skipped" note.
+
+   No wrist-moment or joint-torque numbers exist in the datasheet; keep joint torques from joint_limits.yaml.
+3. **Real part mesh:** the user will try their own STL in the browser (Cell → Part → Upload; Targets → click). The Viser vs PyVista decision follows from that; it doesn't block M10.
+4. **M10 outputs agreed:** URDF + CSV + HTML report with a dimensioned SVG side view of the tool (the "envelope sketch"). STEP is deferred (CadQuery later if the designer asks).
+5. **Datasheet PDF:** marked proprietary; still untracked. Ask once whether to commit it or `.gitignore` it; don't push it.
+
 **Still waiting on the user**
-- Confirm the M9 done-when scene (rail wall-side face; see Carriers), or name another one.
+- OK on the M9 replacement check above (or another proposal).
 - **UR20 datasheet** (`docs/ur20_data_sheet.pdf`, Dec 2024, added by the user; **untracked, marked "PROPRIETARY AND CONFIDENTIAL": do not commit or push it without the user's OK**). It has *no* wrist-moment or joint-torque limits. It does have the **payload curve** (full performance: 20 kg flat to a 200 mm COG offset, then roughly linear to about 8 kg at 800 mm; expanded 25 kg under manual conditions). The curve is read off a plot, so it is approximate; get the user to confirm the points. Proposal: replace the wrist-moment check with a payload-curve check (tool mass against COG offset from the flange) using `payload.curve: [[0,20],[200,20],[800,8]]` (mm, kg) in spec.yaml. The datasheet confirms the DH lengths (236.3 / 862 / 728.7 / 201 / 159.3) and the 1750 mm reach. It lists the elbow as ±360°; we keep the ROS ±180° limit because the arm self-collides beyond it.
-- A real part mesh, to settle the open picking decision (Viser vs PyVista).
-- The designer output format for M10 (open decision): envelope sketch, URDF, or STEP stub. Default to URDF + CSV + HTML.
+- Results from the user's own part mesh in the browser (Viser picking good enough?).
 - Push to `origin` (github.com/bkaschke/robot-sys-optimizer)? Not done; only on request.
 
 **Not verified in a real browser yet** (all tests are code-level plus headless screenshots): gizmo dragging, contact-face clicking, shift/ctrl-click modifier strings, box select (OpenCV camera assumption), upload buttons, file downloads.
@@ -323,4 +342,4 @@ $PY scripts/import_ur_description.py <clone> ur20   # re-import a UR model (see 
 - [x] Tool geometry v1: straight + one bend (with lateral offset d), selectable per tool (decided in M3).
 - [ ] Single tool length for all stations, or a tool swap per station?
 - [ ] Gantry: station mode only in v1, or coordinated mode too?
-- [ ] Designer output: envelope sketch, URDF, or STEP stub?
+- [x] Designer output: URDF + CSV + HTML with a dimensioned SVG envelope; STEP deferred (user, 2026-11-04).
