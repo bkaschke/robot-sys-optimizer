@@ -26,5 +26,5 @@ echo conda-unpack failed. Unzip the bundle again into a folder you can write to 
 exit /b 1
 
 :run
-echo Starting... then open http://localhost:8080 in your browser (Ctrl+C here to stop).
+echo Starting... then open the http://localhost address shown below in your browser (default 8080; Ctrl+C here to stop).
 "%PY%" "%~dp0..\app.py" %*

@@ -134,6 +134,7 @@ The STLs in `assets/parts/` are generated from these; regenerate them if the bui
 - Pinocchio and Coal come from conda-forge; there are no Windows wheels on PyPI. Pip-only packages (viser, yourdfpy, pydantic, trimesh, xacro) go in the `pip:` section of `environment.yml`.
 - **BLAS must be OpenBLAS.** The conda-forge MKL build kills the process (0xc06d007f) on any numpy matmul on this machine. `environment.yml` pins `libblas=*=*openblas`.
 - The old `.venv/` from M0 is obsolete (gitignored); do not use it.
+- **Portable bundle** (user's offline PC, 2026-11-05): `scripts/make_portable.py` = `conda-pack -p sys.prefix` (conda-pack lives in the base env; `-n` fails because conda is not on PATH) + `git archive HEAD`, merged into one zip under `robot-sys-optimizer/` with `env/` and a root `Start Robot Optimizer.bat`. `run_app.bat` prefers `..\env\python.exe` and runs `env\Scripts\conda-unpack.exe` once (marker `env\.unpacked`). `.gitattributes` forces CRLF for `*.bat` (cmd `goto` labels misbehave with LF).
 - `pyproject.toml` holds the ruff and pytest config only. Packages (`core`, `opt`, `ui`) are imported from the repo root, not installed.
 
 ## Commands
@@ -147,6 +148,7 @@ RUFF=/c/Users/Ben/miniforge3/envs/rso/Library/bin/ruff.exe
 $PY app.py [--port 8080]                  # serve the GUI → http://localhost:8080
 $PY -m pytest -q                          # tests (~35 s; 10k-sample IK round trip dominates)
 $RUFF check . && $RUFF format --check .   # lint + format
+$PY scripts/make_portable.py              # dist/*-portable-<sha>.zip: last commit + conda-pack'd env (offline PCs; guide 2.5)
 $PY scripts/make_golden_parts.py          # regenerate assets/parts/*.stl
 $PY scripts/import_ur_description.py <clone> ur20   # re-import a UR model (see the script docstring)
 ```

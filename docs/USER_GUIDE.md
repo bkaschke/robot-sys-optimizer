@@ -60,7 +60,7 @@ Tick **Dark mode** at the top of the panel at any time.
 
 ## 2. Set up on a new computer
 
-Tested on **Windows 10/11**. Linux and macOS should work with the same conda environment but have not been tested.
+Tested on **Windows 10/11**. Linux and macOS should work with the same conda environment but have not been tested. **No conda or internet on that PC?** Use the portable copy in [2.5](#25-portable-copy-for-a-pc-without-conda-or-internet).
 
 ### 2.1 Prerequisites
 
@@ -106,6 +106,25 @@ $PY app.py --port 8080 [--dark]
 ```
 
 The first station plan or heatmap for a tool builds a **reachability map** (about 50–70 s), which is cached in `cache/reachability/`. Later runs reuse it in seconds. The cache is not in git; each computer builds its own.
+
+### 2.5 Portable copy for a PC without conda or internet
+
+For a PC where you cannot install Miniforge or download packages, build one zip on a set-up computer and copy it over. The zip contains the app and its complete Python environment (Pinocchio and Coal included). Nothing is installed on the target PC: no admin rights, conda, Git or network are needed.
+
+**On the set-up computer** (commit your changes first: the zip holds the last commit):
+
+```bash
+C:/Users/<you>/miniforge3/Scripts/conda.exe install -n base -c conda-forge conda-pack   # once
+$PY scripts/make_portable.py          # -> dist/robot-sys-optimizer-portable-<commit>.zip (a few minutes)
+```
+
+**On the target PC:**
+
+1. Copy the zip (USB stick, network share) and unzip it into a folder you can write to, for example `C:\Users\<you>\robot-sys-optimizer`. Avoid `Program Files`: the app saves projects and caches inside its own folder.
+2. Double-click **`Start Robot Optimizer.bat`**. The first start prepares the bundled environment once (about a minute), then the app starts.
+3. Open **http://localhost:8080** in the browser. The browser only talks to this PC; the app makes no internet requests.
+
+The target PC must be 64-bit Windows 10/11 like the build computer. To update, build a new zip and unzip it into a new folder; copy `workspace/` (your projects) and optionally `cache/` (reachability maps) over from the old folder.
 
 ---
 
