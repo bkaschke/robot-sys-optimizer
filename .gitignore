@@ -10,3 +10,4 @@ __pycache__/
 cache/
 workspace/
 docs/ur20_data_sheet.pdf
+dist/
