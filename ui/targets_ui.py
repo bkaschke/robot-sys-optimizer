@@ -22,6 +22,8 @@ PART = "/cell/part"
 PREVIEW = "/cell/preview"
 SEL_COLOR = (60, 200, 120)
 PALETTE = [(230, 60, 60), (40, 120, 230), (240, 170, 20), (150, 70, 200), (20, 170, 170), (120, 120, 120)]
+STATUS_COLORS = {"reachable": (40, 180, 70), "marginal": (240, 170, 20), "unreachable": (220, 40, 40)}
+UNCHECKED = (150, 150, 150)
 METHODS = ("Projected grid", "Poisson (even)", "Raster lines", "Selection edges")
 CLICK_MODES = ("off", "select surface", "place point")
 
@@ -78,6 +80,7 @@ class TargetsTab:
             self.csv_units = gui.add_dropdown("CSV units", ("mm", "m"))
             self.csv = gui.add_upload_button("Import CSV (x,y,z,nx,ny,nz[,group])", mime_type="text/csv")
         with gui.add_folder("Display"):
+            self.color_by = gui.add_dropdown("Color points by", ("group", "feasibility"))
             self.show_normals = gui.add_checkbox("Show normals", True)
             self.normal_len = gui.add_number("Normal length (mm)", 20.0, min=1.0, step=1.0)
             self.point_size = gui.add_number("Point size (mm)", 4.0, min=0.5, step=0.5)
@@ -280,7 +283,7 @@ class TargetsTab:
             self.refresh()
             notify(e, "Imported", f"{len(rows)} points", ok=True)
 
-        for w in (self.show_normals, self.normal_len, self.point_size):
+        for w in (self.color_by, self.show_normals, self.normal_len, self.point_size):
             w.on_update(lambda e: self._draw_points())
         for w in (self.preview_on, self.preview_idx):
             w.on_update(lambda e: self._draw_preview())
@@ -369,7 +372,13 @@ class TargetsTab:
         self.preview_idx.max = max(1, len(P) - 1)
         if len(P) == 0:
             return
-        colors = np.array([PALETTE[names.index(g) % len(PALETTE)] if g in names else PALETTE[-1] for g in G])
+        if self.color_by.value == "feasibility" and self.s.feasibility:
+            res = self.s.feasibility
+            colors = np.array([STATUS_COLORS[res[i].status] if i in res else UNCHECKED for i in ids])
+        else:
+            colors = np.array(
+                [PALETTE[names.index(g) % len(PALETTE)] if g in names else PALETTE[-1] for g in G]
+            )
         self._handles["points"] = self.server.scene.add_point_cloud(
             f"{PART}/targets",
             P,

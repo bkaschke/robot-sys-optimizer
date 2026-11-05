@@ -123,6 +123,11 @@ class Robot:
         pin.framesForwardKinematics(self.model, self.data, pin.neutral(self.model))
         return np.asarray(self.data.oMf[self.base_frame_id].rotation)
 
+    def set_mount(self, R_world_base: np.ndarray) -> None:
+        """Point gravity along world -z for a base rotated by R_world_base (wall/ceiling)."""
+        g_base = np.asarray(R_world_base, float).T @ np.array([0.0, 0.0, -GRAVITY])
+        self.model.gravity.linear = self._base_rotation_world() @ g_base
+
     def _check_q(self, q) -> np.ndarray:
         q = np.asarray(q, dtype=float)
         if q.shape != (self.nq,) or not np.all(np.isfinite(q)):

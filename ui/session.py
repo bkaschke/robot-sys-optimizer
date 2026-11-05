@@ -47,6 +47,7 @@ class Session:
     tool: schema.EndEffector | None = None
     tool_model: ToolModel | None = None
     targets: schema.Targets = field(default_factory=schema.Targets)
+    feasibility: dict = field(default_factory=dict)  # point id -> feasibility.PointResult (not saved)
     extra: dict = field(default_factory=dict)  # untouched project sections (EE, targets, ...)
 
     # --- assets ---------------------------------------------------------------

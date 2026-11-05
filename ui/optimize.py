@@ -1,0 +1,155 @@
+"""Optimize tab. M5: feasibility check of all targets for the current cell, tool and base.
+
+The check runs in a background thread on its own Robot instance (Pinocchio data is not
+thread-safe); results land in ``session.feasibility`` and recolour the target points.
+"""
+
+from __future__ import annotations
+
+import threading
+from collections.abc import Callable
+
+import numpy as np
+import viser
+
+from core.collision import CollisionScene, Margins
+from core.feasibility import CheckSettings, FeasibilityChecker
+from core.ik import make_ik
+from core.robot import Robot
+from ui.session import Session
+from ui.widgets import notify
+
+
+class OptimizeTab:
+    def __init__(
+        self,
+        server: viser.ViserServer,
+        session: Session,
+        on_results: Callable[[], None],
+        show_q: Callable[[np.ndarray], None],
+    ):
+        self.s = session
+        self.on_results = on_results
+        self.show_q = show_q
+        self._thread: threading.Thread | None = None
+        self._cancel = threading.Event()
+        gui = server.gui
+        with gui.add_folder("Feasibility check"):
+            self.clearance = gui.add_number("Clearance (mm)", 10.0, min=0.0, step=1.0)
+            self.joint_margin = gui.add_number("Joint-limit margin (deg)", 5.0, min=0.0, step=1.0)
+            self.torque = gui.add_number("Torque utilization limit", 0.8, min=0.05, max=1.0, step=0.05)
+            self.run = gui.add_button("Check all targets", color="green")
+            self.stop = gui.add_button("Cancel", visible=False)
+            self.progress = gui.add_progress_bar(0.0, visible=False)
+            self.summary = gui.add_markdown("_Not run yet._")
+        with gui.add_folder("Inspect result"):
+            self.pick = gui.add_slider("Point #", 0, 1, 1, 0)
+            self.detail = gui.add_markdown("")
+            self.goto = gui.add_button("Move robot to this solution")
+        gui.add_markdown("_Optimizer (M6–M8): not built yet._")
+
+        self.run.on_click(lambda e: self.start(e))
+        self.stop.on_click(lambda e: self._cancel.set())
+        self.pick.on_update(lambda e: self._show_detail())
+
+        @self.goto.on_click
+        def _(e) -> None:
+            r = self._selected()
+            if r is None or r.q is None:
+                return notify(e, "No solution", "This point has no feasible joint solution")
+            self.show_q(r.q)
+
+    # --- running -------------------------------------------------------------------------
+
+    def _build_checker(self) -> FeasibilityChecker:
+        s = self.s
+        if s.tool_model is None or s.part is None:
+            raise ValueError("load a tool (Tool Setup) and a part (Cell) first")
+        if not s.targets.points:
+            raise ValueError("no targets: generate points in the Targets tab")
+        robot = Robot(s.robot.spec)  # private Pinocchio data for this thread
+        settings = CheckSettings(self.joint_margin.value, self.torque.value, self.clearance.value / 1000)
+        scene = CollisionScene(
+            robot,
+            s.tool_model,
+            s.part_mesh(),
+            s.T_world_base,
+            s.part.T_world_part,
+            Margins(clearance=settings.clearance),
+        )
+        return FeasibilityChecker(
+            robot, make_ik(robot), s.tool_model, scene, s.T_world_base, s.part.T_world_part, settings
+        )
+
+    def start(self, event=None, block: bool = False) -> None:
+        if self._thread is not None and self._thread.is_alive():
+            return notify(event, "Busy", "A check is already running")
+        try:
+            checker = self._build_checker()
+        except (ValueError, OSError) as err:
+            return notify(event, "Cannot run", str(err))
+        self._cancel.clear()
+        targets = self.s.targets
+        self.run.visible, self.stop.visible, self.progress.visible = False, True, True
+        self.progress.value = 0.0
+
+        def work() -> None:
+            try:
+                res = checker.check_all(
+                    targets,
+                    progress=lambda k, n: setattr(self.progress, "value", 100.0 * k / n),
+                    cancelled=self._cancel.is_set,
+                )
+                self.s.feasibility = {r.id: r for r in res}
+                self._finish(len(res), len(targets.points))
+            finally:
+                self.run.visible, self.stop.visible, self.progress.visible = True, False, False
+
+        self._thread = threading.Thread(target=work, daemon=True)
+        self._thread.start()
+        if block:
+            self._thread.join()
+
+    def _finish(self, done: int, total: int) -> None:
+        res = list(self.s.feasibility.values())
+        count = {k: sum(r.status == k for r in res) for k in ("reachable", "marginal", "unreachable")}
+        reasons: dict[str, int] = {}
+        for r in res:
+            if r.status == "unreachable":
+                reasons[r.reason] = reasons.get(r.reason, 0) + 1
+        notes = sorted({n for r in res for n in r.notes})
+        why = ", ".join(f"{k}: {v}" for k, v in reasons.items()) or "none"
+        self.summary.content = (
+            f"**{count['reachable']}** reachable · **{count['marginal']}** marginal · "
+            f"**{count['unreachable']}** unreachable ({why})"
+            + ("" if done == total else f"  \n⚠ cancelled after {done}/{total} points")
+            + "".join(f"  \n_{n}_" for n in notes)
+        )
+        self.pick.max = max(1, len(res) - 1)
+        self._show_detail()
+        self.on_results()
+
+    # --- inspection ------------------------------------------------------------------------
+
+    def _selected(self):
+        res = list(self.s.feasibility.values())
+        if not res:
+            return None
+        return res[int(np.clip(self.pick.value, 0, len(res) - 1))]
+
+    def _show_detail(self) -> None:
+        r = self._selected()
+        if r is None:
+            self.detail.content = ""
+            return
+        if r.status == "unreachable":
+            self.detail.content = f"Point **{r.id}**: unreachable ({r.reason})"
+            return
+        q = ", ".join(f"{v:.1f}" for v in np.degrees(r.q))
+        self.detail.content = (
+            f"Point **{r.id}**: {r.status} with TCP `{r.tcp}`  \n"
+            f"spin {r.spin_deg:.0f}°, tilt {r.tilt_deg:.1f}°, standoff {r.standoff * 1000:.0f} mm  \n"
+            f"clearance {r.clearance * 1000:.1f} mm · manipulability {r.manipulability:.3f} · "
+            f"torque {100 * r.torque_util:.0f}% · limit margin {r.limit_margin_deg:.0f}°  \n"
+            f"q (deg): {q}"
+        )

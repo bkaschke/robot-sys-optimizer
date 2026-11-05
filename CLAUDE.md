@@ -8,7 +8,7 @@ Full spec: `docs/PROJECT_PLAN.md`. It is the source of truth for scope and miles
 
 ## Status
 
-- **Current milestone:** M5 Feasibility checker (next). M0–M4 are done and merged to `main`.
+- **Current milestone:** M6 Reachability maps (next). M0–M5 are done and merged to `main`.
 - **Known perf item for M6:** UR analytic IK takes ~0.8 ms per pose in pure Python. Vectorize it (batch numpy) or JIT it before building reachability maps.
 - **Branch policy:** one branch per milestone (`m0-skeleton`, `m1-kinematics`, …); merge to `main` when its "done when" check passes.
 - **Last updated:** 2026-11-04
@@ -20,7 +20,7 @@ Full spec: `docs/PROJECT_PLAN.md`. It is the source of truth for scope and miles
 | M2 Viewer | **done** 2026-11-04 (25 random base+q, 4 links, ≤1e-6 m) | Viewer robot pose matches Pinocchio FK for the same q |
 | M3 Tool Setup page | **done** 2026-11-04 (GUI L slider → capsule span L+2r, TCP Δ = ΔL·z_mount, 1e-9) | Changing L stretches the collision capsule and moves the TCP correctly |
 | M4 Targets | **done** 2026-11-04 (click-select → 10 mm grid on rotated panel, worst normal < 1°) | 10 mm grid on the curved panel has normals within 1° of analytic |
-| M5 Feasibility checker | todo | Golden-scene reachable counts match hand-verified values |
+| M5 Feasibility checker | **done** 2026-11-04 (6 golden scenes in tests/test_feasibility.py match hand expectations) | Golden-scene reachable counts match hand-verified values |
 | M6 Reachability maps | todo | Heatmap peak within 50 mm of brute-force best base (flat plate) |
 | M7 Placement optimizer | todo | Two-station scene → finds 2 stations, full coverage |
 | M8 Tool-geometry optimizer | todo | Pocket scene → minimal L within 5 mm |
@@ -78,11 +78,13 @@ docs/             PROJECT_PLAN.md (the spec)
 scripts/          make_golden_parts.py → assets/parts/*.stl; import_ur_description.py;
                   make_sample_tools.py → assets/tools/{orbital_sander,scanner} + tools/*.yaml
 ui/               session (state ↔ project file), widgets (PoseWidgets, notify), cell, robot_view,
-                  tool_setup, tool_view, targets_ui, project_panel; later: optimize, results
+                  tool_setup, tool_view, targets_ui, optimize (feasibility run/inspect), project_panel;
+                  later: results
 core/             schema, golden_parts, robot, ik/{ur,opw,numeric}, transforms, urdf_import,
                   tool (parametric EE + library I/O), process (presets), mesh_select (pick + region grow),
-                  targets (selection, normals, generators, CSV, target-set edits);
-                  later: collision, carrier, standoff, payload
+                  targets (selection, normals, generators, CSV, target-set edits),
+                  collision (Coal via Pinocchio), payload (static torque), feasibility (per-point check);
+                  later: carrier, standoff
 opt/              reachability, placement, tool_geometry, cost
 tools/            tool library (one YAML per EE)
 assets/robots/    robot registry (ur20/ in v1)
@@ -168,6 +170,28 @@ $PY scripts/import_ur_description.py <clone> ur20   # re-import a UR model (see 
   - `parse_csv`: `x,y,z,nx,ny,nz[,group]`, optional header, mm or m.
 - **Edits** apply to points lying on the selected surface: assign group, flip, delete. "Preview tool at point" draws a ghost of the tool posed with tcp.z = −n, at origin p + standoff·n (`targets_ui.target_tcp_pose`).
 
+## Feasibility (M5)
+
+- **Collision (`core/collision.py`):** a single Pinocchio `GeometryModel` holds the robot collision meshes (from the URDF), the tool extension capsules, the head link meshes split by contact signature, the part (BVH) and the floor (half-space at world z = 0). Pair categories and margins:
+  - robot–part and tool–part: ≥ clearance.
+  - tool–robot: ≥ 5 mm, with the last link (wrist_3) excluded.
+  - robot self-pairs: |i − j| ≥ 2, minus any that touch at the neutral pose.
+  - floor: links from upper_arm on, plus the tool.
+
+  `collides(q, tcp)` uses Coal `security_margin`, so it is a clearance test, not just contact. A collision check takes about 0.7 ms.
+- **Contact filtering is per TCP.** A link in `contact_links` is skipped whole. Picked `contact_faces` are skipped **plus their one-ring** (faces sharing a vertex), otherwise the rim faces at the contact edge always register as a collision.
+- **Target frame / spin reference:** z = n; x = part +x projected onto the tangent plane (+y when n ∥ x). The TCP pose is `T0 · Rz(az) · Rx(tilt) · Rz(spin − az)` with `T0 = target · Rx(π)`, plus `standoff · n`.
+- **Sampling:**
+  - Spin: free = 30° steps; a range starts at its centre and works outward, ends included.
+  - Tilt: 0, then rings at cone/2 and cone with 6 azimuths each.
+  - Standoff: mid, lo, hi.
+
+  Poses are tried with increasing tilt, and the **first pose with a feasible branch wins**; its best branch is chosen by manipulability + 0.1 × limit margin. Full cost-based choice comes in M7.
+- **Checks, in order:** IK → joint limits − margin (the best 2π copy is kept) → static torque (τ = g + J_comᵀ(−mg) + Jᵀ F with F = −force·n; utilization ≤ limit; mass ≤ rated) → collision. An unreachable point reports the first stage nothing got past (`no_ik`, `joint_limits`, `torque`, `collision`). `marginal` means clearance < margin + 5 mm, torque > 90 % of its limit, or a joint within 15° of its limit.
+- **Payload:** joint torque limits come from spec.yaml, with URDF effort as fallback. Payload-diagram and wrist-moment checks are reported as *skipped* until spec.yaml has them. `Robot.set_mount(R_world_base)` rotates gravity for wall and ceiling mounts.
+- **GUI (Optimize tab):** the check runs in a thread on a **separate `Robot` instance**, because Pinocchio data is not thread-safe. Results go in `session.feasibility` (not saved, and stale after edits until re-run). Targets switch to "Color points by: feasibility". The inspector moves the robot to the chosen solution.
+- **Speed:** reachable points take about 10 ms; unreachable points try every candidate (up to 13 tilts × 12 spins × 3 standoffs). The pure-Python IK dominates; vectorize it in M6.
+
 ## Robot registry: UR20
 
 - `assets/robots/ur20/` contains `ur20.urdf` (generated from UR's ROS 2 description with xacro, mesh paths made relative), meshes, `spec.yaml` (DH, rated 20 kg, joint torques 738/738/433/107/107/107 N·m) and both licenses.
@@ -191,6 +215,7 @@ $PY scripts/import_ur_description.py <clone> ur20   # re-import a UR model (see 
 - 2026-11-04: Git: commit locally; **do not push** to `origin` unless the user asks.
 - 2026-11-04: The user approved fetching the UR20 description from Universal Robots' ROS 2 repo (BSD-3) in M1. Convert xacro → URDF with the pip `xacro` package.
 - 2026-11-04: The schema rejects unknown keys (`extra="forbid"`). Target normals are auto-normalized; zero normals are rejected. `Robot` takes a registry `name` or a raw `urdf`.
+- 2026-11-04 (M5): The feasibility check takes the first feasible pose in tilt order rather than optimizing per point, and the marginal clearance band is margin + 5 mm (a contact tool's body always sits close to the part).
 - 2026-11-04 (M4): Added a separate Targets tab. Click picking plus region growing in Viser works on the curved test panel. Whether it works on real part meshes stays open until the user supplies one; PyVista remains the fallback.
 - 2026-11-04 (M3): The extension model is fixed as Rz(roll)·Tz(L)·Rx(θ)·Ty(d) with capsule collision. This answers the plan's open question "straight or one bend": both are supported, and `type` selects which.
 - 2026-11-04 (M2): `Project.end_effector` and `Project.part` are optional until the Tool Setup (M3) and part steps fill them in. Projects are saved as `<folder>/project.json`. The UI shows UR's required copyright notice.
