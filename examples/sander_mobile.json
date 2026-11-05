@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "units": "m",
+  "robot": {
+    "urdf": "assets/ur20/ur20.urdf",
+    "flange_link": "tool0",
+    "mount": "floor",
+    "base_pose": {"xyz": [1.2, 0.0, 0.0], "rpy": [0, 0, 1.57]},
+    "ik": "ur_analytic",
+    "payload_spec": {"rated_kg": 20, "wrist_moment_Nm": [null, null, null], "joint_torque_Nm": [null]}
+  },
+  "base": {
+    "mode": "movable", "carrier": "mobile",
+    "chassis": {"shape": "box", "size": [1.2, 0.8, 0.4], "kg": 300},
+    "riser": {"shape": "cylinder", "radius": 0.15, "height": 0.3},
+    "joints": {"x": [0, 6.0], "y": [0, 4.0], "yaw_deg": [-180, 180], "lift": [0, 0.5]},
+    "T_mount": {"xyz": [0.2, 0, 0.7], "rpy": [0, 0, 0]},
+    "keepouts": [],
+    "standoff_m": {"carrier_part_min": 0.3, "carrier_part_preferred": 0.5, "carrier_env_min": 0.1}
+  },
+  "end_effector": {
+    "tool": "tools/orbital_sander.yaml", "process": "sanding", "urdf": "assets/sander/sander.urdf",
+    "T_flange_mount": {"xyz": [0, 0, 0.02], "rpy": [0, 0, 0]},
+    "extension": {"type": "bent", "L": [0.05, 0.6], "theta_deg": [0, 45], "radius": 0.04, "kg_per_m": 2.0},
+    "tcps": [{"name": "pad", "T_head_tcp": {"xyz": [0, 0, 0.12], "rpy": [0, 0, 0]}, "contact_links": ["pad_link"]}],
+    "process_force_N": 50
+  },
+  "part": {"mesh": "assets/parts/flat_plate.stl", "pose": {"xyz": [0, 0, 0.8], "rpy": [0, 0, 0]}},
+  "targets": {
+    "groups": [{"name": "top", "spin_deg": "free", "tilt_deg": 10, "standoff_m": 0, "tcps": ["pad"]}],
+    "points": [{"id": 0, "p": [0.1, 0.2, 0.9], "n": [0, 0, 1], "group": "top"}]
+  },
+  "optimizer": {
+    "free": ["L", "theta", "base"],
+    "max_stations": 3,
+    "weights": {"L": 1.0, "unreached": 1000, "stations": 5, "travel": 0.5, "manip": 0.3, "clearance": 0.3, "limits": 0.2, "torque": 0.5},
+    "margins": {"clearance_m": 0.01, "joint_deg": 5, "torque_util": 0.8}
+  },
+  "results": []
+}

@@ -1,0 +1,322 @@
+"""Pydantic models for the project file and the tool library.
+
+One JSON project file is the source of truth (see docs/PROJECT_PLAN.md, "Data model").
+Internal units are meters and radians; fields ending in ``_deg`` are degrees because
+they are user-facing tolerances, and are converted at the point of use.
+"""
+
+from __future__ import annotations
+
+import json
+import math
+from pathlib import Path
+from typing import Annotated, Literal
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+SCHEMA_VERSION = 1
+
+Vec3 = tuple[float, float, float]
+Range = tuple[float, float]
+
+
+class _Model(BaseModel):
+    """Base: reject unknown keys so typos in project files fail loudly."""
+
+    model_config = ConfigDict(extra="forbid", validate_assignment=True)
+
+
+def _check_range(r: Range | None, name: str) -> None:
+    if r is not None and r[0] > r[1]:
+        raise ValueError(f"{name}: lower bound {r[0]} > upper bound {r[1]}")
+
+
+class Pose(_Model):
+    """Rigid transform as translation (m) + roll/pitch/yaw (rad, fixed-axis XYZ)."""
+
+    xyz: Vec3 = (0.0, 0.0, 0.0)
+    rpy: Vec3 = (0.0, 0.0, 0.0)
+
+    @field_validator("xyz", "rpy")
+    @classmethod
+    def _finite(cls, v: Vec3) -> Vec3:
+        if not all(math.isfinite(x) for x in v):
+            raise ValueError("pose values must be finite")
+        return v
+
+
+# --- Robot -------------------------------------------------------------------
+
+
+class PayloadSpec(_Model):
+    """Datasheet limits. ``None`` means unknown: payload checks must refuse to run."""
+
+    rated_kg: float | None = Field(default=None, gt=0)
+    wrist_moment_Nm: list[float | None] = Field(default_factory=lambda: [None, None, None])
+    joint_torque_Nm: list[float | None] = Field(default_factory=list)
+
+    def is_complete(self) -> bool:
+        return (
+            self.rated_kg is not None
+            and len(self.joint_torque_Nm) > 0
+            and all(t is not None for t in self.joint_torque_Nm)
+            and all(m is not None for m in self.wrist_moment_Nm)
+        )
+
+
+class Robot(_Model):
+    name: str | None = None  # registry name, e.g. "ur20"; preferred over a raw urdf path
+    urdf: str | None = None
+    flange_link: str = "tool0"
+    mount: Literal["floor", "wall", "ceiling", "custom"] = "floor"
+    base_pose: Pose = Field(default_factory=Pose)
+    ik: Literal["ur_analytic", "opw", "numeric"] = "numeric"
+    payload_spec: PayloadSpec = Field(default_factory=PayloadSpec)
+
+    @model_validator(mode="after")
+    def _source(self) -> Robot:
+        if self.name is None and self.urdf is None:
+            raise ValueError("robot needs a registry 'name' or a 'urdf' path")
+        return self
+
+
+# --- Base / carrier ------------------------------------------------------------
+
+
+class Primitive(_Model):
+    shape: Literal["box", "cylinder"]
+    size: Vec3 | None = None  # box: L x W x H (m)
+    radius: float | None = Field(default=None, gt=0)
+    height: float | None = Field(default=None, gt=0)
+    kg: float | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def _dims(self) -> Primitive:
+        if self.shape == "box" and self.size is None:
+            raise ValueError("box primitive needs 'size'")
+        if self.shape == "cylinder" and (self.radius is None or self.height is None):
+            raise ValueError("cylinder primitive needs 'radius' and 'height'")
+        if self.size is not None and any(s <= 0 for s in self.size):
+            raise ValueError("primitive size must be positive")
+        return self
+
+
+class CarrierJoints(_Model):
+    x: Range | None = None
+    y: Range | None = None
+    z: Range | None = None
+    yaw_deg: Range | None = None
+    lift: Range | None = None
+
+    @model_validator(mode="after")
+    def _ranges(self) -> CarrierJoints:
+        for name in ("x", "y", "z", "yaw_deg", "lift"):
+            _check_range(getattr(self, name), name)
+        return self
+
+
+class Keepout(_Model):
+    """Axis-aligned floor box (world frame) the carrier must stay out of."""
+
+    min_xy: tuple[float, float]
+    max_xy: tuple[float, float]
+
+
+class Standoffs(_Model):
+    carrier_part_min: float = Field(default=0.0, ge=0)
+    carrier_part_preferred: float | None = Field(default=None, ge=0)
+    carrier_env_min: float = Field(default=0.0, ge=0)
+
+    @model_validator(mode="after")
+    def _order(self) -> Standoffs:
+        p = self.carrier_part_preferred
+        if p is not None and p < self.carrier_part_min:
+            raise ValueError("preferred standoff must be >= minimum standoff")
+        return self
+
+
+class Base(_Model):
+    mode: Literal["static", "movable"] = "static"
+    carrier: Literal["pedestal", "rail", "gantry", "mobile", "positioner"] | None = None
+    chassis: Primitive | None = None
+    riser: Primitive | None = None
+    joints: CarrierJoints = Field(default_factory=CarrierJoints)
+    T_mount: Pose = Field(default_factory=Pose)
+    keepouts: list[Keepout] = Field(default_factory=list)
+    standoff_m: Standoffs = Field(default_factory=Standoffs)
+
+    @model_validator(mode="after")
+    def _carrier(self) -> Base:
+        if self.mode == "movable" and self.carrier in (None, "pedestal"):
+            raise ValueError("movable base needs carrier: rail, gantry, mobile or positioner")
+        return self
+
+
+# --- End effector ---------------------------------------------------------------
+
+
+class Extension(_Model):
+    type: Literal["straight", "bent"] = "straight"
+    L: Range = (0.0, 0.5)
+    theta_deg: Range = (0.0, 0.0)
+    d: Range = (0.0, 0.0)
+    radius: float = Field(default=0.04, gt=0)
+    kg_per_m: float = Field(default=0.0, ge=0)
+
+    @model_validator(mode="after")
+    def _ranges(self) -> Extension:
+        for name in ("L", "theta_deg", "d"):
+            _check_range(getattr(self, name), name)
+        if self.L[0] < 0:
+            raise ValueError("extension length must be >= 0")
+        return self
+
+
+class TCP(_Model):
+    name: str
+    T_head_tcp: Pose = Field(default_factory=Pose)
+    contact_links: list[str] = Field(default_factory=list)
+
+
+ProcessType = Literal["scanning", "sanding", "grinding", "gripping", "spraying", "custom"]
+
+
+class EndEffector(_Model):
+    tool: str | None = None  # path to a tool-library YAML
+    process: ProcessType = "custom"
+    urdf: str | None = None
+    T_flange_mount: Pose = Field(default_factory=Pose)
+    extension: Extension = Field(default_factory=Extension)
+    tcps: list[TCP] = Field(min_length=1)
+    process_force_N: float = Field(default=0.0, ge=0)
+
+    @field_validator("tcps")
+    @classmethod
+    def _unique_tcps(cls, v: list[TCP]) -> list[TCP]:
+        names = [t.name for t in v]
+        if len(names) != len(set(names)):
+            raise ValueError(f"duplicate TCP names: {names}")
+        return v
+
+
+# --- Part and targets ----------------------------------------------------------
+
+
+class Part(_Model):
+    mesh: str
+    units: Literal["m", "mm", "in"] = "m"
+    pose: Pose = Field(default_factory=Pose)
+
+
+SpinTolerance = Literal["free"] | Annotated[float, Field(ge=0)] | Range
+
+
+class TargetGroup(_Model):
+    name: str
+    spin_deg: SpinTolerance = "free"  # "free", +-half-width, or (lo, hi)
+    tilt_deg: float = Field(default=0.0, ge=0, le=90)
+    standoff_m: float | Range = 0.0
+    tcps: list[str] = Field(default_factory=list)  # empty = any TCP
+
+
+class TargetPoint(_Model):
+    id: int = Field(ge=0)
+    p: Vec3  # position in the part frame (m)
+    n: Vec3  # outward surface normal in the part frame
+    group: str
+
+    @field_validator("n")
+    @classmethod
+    def _unit_normal(cls, n: Vec3) -> Vec3:
+        norm = math.sqrt(sum(c * c for c in n))
+        if not math.isfinite(norm) or norm < 1e-9:
+            raise ValueError("normal must be non-zero and finite")
+        return (n[0] / norm, n[1] / norm, n[2] / norm)
+
+
+class Targets(_Model):
+    groups: list[TargetGroup] = Field(default_factory=list)
+    points: list[TargetPoint] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _refs(self) -> Targets:
+        names = {g.name for g in self.groups}
+        if len(names) != len(self.groups):
+            raise ValueError("duplicate target group names")
+        ids = [p.id for p in self.points]
+        if len(ids) != len(set(ids)):
+            raise ValueError("duplicate target point ids")
+        missing = {p.group for p in self.points} - names
+        if missing:
+            raise ValueError(f"points reference unknown groups: {sorted(missing)}")
+        return self
+
+
+# --- Optimizer -----------------------------------------------------------------
+
+
+class Weights(_Model):
+    L: float = Field(default=1.0, ge=0)
+    unreached: float = Field(default=1000.0, ge=0)
+    stations: float = Field(default=5.0, ge=0)
+    travel: float = Field(default=0.5, ge=0)
+    manip: float = Field(default=0.3, ge=0)
+    clearance: float = Field(default=0.3, ge=0)
+    limits: float = Field(default=0.2, ge=0)
+    torque: float = Field(default=0.5, ge=0)
+
+
+class Margins(_Model):
+    clearance_m: float = Field(default=0.01, ge=0)
+    joint_deg: float = Field(default=5.0, ge=0)
+    torque_util: float = Field(default=0.8, gt=0, le=1)
+
+
+FreeVar = Literal["L", "theta", "d", "roll", "base", "stations"]
+
+
+class Optimizer(_Model):
+    free: list[FreeVar] = Field(default_factory=lambda: ["L", "base"])
+    max_stations: int = Field(default=1, ge=1)
+    weights: Weights = Field(default_factory=Weights)
+    margins: Margins = Field(default_factory=Margins)
+
+
+# --- Project -------------------------------------------------------------------
+
+
+class Project(_Model):
+    version: int = SCHEMA_VERSION
+    units: Literal["m"] = "m"
+    robot: Robot
+    base: Base = Field(default_factory=Base)
+    end_effector: EndEffector
+    part: Part
+    targets: Targets = Field(default_factory=Targets)
+    optimizer: Optimizer = Field(default_factory=Optimizer)
+    results: list[dict] = Field(default_factory=list)  # typed in M7
+
+    @field_validator("version")
+    @classmethod
+    def _version(cls, v: int) -> int:
+        if v != SCHEMA_VERSION:
+            raise ValueError(f"unsupported project version {v}; expected {SCHEMA_VERSION}")
+        return v
+
+    @model_validator(mode="after")
+    def _tcp_refs(self) -> Project:
+        known = {t.name for t in self.end_effector.tcps}
+        for g in self.targets.groups:
+            unknown = set(g.tcps) - known
+            if unknown:
+                raise ValueError(f"group '{g.name}' references unknown TCPs: {sorted(unknown)}")
+        return self
+
+
+def load_project(path: str | Path) -> Project:
+    return Project.model_validate_json(Path(path).read_text(encoding="utf-8"))
+
+
+def save_project(project: Project, path: str | Path) -> None:
+    data = project.model_dump(mode="json")
+    Path(path).write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")

@@ -1,0 +1,8 @@
+# M0 runtime
+viser>=1.1
+pydantic>=2.10
+trimesh>=4.5
+numpy>=1.26
+scipy>=1.13
+rtree>=1.3       # trimesh ray casting / nearest-point queries
+# M1+ (Pinocchio, Coal) need conda-forge or WSL on Windows: see CLAUDE.md "Environment"
