@@ -30,6 +30,9 @@ td:first-child,th:first-child{text-align:left}.bar{background:#5a8cdc;height:10p
 .ok{color:#1f8a43}.warn{color:#b07800}.bad{color:#c62828}.note{color:#666;font-size:12px}
 img{max-width:100%;border:1px solid #ddd;border-radius:6px}.scroll{max-height:420px;overflow:auto}
 @media print{.scroll{max-height:none}}
+@media (prefers-color-scheme: dark){body{background:#16181c;color:#e6e8eb}th{background:#23262c}
+th,td{border-color:#2c3038}.kpi,h2,img{border-color:#2c3038}.meta,.note,.kpi span{color:#9aa0a8}
+.ok{color:#4cc27a}.warn{color:#e0a83a}.bad{color:#ef6b6b}svg{border-radius:6px}}
 """
 
 

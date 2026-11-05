@@ -30,6 +30,7 @@ Full spec: `docs/PROJECT_PLAN.md`. It is the source of truth for scope and miles
 ## Current state (2026-11-05)
 
 **v1 is complete.** M0–M10 are done and merged to `main`, which is pushed to `origin` (the user authorized the push on 2026-11-04). The user guide is in `docs/USER_GUIDE.md` (setup on a new computer, quickstart, features, examples).
+Launch with `scripts/run_app.bat` (Windows, uses the rso env) or `$PY app.py [--port N] [--dark]`. Dark mode is `apply_theme` in app.py (Viser `configure_theme` + grid colours) with a GUI checkbox; the HTML report follows `prefers-color-scheme`. `examples/headless_plan.py` is the tested no-GUI workflow that the guide cites. **Keep the guide in sync** when GUI labels or commands change.
 
 **Still open with the user**
 - Their own part mesh in the browser, to decide Viser picking vs PyVista.
@@ -87,10 +88,11 @@ Viser (+ `yourdfpy`), Pinocchio (FK/Jacobian/RNEA), UR analytic IK (OPW later), 
 ## Layout
 
 ```
-app.py            Viser entry point (build_app(server) is testable without blocking)
+app.py            Viser entry point (build_app(server, dark=...) is testable without blocking)
+README.md         landing page -> docs/USER_GUIDE.md (user guide)
 environment.yml   conda env `rso` (all dependencies)
 docs/             PROJECT_PLAN.md (the spec)
-scripts/          make_golden_parts.py → assets/parts/*.stl; import_ur_description.py;
+scripts/          run_app.bat (Windows launcher); make_golden_parts.py → assets/parts/*.stl; import_ur_description.py;
                   make_sample_tools.py → assets/tools/{orbital_sander,scanner} + tools/*.yaml
 ui/               session (state ↔ project file), widgets (PoseWidgets, notify), cell, robot_view,
                   tool_setup, tool_view, targets_ui, optimize (feasibility run/inspect),

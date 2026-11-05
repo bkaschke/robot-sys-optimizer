@@ -120,3 +120,17 @@ def test_hiding_gizmo_keeps_robot_and_part_visible(app):
         cell.base.show.value = True
         cell.part_pose.show.value = True
     assert not cell.base.gizmo.disable_axes
+
+
+def test_dark_mode_toggle(app):
+    _, state = app
+    toggle = state["dark_toggle"]
+    toggle.value = True  # re-themes the GUI and redraws the floor grid for a dark background
+    toggle.value = False
+    assert toggle.value is False
+
+
+def test_report_has_dark_css():
+    from core.report import CSS
+
+    assert "prefers-color-scheme: dark" in CSS

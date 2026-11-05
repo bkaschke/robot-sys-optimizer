@@ -27,7 +27,22 @@ UR_NOTICE = (
 )
 
 
-def build_app(server: viser.ViserServer, session: Session | None = None) -> dict:
+def apply_theme(server: viser.ViserServer, dark: bool) -> None:
+    server.gui.configure_theme(dark_mode=dark, control_width="medium", brand_color=(90, 140, 220))
+    # grid lines: light on a dark background, grey on a light one
+    cell, section = ((80, 84, 92), (120, 126, 138)) if dark else ((200, 200, 200), (140, 140, 140))
+    server.scene.add_grid(
+        "/world/grid",
+        width=10.0,
+        height=10.0,
+        cell_size=0.1,
+        section_size=1.0,
+        cell_color=cell,
+        section_color=section,
+    )
+
+
+def build_app(server: viser.ViserServer, session: Session | None = None, dark: bool = False) -> dict:
     """Populate the scene and GUI. Returns handles for tests and later milestones."""
     if session is None:
         session = Session()
@@ -37,10 +52,12 @@ def build_app(server: viser.ViserServer, session: Session | None = None) -> dict
     server.scene.set_up_direction("+z")
     server.initial_camera.position = (3.0, -3.0, 2.2)
     server.initial_camera.look_at = (0.5, 0.0, 0.6)
-    server.scene.add_grid("/world/grid", width=10.0, height=10.0, cell_size=0.1, section_size=1.0)
+    apply_theme(server, dark)
     server.scene.add_frame("/world/origin", axes_length=0.2, axes_radius=0.005)
 
     state: dict = {"session": session}
+    dark_toggle = server.gui.add_checkbox("Dark mode", dark)
+    dark_toggle.on_update(lambda e: apply_theme(server, dark_toggle.value))
 
     def on_loaded() -> None:
         state["cell"].refresh()
@@ -96,6 +113,7 @@ def build_app(server: viser.ViserServer, session: Session | None = None) -> dict
         stations=stations,
         tool_opt=tool_opt,
         project=project,
+        dark_toggle=dark_toggle,
     )
     return state
 
@@ -104,10 +122,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Robot cell & end-effector optimizer")
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8080)
+    parser.add_argument("--dark", action="store_true", help="start in dark mode (also a checkbox in the GUI)")
     args = parser.parse_args()
 
     server = viser.ViserServer(host=args.host, port=args.port, label="Robot Cell Optimizer")
-    build_app(server)
+    build_app(server, dark=args.dark)
     try:
         while True:
             time.sleep(1.0)
