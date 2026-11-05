@@ -1,0 +1,27 @@
+<robot name="orbital_sander">
+  <link name="sander_body">
+    <visual><geometry><mesh filename="meshes/sander_body.stl"/></geometry></visual>
+    <collision><geometry><mesh filename="meshes/sander_body.stl"/></geometry></collision>
+    <inertial>
+      <origin xyz="0 0 0.075" rpy="0 0 0"/>
+      <mass value="2.5"/>
+      <inertia ixx="1e-3" ixy="0" ixz="0" iyy="1e-3" iyz="0" izz="1e-3"/>
+    </inertial>
+  </link>
+
+  <link name="pad_link">
+    <visual><geometry><mesh filename="meshes/pad_link.stl"/></geometry></visual>
+    <collision><geometry><mesh filename="meshes/pad_link.stl"/></geometry></collision>
+    <inertial>
+      <origin xyz="0 0 0.01" rpy="0 0 0"/>
+      <mass value="0.4"/>
+      <inertia ixx="1e-3" ixy="0" ixz="0" iyy="1e-3" iyz="0" izz="1e-3"/>
+    </inertial>
+  </link>
+
+  <joint name="sander_body-pad_link" type="fixed">
+    <parent link="sander_body"/><child link="pad_link"/>
+    <origin xyz="0 0 0.15" rpy="0 0 0"/>
+  </joint>
+
+</robot>

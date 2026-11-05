@@ -11,6 +11,7 @@ from core.transforms import make_T
 from ui.cell import CellTab
 from ui.project_panel import ProjectPanel
 from ui.session import PartState, Session
+from ui.tool_setup import ToolSetupTab
 
 TABS = ("Tool Setup", "Cell", "Optimize", "Results")
 UR_NOTICE = (
@@ -24,6 +25,8 @@ def build_app(server: viser.ViserServer, session: Session | None = None) -> dict
     if session is None:
         session = Session()
         session.part = PartState("assets/parts/flat_plate.stl", "m", make_T(p=(1.0, 0.0, 0.5)))
+        session.load_robot_from_registry("ur20")
+        session.load_tool_from_library("orbital_sander")
     server.scene.set_up_direction("+z")
     server.initial_camera.position = (3.0, -3.0, 2.2)
     server.initial_camera.look_at = (0.5, 0.0, 0.6)
@@ -31,17 +34,25 @@ def build_app(server: viser.ViserServer, session: Session | None = None) -> dict
     server.scene.add_frame("/world/origin", axes_length=0.2, axes_radius=0.005)
 
     state: dict = {"session": session}
-    project = ProjectPanel(server, session, on_loaded=lambda: state["cell"].refresh())
+
+    def on_loaded() -> None:
+        state["cell"].refresh()
+        state["tool"].refresh()
+
+    project = ProjectPanel(server, session, on_loaded=on_loaded)
     tabs = server.gui.add_tab_group()
     tab_handles = {name: tabs.add_tab(name) for name in TABS}
     with tab_handles["Cell"]:
         cell = CellTab(server, session)
-    for name in ("Tool Setup", "Optimize", "Results"):
+    with tab_handles["Tool Setup"]:
+        tool = ToolSetupTab(server, session)
+    cell.listeners.append(tool.on_robot_moved)
+    for name in ("Optimize", "Results"):
         with tab_handles[name]:
             server.gui.add_markdown(f"_{name}: not built yet (see CLAUDE.md milestones)._")
     server.gui.add_markdown(UR_NOTICE)
 
-    state.update(tabs=tab_handles, cell=cell, project=project)
+    state.update(tabs=tab_handles, cell=cell, tool=tool, project=project)
     return state
 
 

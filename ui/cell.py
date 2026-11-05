@@ -5,7 +5,6 @@ The GUI works in mm and degrees; the session and scene in m and rad.
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 import numpy as np
@@ -16,85 +15,24 @@ from core.robot import list_robots
 from core.transforms import (
     make_T,
     matrix_to_rpy,
-    matrix_to_wxyz,
     rpy_to_matrix,
-    wxyz_to_matrix,
 )
 from core.urdf_import import URDFImportError, import_urdf_zip
 from ui.robot_view import RobotView
 from ui.session import MESH_EXTS, MOUNT_RPY, UNIT_SCALE, PartState, Session, load_mesh
+from ui.widgets import MAX_UPLOAD, PoseWidgets
+from ui.widgets import notify as _notify
+from ui.widgets import safe_name as _safe_name
 
 BASE_NODE = "/cell/base"
 PART_NODE = "/cell/part"
 UPLOADED = "(uploaded URDF)"
-MAX_UPLOAD = 200 * 1024 * 1024
-
-
-def _safe_name(name: str) -> str:
-    stem = re.sub(r"[^A-Za-z0-9._-]", "_", Path(name).name)
-    return stem.lstrip(".") or "upload"
-
-
-def _notify(event, title: str, body: str, ok: bool = False) -> None:
-    client = getattr(event, "client", None)
-    if client is not None:
-        client.add_notification(title, body, color="green" if ok else "red", auto_close_seconds=6)
 
 
 def _yaw_about_world_z(R: np.ndarray) -> np.ndarray:
     """The world-z yaw part of R (heading of R's x axis projected on the floor)."""
     yaw = np.arctan2(R[1, 0], R[0, 0]) if abs(R[2, 0]) < 1 - 1e-9 else np.arctan2(-R[0, 1], R[1, 1])
     return rpy_to_matrix((0.0, 0.0, yaw))
-
-
-class PoseWidgets:
-    """xyz (mm) + rpy (deg) inputs, two-way synced with a transform gizmo."""
-
-    def __init__(self, server: viser.ViserServer, node: str, T: np.ndarray, on_change):
-        self._on_change = on_change
-        self._syncing = False
-        self.gizmo = server.scene.add_transform_controls(node, scale=0.3, visible=True)
-        self.xyz = server.gui.add_vector3("xyz (mm)", (0.0, 0.0, 0.0), step=1.0)
-        self.rpy = server.gui.add_vector3("rpy (deg)", (0.0, 0.0, 0.0), step=0.5)
-        self.show = server.gui.add_checkbox("Show gizmo", True)
-        self.set(T)
-
-        @self.gizmo.on_update
-        def _(_e) -> None:
-            if not self._syncing:
-                self._apply(make_T(wxyz_to_matrix(self.gizmo.wxyz), self.gizmo.position), source="gizmo")
-
-        @self.xyz.on_update
-        def _(_e) -> None:
-            if not self._syncing:
-                self._apply(self._from_fields(), source="fields")
-
-        @self.rpy.on_update
-        def _(_e) -> None:
-            if not self._syncing:
-                self._apply(self._from_fields(), source="fields")
-
-        @self.show.on_update
-        def _(_e) -> None:
-            self.gizmo.visible = self.show.value
-
-    def _from_fields(self) -> np.ndarray:
-        return make_T(rpy_to_matrix(np.radians(self.rpy.value)), np.array(self.xyz.value) / 1000)
-
-    def set(self, T: np.ndarray) -> None:
-        self._syncing = True
-        try:
-            self.gizmo.wxyz = matrix_to_wxyz(T[:3, :3])
-            self.gizmo.position = T[:3, 3]
-            # full precision: rounding here would leak into the pose on the next field edit
-            self.xyz.value = tuple(float(v) for v in T[:3, 3] * 1000)
-            self.rpy.value = tuple(float(v) for v in np.degrees(matrix_to_rpy(T[:3, :3])))
-        finally:
-            self._syncing = False
-
-    def _apply(self, T: np.ndarray, source: str) -> None:
-        self.set(T)
-        self._on_change(T)
 
 
 class CellTab:
@@ -105,6 +43,7 @@ class CellTab:
         self.sliders: list = []
         self.part_handle = None
         self._busy = False  # set while the code (not the user) updates widgets
+        self.listeners: list = []  # called with T_world_flange after any robot move
 
         with server.gui.add_folder("Robot"):
             robots = (*list_robots(), UPLOADED)
@@ -240,7 +179,9 @@ class CellTab:
         self._update_readout()
 
     def _update_readout(self) -> None:
-        T = self.s.T_world_base @ self.s.robot.fk(self.s.q)
+        T = self.s.T_world_flange()
+        for fn in self.listeners:
+            fn(T)
         p = T[:3, 3] * 1000
         r = np.degrees(matrix_to_rpy(T[:3, :3]))
         self.readout.content = (

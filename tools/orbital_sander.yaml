@@ -1,0 +1,54 @@
+name: orbital_sander
+process: sanding
+urdf: assets/tools/orbital_sander/orbital_sander.urdf
+T_flange_mount:
+  xyz:
+  - 0.0
+  - 0.0
+  - 0.02
+  rpy:
+  - 0.0
+  - 0.0
+  - 0.0
+extension:
+  type: bent
+  L:
+  - 0.05
+  - 0.6
+  theta_deg:
+  - 0.0
+  - 45.0
+  d:
+  - 0.0
+  - 0.0
+  roll_deg:
+  - 0.0
+  - 0.0
+  radius: 0.04
+  kg_per_m: 2.0
+  nominal:
+    L: 0.15
+    theta_deg: 0.0
+    d: 0.0
+    roll_deg: 0.0
+tcps:
+- name: pad
+  T_head_tcp:
+    xyz:
+    - 0.0
+    - 0.0
+    - 0.17
+    rpy:
+    - 0.0
+    - 0.0
+    - 0.0
+  contact_links:
+  - pad_link
+  contact_faces: {}
+process_force_N: 50.0
+tolerances:
+  spin_deg: free
+  tilt_deg: 10.0
+  standoff_m: 0.0
+line_of_sight: false
+approach_m: 0.0

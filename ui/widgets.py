@@ -1,0 +1,78 @@
+"""Shared GUI helpers: notifications, safe upload names, pose fields + gizmo."""
+
+from __future__ import annotations
+
+import re
+from pathlib import Path
+
+import numpy as np
+import viser
+
+from core.transforms import make_T, matrix_to_rpy, matrix_to_wxyz, rpy_to_matrix, wxyz_to_matrix
+
+MAX_UPLOAD = 200 * 1024 * 1024
+
+
+def safe_name(name: str) -> str:
+    stem = re.sub(r"[^A-Za-z0-9._-]", "_", Path(name).name)
+    return stem.lstrip(".") or "upload"
+
+
+def notify(event, title: str, body: str, ok: bool = False) -> None:
+    client = getattr(event, "client", None)
+    if client is not None:
+        client.add_notification(title, body, color="green" if ok else "red", auto_close_seconds=6)
+
+
+class PoseWidgets:
+    """xyz (mm) + rpy (deg) inputs, two-way synced with a transform gizmo."""
+
+    def __init__(self, server: viser.ViserServer, node: str, T: np.ndarray, on_change, scale: float = 0.3):
+        self._on_change = on_change
+        self._syncing = False
+        self.gizmo = server.scene.add_transform_controls(node, scale=scale, visible=True)
+        self.xyz = server.gui.add_vector3("xyz (mm)", (0.0, 0.0, 0.0), step=1.0)
+        self.rpy = server.gui.add_vector3("rpy (deg)", (0.0, 0.0, 0.0), step=0.5)
+        self.show = server.gui.add_checkbox("Show gizmo", True)
+        self.set(T)
+
+        @self.gizmo.on_update
+        def _(_e) -> None:
+            if not self._syncing:
+                self._apply(make_T(wxyz_to_matrix(self.gizmo.wxyz), self.gizmo.position), source="gizmo")
+
+        @self.xyz.on_update
+        def _(_e) -> None:
+            if not self._syncing:
+                self._apply(self._from_fields(), source="fields")
+
+        @self.rpy.on_update
+        def _(_e) -> None:
+            if not self._syncing:
+                self._apply(self._from_fields(), source="fields")
+
+        @self.show.on_update
+        def _(_e) -> None:
+            self.gizmo.visible = self.show.value
+
+    def _from_fields(self) -> np.ndarray:
+        return make_T(rpy_to_matrix(np.radians(self.rpy.value)), np.array(self.xyz.value) / 1000)
+
+    def set(self, T: np.ndarray) -> None:
+        self._syncing = True
+        try:
+            self.gizmo.wxyz = matrix_to_wxyz(T[:3, :3])
+            self.gizmo.position = T[:3, 3]
+            # full precision: rounding here would leak into the pose on the next field edit
+            self.xyz.value = tuple(float(v) for v in T[:3, 3] * 1000)
+            self.rpy.value = tuple(float(v) for v in np.degrees(matrix_to_rpy(T[:3, :3])))
+        finally:
+            self._syncing = False
+
+    def _apply(self, T: np.ndarray, source: str) -> None:
+        self.set(T)
+        self._on_change(T)
+
+    def remove(self) -> None:
+        for h in (self.gizmo, self.xyz, self.rpy, self.show):
+            h.remove()

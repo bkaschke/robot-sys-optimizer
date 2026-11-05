@@ -155,40 +155,91 @@ class Base(_Model):
 # --- End effector ---------------------------------------------------------------
 
 
+class ExtensionValues(_Model):
+    """One concrete extension geometry (the rough placement, or an optimizer result)."""
+
+    L: float = Field(default=0.1, ge=0)
+    theta_deg: float = 0.0
+    d: float = 0.0
+    roll_deg: float = 0.0
+
+
 class Extension(_Model):
+    """Parametric arm between the mount adapter and the tool head.
+
+    Geometry (see core/tool.py): T_mount_head = Rz(roll) Tz(L) Rx(theta) Ty(d).
+    Ranges bound the optimizer; ``nominal`` is the user's rough placement.
+    A straight extension forces theta = d = 0.
+    """
+
     type: Literal["straight", "bent"] = "straight"
     L: Range = (0.0, 0.5)
     theta_deg: Range = (0.0, 0.0)
     d: Range = (0.0, 0.0)
+    roll_deg: Range = (0.0, 0.0)
     radius: float = Field(default=0.04, gt=0)
     kg_per_m: float = Field(default=0.0, ge=0)
+    nominal: ExtensionValues = Field(default_factory=ExtensionValues)
 
     @model_validator(mode="after")
     def _ranges(self) -> Extension:
-        for name in ("L", "theta_deg", "d"):
+        for name in ("L", "theta_deg", "d", "roll_deg"):
             _check_range(getattr(self, name), name)
         if self.L[0] < 0:
             raise ValueError("extension length must be >= 0")
+        if self.type == "straight" and (self.theta_deg != (0.0, 0.0) or self.d != (0.0, 0.0)):
+            raise ValueError("a straight extension has theta and d fixed at 0")
+        n = self.nominal
+        for name in ("L", "theta_deg", "d", "roll_deg"):
+            lo, hi = getattr(self, name)
+            v = getattr(n, name)
+            if not lo - 1e-9 <= v <= hi + 1e-9:
+                raise ValueError(f"nominal {name}={v} outside its range [{lo}, {hi}]")
         return self
 
 
 class TCP(_Model):
     name: str
     T_head_tcp: Pose = Field(default_factory=Pose)
-    contact_links: list[str] = Field(default_factory=list)
+    contact_links: list[str] = Field(default_factory=list)  # whole links allowed to touch
+    contact_faces: dict[str, list[int]] = Field(default_factory=dict)  # link -> face ids
+
+    @field_validator("contact_faces")
+    @classmethod
+    def _faces(cls, v: dict[str, list[int]]) -> dict[str, list[int]]:
+        for link, faces in v.items():
+            if any(f < 0 for f in faces):
+                raise ValueError(f"negative face index on {link}")
+        return {k: sorted(set(f)) for k, f in v.items()}
 
 
 ProcessType = Literal["scanning", "sanding", "grinding", "gripping", "spraying", "custom"]
 
 
+class Tolerances(_Model):
+    """Per-target freedom; a process preset supplies defaults for new target groups."""
+
+    spin_deg: Literal["free"] | Annotated[float, Field(ge=0)] | Range = "free"
+    tilt_deg: float = Field(default=0.0, ge=0, le=90)
+    standoff_m: float | Range = 0.0
+
+
 class EndEffector(_Model):
-    tool: str | None = None  # path to a tool-library YAML
+    """A tool-library entry (tools/<name>.yaml) and the project's chosen tool."""
+
+    name: str = "tool"
+    tool: str | None = None  # path to the tool-library YAML this was loaded from
     process: ProcessType = "custom"
     urdf: str | None = None
     T_flange_mount: Pose = Field(default_factory=Pose)
     extension: Extension = Field(default_factory=Extension)
     tcps: list[TCP] = Field(min_length=1)
     process_force_N: float = Field(default=0.0, ge=0)
+    mass_kg: float | None = Field(default=None, ge=0)  # override of the URDF head mass
+    com_head: Vec3 | None = None  # override of the URDF head COM (head frame, m)
+    tolerances: Tolerances = Field(default_factory=Tolerances)
+    line_of_sight: bool = False  # scanning: require a clear ray from sensor to point
+    approach_m: float = Field(default=0.0, ge=0)  # gripping: approach/retreat distance
 
     @field_validator("tcps")
     @classmethod

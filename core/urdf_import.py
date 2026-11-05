@@ -131,7 +131,7 @@ def _chain_info(xml_text: str) -> tuple[str, str, str, list[str]]:
     return root.get("name") or "robot", roots[0], deepest(roots[0])[1], actuated
 
 
-def import_urdf(source: Path, dest: Path) -> URDFInfo:
+def import_urdf(source: Path, dest: Path, require_actuated: bool = True) -> URDFInfo:
     """Copy/resolve a URDF folder (or the folder a zip was extracted to) into ``dest``."""
     source, dest = source.resolve(), dest.resolve()
     if source != dest:
@@ -146,7 +146,7 @@ def import_urdf(source: Path, dest: Path) -> URDFInfo:
         text,
     )
     name, root_link, leaf, actuated = _chain_info(text)
-    if not actuated:
+    if require_actuated and not actuated:
         raise URDFImportError("URDF has no movable joints")
     urdf.write_text(text, encoding="utf-8")
     return URDFInfo(urdf, name, root_link, leaf, actuated)
@@ -158,8 +158,8 @@ def inspect_urdf(path: Path) -> URDFInfo:
     return URDFInfo(Path(path), name, root_link, leaf, actuated)
 
 
-def import_urdf_zip(data: bytes, dest: Path) -> URDFInfo:
+def import_urdf_zip(data: bytes, dest: Path, require_actuated: bool = True) -> URDFInfo:
     if dest.exists():
         shutil.rmtree(dest)
     safe_extract_zip(data, dest)
-    return import_urdf(dest, dest)
+    return import_urdf(dest, dest, require_actuated)

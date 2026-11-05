@@ -1,0 +1,55 @@
+name: scanner
+process: scanning
+urdf: assets/tools/scanner/scanner.urdf
+T_flange_mount:
+  xyz:
+  - 0.0
+  - 0.0
+  - 0.0
+  rpy:
+  - 0.0
+  - 0.0
+  - 0.0
+extension:
+  type: straight
+  L:
+  - 0.0
+  - 0.4
+  theta_deg:
+  - 0.0
+  - 0.0
+  d:
+  - 0.0
+  - 0.0
+  roll_deg:
+  - 0.0
+  - 0.0
+  radius: 0.03
+  kg_per_m: 1.5
+  nominal:
+    L: 0.1
+    theta_deg: 0.0
+    d: 0.0
+    roll_deg: 0.0
+tcps:
+- name: sensor
+  T_head_tcp:
+    xyz:
+    - 0.0
+    - 0.0
+    - 0.12
+    rpy:
+    - 0.0
+    - 0.0
+    - 0.0
+  contact_links: []
+  contact_faces: {}
+process_force_N: 0.0
+tolerances:
+  spin_deg: free
+  tilt_deg: 3.0
+  standoff_m:
+  - 0.15
+  - 0.25
+line_of_sight: true
+approach_m: 0.0

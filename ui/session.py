@@ -15,6 +15,7 @@ import trimesh
 
 from core import schema
 from core.robot import Robot, list_robots
+from core.tool import ToolModel, load_tool
 from core.transforms import matrix_to_pose, pose_to_matrix
 from core.urdf_import import inspect_urdf
 
@@ -43,6 +44,8 @@ class Session:
     T_world_base: np.ndarray = field(default_factory=lambda: np.eye(4))
     q: np.ndarray | None = None
     part: PartState | None = None
+    tool: schema.EndEffector | None = None
+    tool_model: ToolModel | None = None
     extra: dict = field(default_factory=dict)  # untouched project sections (EE, targets, ...)
 
     # --- assets ---------------------------------------------------------------
@@ -76,6 +79,21 @@ class Session:
         self.robot_name, self.robot_urdf = None, self.relative(urdf)
         self.q = np.clip(np.zeros(self.robot.nq), self.robot.lower, self.robot.upper)
 
+    def T_world_flange(self) -> np.ndarray:
+        return self.T_world_base @ self.robot.fk(self.q)
+
+    def set_tool(self, ee: schema.EndEffector | None) -> None:
+        """Select a tool and rebuild its geometry model (meshes are loaded once here)."""
+        if ee is None:
+            self.tool, self.tool_model = None, None
+            return
+        urdf = self.resolve(ee.urdf) if ee.urdf else None
+        self.tool_model = ToolModel(ee, urdf)
+        self.tool = ee
+
+    def load_tool_from_library(self, name: str) -> None:
+        self.set_tool(load_tool(name))
+
     @property
     def robot_urdf_path(self) -> Path:
         return self.robot.spec.folder / self.robot.spec.urdf
@@ -105,7 +123,7 @@ class Session:
                 units=self.part.units,
                 pose=matrix_to_pose(self.part.T_world_part),
             )
-        return schema.Project(robot=robot, part=part, **self.extra)
+        return schema.Project(robot=robot, part=part, end_effector=self.tool, **self.extra)
 
     def apply_project(self, project: schema.Project, project_dir: Path) -> None:
         self.project_dir = project_dir
@@ -120,9 +138,8 @@ class Session:
         if project.part is not None:
             self.part = PartState(project.part.mesh, project.part.units, pose_to_matrix(project.part.pose))
             self.part_mesh()  # fail early if the mesh is missing or broken
-        self.extra = {
-            k: getattr(project, k) for k in ("base", "end_effector", "targets", "optimizer", "results")
-        }
+        self.extra = {k: getattr(project, k) for k in ("base", "targets", "optimizer", "results")}
+        self.set_tool(project.end_effector)
 
 
 def load_mesh(path: Path, units: str = "m") -> trimesh.Trimesh:

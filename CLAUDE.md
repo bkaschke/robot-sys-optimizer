@@ -8,7 +8,7 @@ Full spec: `docs/PROJECT_PLAN.md`. It is the source of truth for scope and miles
 
 ## Status
 
-- **Current milestone:** M3 Tool Setup page (next). M0–M2 are done and merged to `main`.
+- **Current milestone:** M4 Targets (next). M0–M3 are done and merged to `main`.
 - **Known perf item for M6:** UR analytic IK takes ~0.8 ms per pose in pure Python. Vectorize it (batch numpy) or JIT it before building reachability maps.
 - **Branch policy:** one branch per milestone (`m0-skeleton`, `m1-kinematics`, …); merge to `main` when its "done when" check passes.
 - **Last updated:** 2026-11-04
@@ -18,7 +18,7 @@ Full spec: `docs/PROJECT_PLAN.md`. It is the source of truth for scope and miles
 | M0 Skeleton | **done** 2026-11-04 | `python app.py` serves the page; `pytest` passes |
 | M1 Robot kinematics | **done** 2026-11-04 (worst 4.9e-10 m) | IK round-trip (q → FK → IK → FK) within 1e-6 m on 10,000 samples, all branches found |
 | M2 Viewer | **done** 2026-11-04 (25 random base+q, 4 links, ≤1e-6 m) | Viewer robot pose matches Pinocchio FK for the same q |
-| M3 Tool Setup page | todo | Changing L stretches the collision capsule and moves the TCP correctly |
+| M3 Tool Setup page | **done** 2026-11-04 (GUI L slider → capsule span L+2r, TCP Δ = ΔL·z_mount, 1e-9) | Changing L stretches the collision capsule and moves the TCP correctly |
 | M4 Targets | todo | 10 mm grid on the curved panel has normals within 1° of analytic |
 | M5 Feasibility checker | todo | Golden-scene reachable counts match hand-verified values |
 | M6 Reachability maps | todo | Heatmap peak within 50 mm of brute-force best base (flat plate) |
@@ -75,12 +75,13 @@ Viser (+ `yourdfpy`), Pinocchio (FK/Jacobian/RNEA), UR analytic IK (OPW later), 
 app.py            Viser entry point (build_app(server) is testable without blocking)
 environment.yml   conda env `rso` (all dependencies)
 docs/             PROJECT_PLAN.md (the spec)
-scripts/          make_golden_parts.py → assets/parts/*.stl; import_ur_description.py
-ui/               session (state ↔ project file), cell, robot_view, project_panel;
-                  later: tool_setup, targets_ui, optimize, results
+scripts/          make_golden_parts.py → assets/parts/*.stl; import_ur_description.py;
+                  make_sample_tools.py → assets/tools/{orbital_sander,scanner} + tools/*.yaml
+ui/               session (state ↔ project file), widgets (PoseWidgets, notify), cell, robot_view,
+                  tool_setup, tool_view, project_panel; later: targets_ui, optimize, results
 core/             schema, golden_parts, robot, ik/{ur,opw,numeric}, transforms, urdf_import,
-                  collision, tool,
-                  process, carrier, standoff, targets, payload
+                  tool (parametric EE + library I/O), process (presets), mesh_select (pick + region grow);
+                  later: collision, carrier, standoff, targets, payload
 opt/              reachability, placement, tool_geometry, cost
 tools/            tool library (one YAML per EE)
 assets/robots/    robot registry (ur20/ in v1)
@@ -141,6 +142,17 @@ $PY scripts/import_ur_description.py <clone> ur20   # re-import a UR model (see 
 - Mount presets (floor, wall, ceiling) keep the base yaw. Any other rotation switches the mount to `custom`.
 - Visual smoke test with no GPU: run the app, then `msedge --headless=new --use-angle=swiftshader --enable-unsafe-swiftshader --virtual-time-budget=40000 --screenshot=out.png http://127.0.0.1:<port>/`.
 
+## Tool Setup (M3)
+
+- **EE geometry (core/tool.py):** `T_flange_head = T_flange_mount · Rz(roll) · Tz(L) · Rx(θ) · Ty(d)` and `T_flange_tcp = T_flange_head · T_head_tcp`. The extension collision is capsules of `radius`: segment 1 runs from the mount origin along mount z for L; segment 2 (only when d ≠ 0) is the lateral leg to the head origin. A `straight` extension forces θ = d = 0. The head frame is the EE URDF root link, and head links are rigid.
+- `Extension` holds **ranges** (optimizer bounds) plus `nominal` (the user's rough placement, validated to lie inside the ranges). Changing a range in the GUI clamps the nominal value into it.
+- **Contacts per TCP:** `contact_links` (whole links) and `contact_faces` (link → face indices on that link's *visual* mesh as loaded by yourdfpy). Collision filtering in M5 must use those same meshes and indices. Contact-free presets (scanning, spraying) clear all contacts.
+- **Mass:** URDF inertials (head) + `kg_per_m` × extension length at segment midpoints. `mass_kg` and `com_head` override the head. `head_mass_known=False` when the URDF has no inertials and there is no override.
+- **Tool library:** `tools/<name>.yaml` (EndEffector dump; name restricted to `[A-Za-z0-9_-]`). Saving an uploaded tool copies its URDF folder into `assets/tools/<name>/` so the entry is self-contained. The sample tools are stand-in geometry from `scripts/make_sample_tools.py`.
+- **GUI edits** go through `ToolSetupTab._commit(fn)`: dump to a dict, apply the change, re-validate the whole `EndEffector`, and on error notify and revert the widgets. Meshes load only in `Session.set_tool`; parameter edits swap `tool_model.ee` without reloading.
+- **Face picking:** a click ray (world) goes into the link frame, then `pick_face`, then `grow_region` (dihedral ≤ slider angle). Clicking an already-picked face removes its region. Picking is off until the checkbox is ticked.
+- `CellTab.listeners` get `T_world_flange` after every base or joint change; the tool view follows the flange this way.
+
 ## Robot registry: UR20
 
 - `assets/robots/ur20/` contains `ur20.urdf` (generated from UR's ROS 2 description with xacro, mesh paths made relative), meshes, `spec.yaml` (DH, rated 20 kg, joint torques 738/738/433/107/107/107 N·m) and both licenses.
@@ -164,12 +176,13 @@ $PY scripts/import_ur_description.py <clone> ur20   # re-import a UR model (see 
 - 2026-11-04: Git: commit locally; **do not push** to `origin` unless the user asks.
 - 2026-11-04: The user approved fetching the UR20 description from Universal Robots' ROS 2 repo (BSD-3) in M1. Convert xacro → URDF with the pip `xacro` package.
 - 2026-11-04: The schema rejects unknown keys (`extra="forbid"`). Target normals are auto-normalized; zero normals are rejected. `Robot` takes a registry `name` or a raw `urdf`.
+- 2026-11-04 (M3): The extension model is fixed as Rz(roll)·Tz(L)·Rx(θ)·Ty(d) with capsule collision. This answers the plan's open question "straight or one bend": both are supported, and `type` selects which.
 - 2026-11-04 (M2): `Project.end_effector` and `Project.part` are optional until the Tool Setup (M3) and part steps fill them in. Projects are saved as `<folder>/project.json`. The UI shows UR's required copyright notice.
 
 ## Open decisions (from plan; decide before M5)
 
 - [ ] Viser picking + region growing good enough on real meshes, or PyVista for selection? (prototype in M4)
-- [ ] Tool geometry v1: straight only, or straight + one bend?
+- [x] Tool geometry v1: straight + one bend (with lateral offset d), selectable per tool (decided in M3).
 - [ ] Single tool length for all stations, or a tool swap per station?
 - [ ] Gantry: station mode only in v1, or coordinated mode too?
 - [ ] Designer output: envelope sketch, URDF, or STEP stub?
