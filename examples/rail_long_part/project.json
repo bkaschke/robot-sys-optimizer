@@ -1,0 +1,675 @@
+{
+  "version": 1,
+  "units": "m",
+  "robot": {
+    "name": "ur20",
+    "urdf": null,
+    "flange_link": "tool0",
+    "mount": "floor",
+    "base_pose": {
+      "xyz": [
+        -1.5,
+        0.15,
+        0.7
+      ],
+      "rpy": [
+        0.0,
+        -0.0,
+        0.0
+      ]
+    },
+    "ik": "ur_analytic",
+    "payload_spec": {
+      "rated_kg": 20.0,
+      "wrist_moment_Nm": [
+        null,
+        null,
+        null
+      ],
+      "joint_torque_Nm": [
+        738.0,
+        738.0,
+        433.0,
+        107.0,
+        107.0,
+        107.0
+      ],
+      "curve_mm_kg": [
+        [
+          0.0,
+          20.0
+        ],
+        [
+          200.0,
+          20.0
+        ],
+        [
+          800.0,
+          7.0
+        ]
+      ],
+      "curve_extrapolate": "linear",
+      "curve_source": "UR20 datasheet Dec 2024 (plot reading); >800 mm extrapolated estimate"
+    }
+  },
+  "base": {
+    "mode": "movable",
+    "carrier": "rail",
+    "pose": {
+      "xyz": [
+        0.0,
+        0.15,
+        0.0
+      ],
+      "rpy": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "chassis": null,
+    "riser": null,
+    "track": null,
+    "bodies": [
+      {
+        "shape": "box",
+        "size": [
+          7.0,
+          0.3,
+          0.1
+        ],
+        "radius": null,
+        "height": null,
+        "kg": null,
+        "name": "track",
+        "attach": "fixed",
+        "pose": {
+          "xyz": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rpy": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "mesh": null,
+        "units": "m"
+      },
+      {
+        "shape": "box",
+        "size": [
+          0.5,
+          0.5,
+          0.15
+        ],
+        "radius": null,
+        "height": null,
+        "kg": 60.0,
+        "name": "carriage",
+        "attach": "carriage",
+        "pose": {
+          "xyz": [
+            0.0,
+            0.0,
+            0.1
+          ],
+          "rpy": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "mesh": null,
+        "units": "m"
+      },
+      {
+        "shape": "cylinder",
+        "size": null,
+        "radius": 0.15,
+        "height": 0.45,
+        "kg": 40.0,
+        "name": "riser",
+        "attach": "carriage",
+        "pose": {
+          "xyz": [
+            0.0,
+            0.0,
+            0.25
+          ],
+          "rpy": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "mesh": null,
+        "units": "m"
+      }
+    ],
+    "joints": {
+      "x": [
+        -3.0,
+        3.0
+      ],
+      "y": null,
+      "z": null,
+      "yaw_deg": null,
+      "lift": null
+    },
+    "T_mount": {
+      "xyz": [
+        0.0,
+        0.0,
+        0.7
+      ],
+      "rpy": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "keepouts": [
+      {
+        "min_xy": [
+          -5.0,
+          1.3
+        ],
+        "max_xy": [
+          5.0,
+          3.0
+        ]
+      }
+    ],
+    "standoff_m": {
+      "carrier_part_min": 0.3,
+      "carrier_part_preferred": 0.4,
+      "carrier_env_min": 0.1
+    },
+    "localization_m": 0.0,
+    "localization_deg": 0.0,
+    "tip_over": false,
+    "tip_margin_m": 0.05
+  },
+  "end_effector": {
+    "name": "orbital_sander",
+    "tool": "tools/orbital_sander.yaml",
+    "process": "sanding",
+    "urdf": "assets/tools/orbital_sander/orbital_sander.urdf",
+    "T_flange_mount": {
+      "xyz": [
+        0.0,
+        0.0,
+        0.02
+      ],
+      "rpy": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "extension": {
+      "type": "bent",
+      "L": [
+        0.05,
+        0.6
+      ],
+      "theta_deg": [
+        0.0,
+        45.0
+      ],
+      "d": [
+        0.0,
+        0.0
+      ],
+      "roll_deg": [
+        0.0,
+        0.0
+      ],
+      "radius": 0.04,
+      "kg_per_m": 2.0,
+      "nominal": {
+        "L": 0.15,
+        "theta_deg": 0.0,
+        "d": 0.0,
+        "roll_deg": 0.0
+      }
+    },
+    "tcps": [
+      {
+        "name": "pad",
+        "T_head_tcp": {
+          "xyz": [
+            0.0,
+            0.0,
+            0.17
+          ],
+          "rpy": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "contact_links": [
+          "pad_link"
+        ],
+        "contact_faces": {}
+      }
+    ],
+    "process_force_N": 50.0,
+    "mass_kg": null,
+    "com_head": null,
+    "tolerances": {
+      "spin_deg": "free",
+      "tilt_deg": 10.0,
+      "standoff_m": 0.0
+    },
+    "line_of_sight": false,
+    "approach_m": 0.0
+  },
+  "part": {
+    "mesh": "assets/parts/long_rail.stl",
+    "units": "m",
+    "pose": {
+      "xyz": [
+        0.0,
+        0.8,
+        0.5
+      ],
+      "rpy": [
+        0.0,
+        -0.0,
+        0.0
+      ]
+    }
+  },
+  "targets": {
+    "groups": [
+      {
+        "name": "top",
+        "spin_deg": "free",
+        "tilt_deg": 10.0,
+        "standoff_m": 0.0,
+        "tcps": []
+      }
+    ],
+    "points": [
+      {
+        "id": 0,
+        "p": [
+          -3.0,
+          0.0,
+          0.15000000000000036
+        ],
+        "n": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "group": "top"
+      },
+      {
+        "id": 1,
+        "p": [
+          -2.75,
+          0.0,
+          0.15000000000000036
+        ],
+        "n": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "group": "top"
+      },
+      {
+        "id": 2,
+        "p": [
+          -2.5,
+          0.0,
+          0.15000000000000036
+        ],
+        "n": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "group": "top"
+      },
+      {
+        "id": 3,
+        "p": [
+          -2.25,
+          0.0,
+          0.15000000000000036
+        ],
+        "n": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "group": "top"
+      },
+      {
+        "id": 4,
+        "p": [
+          -2.0,
+          0.0,
+          0.15000000000000036
+        ],
+        "n": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "group": "top"
+      },
+      {
+        "id": 5,
+        "p": [
+          -1.75,
+          0.0,
+          0.15000000000000036
+        ],
+        "n": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "group": "top"
+      },
+      {
+        "id": 6,
+        "p": [
+          -1.5,
+          0.0,
+          0.15000000000000036
+        ],
+        "n": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "group": "top"
+      },
+      {
+        "id": 7,
+        "p": [
+          -1.25,
+          0.0,
+          0.15000000000000036
+        ],
+        "n": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "group": "top"
+      },
+      {
+        "id": 8,
+        "p": [
+          -1.0,
+          0.0,
+          0.15000000000000036
+        ],
+        "n": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "group": "top"
+      },
+      {
+        "id": 9,
+        "p": [
+          -0.75,
+          0.0,
+          0.15000000000000036
+        ],
+        "n": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "group": "top"
+      },
+      {
+        "id": 10,
+        "p": [
+          -0.5,
+          0.0,
+          0.15000000000000036
+        ],
+        "n": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "group": "top"
+      },
+      {
+        "id": 11,
+        "p": [
+          -0.25,
+          0.0,
+          0.15000000000000036
+        ],
+        "n": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "group": "top"
+      },
+      {
+        "id": 12,
+        "p": [
+          0.0,
+          0.0,
+          0.15000000000000036
+        ],
+        "n": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "group": "top"
+      },
+      {
+        "id": 13,
+        "p": [
+          0.25,
+          0.0,
+          0.15000000000000036
+        ],
+        "n": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "group": "top"
+      },
+      {
+        "id": 14,
+        "p": [
+          0.5,
+          0.0,
+          0.15000000000000036
+        ],
+        "n": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "group": "top"
+      },
+      {
+        "id": 15,
+        "p": [
+          0.75,
+          0.0,
+          0.15000000000000036
+        ],
+        "n": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "group": "top"
+      },
+      {
+        "id": 16,
+        "p": [
+          1.0,
+          0.0,
+          0.15000000000000036
+        ],
+        "n": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "group": "top"
+      },
+      {
+        "id": 17,
+        "p": [
+          1.25,
+          0.0,
+          0.15000000000000036
+        ],
+        "n": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "group": "top"
+      },
+      {
+        "id": 18,
+        "p": [
+          1.5,
+          0.0,
+          0.15000000000000036
+        ],
+        "n": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "group": "top"
+      },
+      {
+        "id": 19,
+        "p": [
+          1.75,
+          0.0,
+          0.15000000000000036
+        ],
+        "n": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "group": "top"
+      },
+      {
+        "id": 20,
+        "p": [
+          2.0,
+          0.0,
+          0.15000000000000036
+        ],
+        "n": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "group": "top"
+      },
+      {
+        "id": 21,
+        "p": [
+          2.25,
+          0.0,
+          0.15000000000000036
+        ],
+        "n": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "group": "top"
+      },
+      {
+        "id": 22,
+        "p": [
+          2.5,
+          0.0,
+          0.15000000000000036
+        ],
+        "n": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "group": "top"
+      },
+      {
+        "id": 23,
+        "p": [
+          2.75,
+          0.0,
+          0.15000000000000036
+        ],
+        "n": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "group": "top"
+      },
+      {
+        "id": 24,
+        "p": [
+          3.0,
+          0.0,
+          0.15000000000000036
+        ],
+        "n": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "group": "top"
+      }
+    ]
+  },
+  "optimizer": {
+    "free": [
+      "L",
+      "base"
+    ],
+    "max_stations": 1,
+    "weights": {
+      "L": 1.0,
+      "unreached": 1000.0,
+      "stations": 5.0,
+      "travel": 0.5,
+      "manip": 0.3,
+      "clearance": 0.3,
+      "limits": 0.2,
+      "torque": 0.5,
+      "standoff": 1.0
+    },
+    "margins": {
+      "clearance_m": 0.01,
+      "joint_deg": 5.0,
+      "torque_util": 0.8
+    }
+  },
+  "results": []
+}

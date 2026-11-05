@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from collections.abc import Callable
 from pathlib import Path
 
@@ -13,6 +14,13 @@ from core import schema
 from ui.session import REPO, Session, load_project, save_project
 
 MAX_JSON = 20 * 1024 * 1024
+EXAMPLES = REPO / "examples"
+NO_EXAMPLE = "(choose)"
+
+
+def list_examples() -> list[str]:
+    """Example projects shipped in examples/<name>/project.json."""
+    return sorted(p.parent.name for p in EXAMPLES.glob("*/project.json"))
 
 
 def _notify(event, title: str, body: str, ok: bool = False) -> None:
@@ -42,6 +50,8 @@ class ProjectPanel:
             self.load = server.gui.add_button("Load")
             self.download = server.gui.add_button("Download project.json")
             self.upload = server.gui.add_upload_button("Open project.json", mime_type="application/json")
+            self.example = server.gui.add_dropdown("Examples", (NO_EXAMPLE, *list_examples()))
+            self.open_example = server.gui.add_button("Open example")
 
         @self.save.on_click
         def _(e) -> None:
@@ -75,10 +85,29 @@ class ProjectPanel:
             (d / "project.json").write_bytes(f.content)
             self._load(e, d)
 
-    def _load(self, e, project_dir: Path) -> None:
+        @self.open_example.on_click
+        def _(e) -> None:
+            self.load_example(self.example.value, e)
+
+    def load_example(self, name: str, e=None) -> bool:
+        """Copy examples/<name> to workspace/examples/<name> (so saving never edits the
+        shipped copy) and load it. An existing workspace copy is replaced."""
+        if name not in list_examples():
+            _notify(e, "No example", "Choose an example first")
+            return False
+        dest = REPO / "workspace" / "examples" / name
+        if dest.exists():
+            shutil.rmtree(dest)
+        shutil.copytree(EXAMPLES / name, dest)
+        self.folder.value = dest.relative_to(REPO).as_posix()
+        return self._load(e, dest)
+
+    def _load(self, e, project_dir: Path) -> bool:
         try:
             load_project(self.s, project_dir)
         except (OSError, ValueError, ValidationError) as err:  # session untouched on failure
-            return _notify(e, "Load failed", str(err)[:500])
+            _notify(e, "Load failed", str(err)[:500])
+            return False
         self.on_loaded()
         _notify(e, "Loaded", str(project_dir / "project.json"), ok=True)
+        return True

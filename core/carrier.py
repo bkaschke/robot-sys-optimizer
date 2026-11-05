@@ -5,11 +5,20 @@ then the arm works). See schema.Base for the frame conventions. This module turn
 into: the DOF list and bounds, the robot base pose for given DOF values, the primitive
 bodies (moving with the carriage, or static like a rail track), their floor footprint, the
 travel metric between stations, a static tip-over check, and a URDF of the chain.
+
+Bodies come from ``Base.bodies`` (boxes, cylinders and meshes placed freely on the carriage
+or fixed in the carrier frame). Older projects use ``chassis``/``riser``/``track`` instead;
+``body_list`` converts those, and ``migrate`` rewrites a Base into the body-list form.
 """
 
 from __future__ import annotations
 
+import functools
+import re
+from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
+from xml.sax.saxutils import quoteattr
 
 import numpy as np
 import pinocchio as pin
@@ -17,14 +26,40 @@ import trimesh
 from shapely.geometry import MultiPoint, Polygon
 from shapely.ops import unary_union
 
-from core.schema import Base, Primitive
+from core.schema import Base, Pose, Primitive
 from core.transforms import make_T, pose_to_matrix, rpy_to_matrix
 
 G = 9.81
+REPO = Path(__file__).resolve().parents[1]
+UNIT_SCALE = {"m": 1.0, "mm": 1e-3, "in": 0.0254}
+MESH_EXTS = (".stl", ".obj", ".ply")
+Resolver = Callable[[str], Path]
 
 
-def primitive_mesh(p: Primitive) -> trimesh.Trimesh:
-    """Mesh with its bottom face on z = 0, centred in x/y."""
+def default_resolve(rel: str) -> Path:
+    p = Path(rel)
+    return p if p.is_absolute() else REPO / p
+
+
+@functools.lru_cache(maxsize=32)
+def _load_mesh(path: str, mtime: float, units: str) -> trimesh.Trimesh:
+    m = trimesh.load(path, force="mesh")
+    if not isinstance(m, trimesh.Trimesh) or len(m.faces) == 0:
+        raise ValueError(f"{Path(path).name} contains no triangles")
+    m.apply_scale(UNIT_SCALE[units])
+    return m
+
+
+def primitive_mesh(p: Primitive, resolve: Resolver | None = None) -> trimesh.Trimesh:
+    """Body mesh in its own frame. Box/cylinder: bottom face on z = 0, centred in x/y.
+    Mesh bodies keep the file's origin, scaled by ``units``."""
+    if p.shape == "mesh":
+        path = (resolve or default_resolve)(p.mesh)
+        if path.suffix.lower() not in MESH_EXTS:
+            raise ValueError(f"unsupported mesh type {path.suffix}; use {', '.join(MESH_EXTS)}")
+        if not path.exists():
+            raise FileNotFoundError(f"carrier mesh not found: {p.mesh}")
+        return _load_mesh(str(path), path.stat().st_mtime, p.units).copy()
     if p.shape == "box":
         m = trimesh.creation.box(extents=p.size)
         m.apply_translation((0, 0, p.size[2] / 2))
@@ -38,6 +73,65 @@ def primitive_height(p: Primitive) -> float:
     return p.size[2] if p.shape == "box" else p.height
 
 
+def safe_name(name: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_]", "_", name) or "body"
+
+
+def body_list(base: Base) -> list[Primitive]:
+    """The carrier's bodies with unique names. Legacy chassis/riser/track are converted:
+    the riser sits on the chassis top, the track is centred on the rail travel range."""
+    if base.bodies:
+        out = list(base.bodies)
+    else:
+        out = []
+        if base.chassis is not None:
+            out.append(
+                base.chassis.model_copy(update={"name": base.chassis.name or "chassis", "attach": "carriage"})
+            )
+            if base.riser is not None:
+                z = primitive_height(base.chassis)
+                upd = {"name": base.riser.name or "riser", "attach": "carriage", "pose": Pose(xyz=(0, 0, z))}
+                out.append(base.riser.model_copy(update=upd))
+        if base.track is not None and base.carrier == "rail" and base.joints.x is not None:
+            lo, hi = base.joints.x
+            upd = {
+                "name": base.track.name or "track",
+                "attach": "fixed",
+                "pose": Pose(xyz=((lo + hi) / 2, 0, 0)),
+            }
+            out.append(base.track.model_copy(update=upd))
+    seen: set[str] = set()
+    named = []
+    for k, b in enumerate(out):
+        n = safe_name(b.name or f"{b.shape}{k + 1}")
+        while n in seen:
+            n = f"{n}_{k + 1}"
+        seen.add(n)
+        named.append(b.model_copy(update={"name": n}))
+    return named
+
+
+def migrate(base: Base) -> Base:
+    """Same carrier in body-list form (chassis/riser/track moved into ``bodies``)."""
+    d = base.model_dump()
+    d.update(bodies=[b.model_dump() for b in body_list(base)], chassis=None, riser=None, track=None)
+    return Base.model_validate(d)
+
+
+def body_top(p: Primitive, resolve: Resolver | None = None) -> np.ndarray:
+    """Centre of the top of a body's bounding box, in its parent (carriage) frame: where a
+    robot mounted 'on top of' the body sits."""
+    m = primitive_mesh(p, resolve)
+    T = pose_to_matrix(p.pose)
+    w = m.vertices @ T[:3, :3].T + T[:3, 3]
+    lo, hi = w.min(axis=0), w.max(axis=0)
+    return np.array([(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, hi[2]])
+
+
+def _com(mesh: trimesh.Trimesh) -> np.ndarray:
+    return np.asarray(mesh.center_mass if mesh.is_volume else mesh.bounds.mean(axis=0))
+
+
 @dataclass
 class Body:
     name: str
@@ -47,8 +141,13 @@ class Body:
 
 
 class Carrier:
-    def __init__(self, base: Base, T_world_base_static: np.ndarray | None = None):
+    def __init__(
+        self, base: Base, T_world_base_static: np.ndarray | None = None, resolve: Resolver | None = None
+    ):
         self.base = base
+        self.resolve = resolve
+        self.specs = body_list(base)
+        self._meshes: dict[int, trimesh.Trimesh] = {}
         self.kind = base.carrier if base.mode == "movable" else "static"
         self.T_static = np.eye(4) if T_world_base_static is None else np.asarray(T_world_base_static, float)
         self.T_frame = pose_to_matrix(base.pose)
@@ -103,33 +202,29 @@ class Carrier:
 
     # --- bodies ------------------------------------------------------------------------------
 
+    def mesh(self, k: int) -> trimesh.Trimesh:
+        if k not in self._meshes:
+            self._meshes[k] = primitive_mesh(self.specs[k], self.resolve)
+        return self._meshes[k]
+
+    def _bodies(self, attach: str, T_parent: np.ndarray) -> list[Body]:
+        return [
+            Body(p.name, self.mesh(k), T_parent @ pose_to_matrix(p.pose), p.kg)
+            for k, p in enumerate(self.specs)
+            if p.attach == attach
+        ]
+
     def moving_bodies(self, v: dict) -> list[Body]:
+        """Bodies on the carriage (world poses for DOF values v)."""
         if self.kind == "static":
             return []
-        out = []
-        T = self.T_world_carriage(v)
-        b = self.base
-        if b.chassis is not None:
-            out.append(Body("chassis", primitive_mesh(b.chassis), T, b.chassis.kg))
-            if b.riser is not None:
-                out.append(
-                    Body(
-                        "riser",
-                        primitive_mesh(b.riser),
-                        T @ make_T(p=(0, 0, primitive_height(b.chassis))),
-                        b.riser.kg,
-                    )
-                )
-        return out
+        return self._bodies("carriage", self.T_world_carriage(v))
 
     def static_bodies(self) -> list[Body]:
-        b = self.base
-        if self.kind != "rail" or b.track is None:
+        """Bodies fixed in the carrier frame (rail track, gantry beams, ...)."""
+        if self.kind == "static":
             return []
-        lo, hi = self.bounds[0]
-        return [
-            Body("track", primitive_mesh(b.track), self.T_frame @ make_T(p=((lo + hi) / 2, 0, 0)), b.track.kg)
-        ]
+        return self._bodies("fixed", self.T_frame)
 
     def footprint(self, v: dict) -> Polygon | None:
         polys = []
@@ -188,7 +283,7 @@ class Carrier:
         forces: list[tuple[np.ndarray, np.ndarray]] = []  # (point, force) in world
         for body in self.moving_bodies(v):
             if body.kg:
-                c = body.T[:3, :3] @ body.mesh.center_mass + body.T[:3, 3]
+                c = body.T[:3, :3] @ _com(body.mesh) + body.T[:3, 3]
                 forces.append((c, np.array([0, 0, -G * body.kg])))
         T_wb = self.T_world_base(v)
         pin.framesForwardKinematics(robot.model, robot.data, np.asarray(q))
@@ -221,9 +316,14 @@ class Carrier:
         return bool(not inside.is_empty and inside.contains(pt)), margin - self.base.tip_margin_m
 
     def footprint_moving(self, v: dict) -> Polygon:
-        bodies = [b for b in self.moving_bodies(v) if b.name == "chassis"]
-        w = bodies[0].mesh.vertices @ bodies[0].T[:3, :3].T + bodies[0].T[:3, 3]
-        return MultiPoint(w[:, :2]).convex_hull
+        """Support polygon: convex hull of the carriage bodies that reach the floor (lowest
+        within 20 mm of the lowest carriage point), e.g. the chassis or the wheels."""
+        world = [b.mesh.vertices @ b.T[:3, :3].T + b.T[:3, 3] for b in self.moving_bodies(v)]
+        if not world:
+            raise ValueError("carrier has no carriage bodies")
+        z0 = min(w[:, 2].min() for w in world)
+        pts = np.vstack([w for w in world if w[:, 2].min() <= z0 + 0.02])
+        return MultiPoint(pts[:, :2]).convex_hull
 
     # --- URDF ---------------------------------------------------------------------------------
 
@@ -233,12 +333,16 @@ class Carrier:
         def geom(p: Primitive) -> str:
             if p.shape == "box":
                 return f'<box size="{p.size[0]} {p.size[1]} {p.size[2]}"/>'
+            if p.shape == "mesh":
+                path = (self.resolve or default_resolve)(p.mesh).resolve().as_posix()
+                sc = UNIT_SCALE[p.units]
+                return f'<mesh filename={quoteattr(path)} scale="{sc} {sc} {sc}"/>'
             return f'<cylinder radius="{p.radius}" length="{p.height}"/>'
 
-        def link(name: str, p: Primitive | None = None, z0: float = 0.0) -> str:
+        def link(name: str, p: Primitive | None = None) -> str:
             if p is None:
                 return f'  <link name="{name}"/>'
-            h = primitive_height(p) / 2 + z0
+            h = 0.0 if p.shape == "mesh" else primitive_height(p) / 2
             g = f'<origin xyz="0 0 {h}"/><geometry>{geom(p)}</geometry>'
             return f'  <link name="{name}"><visual>{g}</visual><collision>{g}</collision></link>'
 
@@ -262,6 +366,13 @@ class Carrier:
             )
 
         lines = ['<robot name="carrier">', link("world")]
+        for p in self.specs:
+            if p.attach == "fixed":
+                xyz, rpy = xyz_rpy(self.T_frame @ pose_to_matrix(p.pose))
+                lines += [
+                    link(f"fixed_{p.name}", p),
+                    joint(f"fixed_{p.name}_joint", "fixed", "world", f"fixed_{p.name}", xyz, rpy),
+                ]
         parent = "world"
         bnd = dict(zip(self.dofs, self.bounds.tolist(), strict=True))
         if self.kind in ("rail", "gantry"):
@@ -281,15 +392,15 @@ class Carrier:
                 joint(f"{n}_joint", kind, parent, f"{n}_link", axis=axis, lim=bnd[n]),
             ]
             parent = f"{n}_link"
-        lines += [link("carriage", self.base.chassis), joint("carriage_fixed", "fixed", parent, "carriage")]
+        lines += [link("carriage"), joint("carriage_fixed", "fixed", parent, "carriage")]
         parent = "carriage"
-        if self.base.riser is not None and self.base.chassis is not None:
-            lines += [
-                link("riser", self.base.riser),
-                joint(
-                    "riser_fixed", "fixed", "carriage", "riser", f"0 0 {primitive_height(self.base.chassis)}"
-                ),
-            ]
+        for p in self.specs:
+            if p.attach == "carriage":
+                xyz, rpy = xyz_rpy(pose_to_matrix(p.pose))
+                lines += [
+                    link(f"body_{p.name}", p),
+                    joint(f"body_{p.name}_joint", "fixed", "carriage", f"body_{p.name}", xyz, rpy),
+                ]
         if "lift" in self.dofs:
             lines += [
                 link("lift_link"),

@@ -123,11 +123,24 @@ class Robot(_Model):
 
 
 class Primitive(_Model):
-    shape: Literal["box", "cylinder"]
+    """One carrier body: a box, a cylinder, or an STL/OBJ/PLY mesh.
+
+    Box and cylinder frames sit at the centre of the bottom face; a mesh keeps its own
+    origin (scaled by ``units``). ``pose`` places the body frame in its parent frame:
+    the carriage frame (``attach="carriage"``, moves with the carrier DOFs) or the carrier
+    frame ``Base.pose`` (``attach="fixed"``, e.g. a rail track or a gantry beam).
+    """
+
+    shape: Literal["box", "cylinder", "mesh"]
     size: Vec3 | None = None  # box: L x W x H (m)
     radius: float | None = Field(default=None, gt=0)
     height: float | None = Field(default=None, gt=0)
     kg: float | None = Field(default=None, ge=0)
+    name: str = Field(default="", max_length=64)
+    attach: Literal["carriage", "fixed"] = "carriage"
+    pose: Pose = Field(default_factory=Pose)
+    mesh: str | None = None  # mesh path, relative to the project folder or the repo
+    units: Literal["m", "mm", "in"] = "m"
 
     @model_validator(mode="after")
     def _dims(self) -> Primitive:
@@ -135,6 +148,8 @@ class Primitive(_Model):
             raise ValueError("box primitive needs 'size'")
         if self.shape == "cylinder" and (self.radius is None or self.height is None):
             raise ValueError("cylinder primitive needs 'radius' and 'height'")
+        if self.shape == "mesh" and not self.mesh:
+            raise ValueError("mesh body needs a 'mesh' file")
         if self.size is not None and any(s <= 0 for s in self.size):
             raise ValueError("primitive size must be positive")
         return self
@@ -183,9 +198,10 @@ class Base(_Model):
       gantry  x,y -> carriage position in the gantry frame (mount usually inverted)
       mobile  x,y,yaw -> chassis pose on the floor (world)
     T_world_base = T_world_carriage(dofs) @ Tz(lift) @ T_mount.
-    ``chassis`` is the moving body (mobile chassis or rail/gantry carriage), bottom at the
-    carriage frame origin; ``riser`` sits on top of it; ``track`` is the static rail body,
-    centred on the travel range.
+    ``bodies`` is the carrier built from simple shapes or meshes (see Primitive). When it is
+    empty, the legacy fields are used instead: ``chassis`` is the moving body (bottom at the
+    carriage frame origin), ``riser`` sits on top of it, and ``track`` is the static rail
+    body, centred on the travel range (core.carrier.body_list converts them).
     """
 
     mode: Literal["static", "movable"] = "static"
@@ -194,6 +210,7 @@ class Base(_Model):
     chassis: Primitive | None = None
     riser: Primitive | None = None
     track: Primitive | None = None
+    bodies: list[Primitive] = Field(default_factory=list, max_length=64)
     joints: CarrierJoints = Field(default_factory=CarrierJoints)
     T_mount: Pose = Field(default_factory=Pose)
     keepouts: list[Keepout] = Field(default_factory=list)
@@ -215,8 +232,12 @@ class Base(_Model):
             missing = [k for k in need if getattr(j, k) is None]
             if missing:
                 raise ValueError(f"{self.carrier} needs travel ranges for {missing}")
-        if self.tip_over and (self.chassis is None or self.chassis.kg is None):
-            raise ValueError("tip-over check needs the chassis mass")
+        if self.tip_over:
+            moving = [b for b in self.bodies if b.attach == "carriage"] or [
+                b for b in (self.chassis, self.riser) if b is not None
+            ]
+            if not any(b.kg for b in moving):
+                raise ValueError("tip-over check needs the chassis mass")
         return self
 
 

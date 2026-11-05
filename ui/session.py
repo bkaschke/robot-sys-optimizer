@@ -89,12 +89,17 @@ class Session:
 
     def sites(self):
         """Planner search space: a carrier (movable mode) or one free floor base (static)."""
-        from core.carrier import Carrier
         from opt.sites import CarrierSites
 
         if self.base.mode != "movable" or self.part is None:
             return None
-        return CarrierSites(Carrier(self.base, self.T_world_base), self.part_mesh(), self.part.T_world_part)
+        return CarrierSites(self.carrier(), self.part_mesh(), self.part.T_world_part)
+
+    def carrier(self):
+        """core.carrier.Carrier for the current base (mesh bodies resolved like other assets)."""
+        from core.carrier import Carrier
+
+        return Carrier(self.base, self.T_world_base, resolve=self.resolve)
 
     def set_tool(self, ee: schema.EndEffector | None) -> None:
         """Select a tool and rebuild its geometry model (meshes are loaded once here)."""

@@ -1,7 +1,9 @@
-"""Cell tab → Base mode (M9): static or movable base, carrier built from primitives,
-standoffs, keep-outs, localization and tip-over settings, DOF sliders to jog the carrier.
+"""External Axis tab (M9 + carrier builder): static or movable base, the carrier built from
+boxes, cylinders and meshes (ui.carrier_bodies), the robot mount, standoffs, keep-outs,
+localization and tip-over settings, and DOF sliders to jog the carrier.
 
-Edits are collected in widgets and committed with "Apply" (validated as schema.Base).
+Axis-type and safety fields are committed with "Apply base settings"; body and mount edits
+apply immediately. Both go through ``commit`` (validated as schema.Base).
 Scene: carrier bodies under /cell/carrier, standoff shells (min red, preferred amber) and
 keep-out boxes on the floor.
 """
@@ -14,10 +16,11 @@ import numpy as np
 import viser
 from pydantic import ValidationError
 
-from core.carrier import Carrier
+from core.carrier import migrate
 from core.schema import Base, CarrierJoints, Keepout, Pose, Primitive, Standoffs
 from core.standoff import Zones, footprint
-from core.transforms import matrix_to_wxyz
+from core.transforms import make_T, matrix_to_wxyz
+from ui.carrier_bodies import BodyEditor
 from ui.session import Session
 from ui.widgets import notify
 
@@ -56,6 +59,7 @@ DEFAULTS = {
         localization_deg=1.0,
     ),
 }
+BODY_COLOR, FIXED_COLOR, PICKED_COLOR = (120, 130, 150), (150, 140, 120), (90, 140, 220)
 
 
 def _mm(v) -> tuple:
@@ -69,9 +73,12 @@ class CarrierPanel:
         self.set_base = set_base
         self._handles: list = []
         self._dof: dict = {}
+        self._dof_sig = None
         self._busy = False
+        self.bodies: list[Primitive] = []
+        self.mount_pose = Pose()
         gui = server.gui
-        with gui.add_folder("Base mode", expand_by_default=False):
+        with gui.add_folder("Axis type"):
             self.mode = gui.add_dropdown("Mode", ("static", "movable"))
             self.kind = gui.add_dropdown("Carrier", ("mobile", "rail", "gantry"))
             self.defaults = gui.add_button("Load carrier defaults")
@@ -80,25 +87,25 @@ class CarrierPanel:
             self.tx = gui.add_vector2("Travel x / s (mm)", (-3000.0, 3000.0), step=10.0)
             self.ty = gui.add_vector2("Travel y (mm)", (-1000.0, 1000.0), step=10.0)
             self.tyaw = gui.add_vector2("Yaw range (deg)", (-180.0, 180.0), step=5.0)
-            self.chassis = gui.add_vector3("Chassis/carriage L W H (mm)", (1200.0, 800.0, 400.0), step=10.0)
-            self.chassis_kg = gui.add_number("Chassis mass (kg, 0 = unknown)", 0.0, min=0.0, step=10.0)
-            self.riser = gui.add_vector2("Riser radius / height (mm)", (150.0, 300.0), step=10.0)
-            self.track = gui.add_vector3("Rail track L W H (mm)", (7000.0, 300.0, 100.0), step=10.0)
-            self.mount_xyz = gui.add_vector3("Mount xyz (mm)", (200.0, 0.0, 700.0), step=10.0)
-            self.mount_rpy = gui.add_vector3("Mount rpy (deg)", (0.0, 0.0, 0.0), step=5.0)
+            self.lift = gui.add_vector2("Lift range (mm, 0 0 = none)", (0.0, 0.0), step=10.0)
+        self.editor = BodyEditor(server, self)
+        with gui.add_folder("Standoff and safety", expand_by_default=False):
             self.so = gui.add_vector2("Part standoff min / preferred (mm)", (300.0, 400.0), step=10.0)
             self.env = gui.add_number("Keep-out clearance (mm)", 100.0, min=0.0, step=10.0)
             self.keepouts = gui.add_text("Keep-outs (mm)", "", hint="x0,y0,x1,y1; x0,y0,x1,y1 (floor boxes)")
             self.loc = gui.add_vector2("Localization ±mm / ±deg (mobile)", (10.0, 1.0), step=1.0)
             self.tip = gui.add_checkbox("Tip-over check (mobile, needs mass)", False)
-            self.apply = gui.add_button("Apply base settings")
-            self.dof_folder = gui.add_folder("Carrier position")
-            self.info = gui.add_markdown("")
+        self.apply = gui.add_button("Apply base settings", color="green")
+        self.dof_folder = gui.add_folder("Carrier position")
+        self.info = gui.add_markdown("")
         self.apply.on_click(lambda e: self.commit(e))
+        # aliases kept for scripts/tests written against the M9 panel
+        self.mount_xyz, self.mount_rpy = self.editor.mount_xyz, self.editor.mount_rpy
 
         @self.defaults.on_click
         def _(e) -> None:
             self.load(DEFAULTS[self.kind.value].model_copy(update={"mode": "movable"}))
+            self.commit(e)
 
         self.load(session.base)
         self.refresh()
@@ -106,6 +113,7 @@ class CarrierPanel:
     # --- widgets <-> schema ------------------------------------------------------------------
 
     def load(self, b: Base) -> None:
+        b = migrate(b)
         self._busy = True
         try:
             self.mode.value = b.mode
@@ -120,15 +128,7 @@ class CarrierPanel:
                 self.ty.value = _mm(j.y)
             if j.yaw_deg:
                 self.tyaw.value = tuple(j.yaw_deg)
-            if b.chassis is not None and b.chassis.shape == "box":
-                self.chassis.value = _mm(b.chassis.size)
-                self.chassis_kg.value = b.chassis.kg or 0.0
-            if b.riser is not None and b.riser.shape == "cylinder":
-                self.riser.value = _mm((b.riser.radius, b.riser.height))
-            if b.track is not None and b.track.shape == "box":
-                self.track.value = _mm(b.track.size)
-            self.mount_xyz.value = _mm(b.T_mount.xyz)
-            self.mount_rpy.value = tuple(float(np.degrees(x)) for x in b.T_mount.rpy)
+            self.lift.value = _mm(j.lift) if j.lift else (0.0, 0.0)
             so = b.standoff_m
             self.so.value = _mm((so.carrier_part_min, so.carrier_part_preferred or so.carrier_part_min))
             self.env.value = so.carrier_env_min * 1000
@@ -137,8 +137,12 @@ class CarrierPanel:
             )
             self.loc.value = (b.localization_m * 1000, b.localization_deg)
             self.tip.value = b.tip_over
+            self.bodies = list(b.bodies)
+            self.mount_pose = b.T_mount
+            self._dof_sig = None  # next refresh re-reads the slider values from the base pose
         finally:
             self._busy = False
+        self.editor.sync()
 
     def collect(self) -> Base:
         kind = self.kind.value
@@ -147,14 +151,13 @@ class CarrierPanel:
         for chunk in filter(None, (c.strip() for c in self.keepouts.value.split(";"))):
             x0, y0, x1, y1 = (float(v) / 1000 for v in chunk.split(","))
             kos.append(Keepout(min_xy=(min(x0, x1), min(y0, y1)), max_xy=(max(x0, x1), max(y0, y1))))
-        L, W, H = (v / 1000 for v in self.chassis.value)
-        kg = self.chassis_kg.value or None
-        r, h = (v / 1000 for v in self.riser.value)
         smin, spref = (v / 1000 for v in self.so.value)
+        lift = tuple(v / 1000 for v in self.lift.value)
         joints = CarrierJoints(
             x=tuple(v / 1000 for v in self.tx.value),
             y=tuple(v / 1000 for v in self.ty.value) if kind in ("mobile", "gantry") else None,
             yaw_deg=tuple(self.tyaw.value) if kind == "mobile" else None,
+            lift=lift if lift != (0.0, 0.0) else None,
         )
         return Base(
             mode="movable" if movable else "static",
@@ -163,16 +166,9 @@ class CarrierPanel:
                 xyz=tuple(v / 1000 for v in self.frame_xyz.value),
                 rpy=(0, 0, np.radians(self.frame_yaw.value)),
             ),
-            chassis=Primitive(shape="box", size=(L, W, H), kg=kg),
-            riser=Primitive(shape="cylinder", radius=r, height=h) if r > 0 and h > 0 else None,
-            track=Primitive(shape="box", size=tuple(v / 1000 for v in self.track.value))
-            if kind == "rail"
-            else None,
+            bodies=self.bodies,
             joints=joints,
-            T_mount=Pose(
-                xyz=tuple(v / 1000 for v in self.mount_xyz.value),
-                rpy=tuple(np.radians(v) for v in self.mount_rpy.value),
-            ),
+            T_mount=self.mount_pose,
             keepouts=kos,
             standoff_m=Standoffs(
                 carrier_part_min=smin, carrier_part_preferred=spref, carrier_env_min=self.env.value / 1000
@@ -185,7 +181,11 @@ class CarrierPanel:
     def commit(self, event=None) -> bool:
         try:
             base = self.collect()
-        except (ValueError, ValidationError) as err:
+            if base.mode == "movable":
+                c = self._carrier(base)
+                for k in range(len(c.specs)):
+                    c.mesh(k)  # fail here (not mid-plan) on a missing or broken mesh file
+        except (ValueError, OSError, ValidationError) as err:
             msg = err.errors()[0]["msg"] if isinstance(err, ValidationError) else str(err)
             notify(event, "Invalid base settings", msg)
             return False
@@ -193,29 +193,38 @@ class CarrierPanel:
         self.refresh()
         return True
 
+    def _carrier(self, base: Base | None = None):
+        from core.carrier import Carrier
+
+        return Carrier(base or self.s.base, self.s.T_world_base, resolve=self.s.resolve)
+
     # --- DOF sliders and drawing ---------------------------------------------------------------
 
     def refresh(self) -> None:
-        for h in self._dof.values():
-            h.remove()
-        self._dof = {}
         b = self.s.base
-        if b.mode == "movable":
-            c = Carrier(b, self.s.T_world_base)
-            v0 = c.values_for_base(self.s.T_world_base)
-            with self.dof_folder:
-                for n, (lo, hi) in zip(c.dofs, c.bounds, strict=True):
-                    unit = "deg" if n == "yaw" else "mm"
-                    conv = np.degrees if n == "yaw" else (lambda x: x * 1000)
-                    sl = self.server.gui.add_slider(
-                        f"{n} ({unit})",
-                        float(conv(lo)),
-                        float(conv(hi)),
-                        1.0 if n == "yaw" else 10.0,
-                        float(conv(v0.get(n, lo))),
-                    )
-                    sl.on_update(lambda e: self._jog())
-                    self._dof[n] = sl
+        c = self._carrier() if b.mode == "movable" else None
+        sig = None if c is None else (tuple(c.dofs), c.bounds.round(9).tobytes())
+        if sig != self._dof_sig:  # rebuild sliders only when the DOFs or ranges change
+            v0 = c.values_for_base(self.s.T_world_base) if c is not None else {}
+            for h in self._dof.values():
+                h.remove()
+            self._dof = {}
+            self._dof_sig = sig
+            if c is not None:
+                with self.dof_folder:
+                    for n, (lo, hi) in zip(c.dofs, c.bounds, strict=True):
+                        unit = "deg" if n == "yaw" else "mm"
+                        conv = np.degrees if n == "yaw" else (lambda x: x * 1000)
+                        sl = self.server.gui.add_slider(
+                            f"{n} ({unit})",
+                            float(conv(lo)),
+                            float(conv(hi)),
+                            1.0 if n == "yaw" else 10.0,
+                            float(conv(v0.get(n, lo))),
+                        )
+                        sl.on_update(lambda e: self._jog())
+                        self._dof[n] = sl
+        if c is not None:
             self._jog()
         else:
             self.draw()
@@ -223,10 +232,22 @@ class CarrierPanel:
     def values(self) -> dict:
         return {n: (np.radians(sl.value) if n == "yaw" else sl.value / 1000) for n, sl in self._dof.items()}
 
+    def parent_T(self, attach: str) -> np.ndarray:
+        """World pose of a body's parent frame: carriage, fixed (carrier frame) or the mount
+        parent (carriage + lift)."""
+        c = self._carrier()
+        if c.kind == "static":
+            return np.eye(4)
+        if attach == "fixed":
+            return c.T_frame
+        v = c.clip(self.values())
+        T = c.T_world_carriage(v)
+        return T @ make_T(p=(0, 0, v.get("lift", 0.0))) if attach == "mount" else T
+
     def _jog(self) -> None:
         if self._busy or self.s.base.mode != "movable":
             return
-        c = Carrier(self.s.base, self.s.T_world_base)
+        c = self._carrier()
         self.set_base(c.T_world_base(c.clip(self.values())))
         self.draw()
 
@@ -239,28 +260,33 @@ class CarrierPanel:
         if self.s.part is not None:
             zones = Zones(b, footprint(self.s.part_mesh(), self.s.part.T_world_part))
         if b.mode == "movable":
-            c = Carrier(b, self.s.T_world_base)
+            c = self._carrier()
             v = c.clip(self.values())
+            picked = self.editor.pick.value
             for body in c.moving_bodies(v) + c.static_bodies():
+                fixed = any(p.name == body.name and p.attach == "fixed" for p in c.specs)
+                color = PICKED_COLOR if body.name == picked else (FIXED_COLOR if fixed else BODY_COLOR)
                 self._handles.append(
                     self.server.scene.add_mesh_simple(
                         f"{ROOT}/{body.name}",
                         body.mesh.vertices,
                         body.mesh.faces,
-                        color=(120, 130, 150),
+                        color=color,
                         opacity=0.6,
                         wxyz=matrix_to_wxyz(body.T[:3, :3]),
                         position=body.T[:3, 3],
                     )
                 )
+            fp = c.footprint(v)
             if zones is not None:
-                fp = c.footprint(v)
                 zc = zones.check(fp) if fp is not None else None
                 state = "ok" if zc is None or zc.ok else f"violates {zc.reason}"
                 dist = f"{zc.part_distance * 1000:.0f} mm" if zc is not None else "n/a"
                 self.info.content = f"Carrier footprint to part: **{dist}** ({state})"
+            else:
+                self.info.content = f"{len(c.specs)} carrier bodies"
         else:
-            self.info.content = "_Static base: the planner places one base (k = 1)._"
+            self.info.content = "_Static base: the planner places one base (k = 1). Set Mode to movable._"
         if zones is not None:
             for name, d, color in (("min", zones.min, (220, 40, 40)), ("pref", zones.pref, (240, 170, 20))):
                 ring = zones.shell(d) if d > 0 else None
@@ -288,3 +314,4 @@ class CarrierPanel:
                     opacity=0.35,
                 )
             )
+        self.editor.place_gizmos()

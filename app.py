@@ -20,7 +20,7 @@ from ui.targets_ui import TargetsTab
 from ui.tool_opt import ToolOptPanel
 from ui.tool_setup import ToolSetupTab
 
-TABS = ("Tool Setup", "Cell", "Targets", "Optimize", "Results")
+TABS = ("Tool Setup", "Cell", "External Axis", "Targets", "Optimize", "Results")
 UR_NOTICE = (
     "_UR robot models © 2023 Universal Robots A/S. Use hereof is subject to Universal Robots A/S' "
     "Terms and Conditions for Use of Graphical Documentation._"
@@ -72,6 +72,7 @@ def build_app(server: viser.ViserServer, session: Session | None = None, dark: b
     tab_handles = {name: tabs.add_tab(name) for name in TABS}
     with tab_handles["Cell"]:
         cell = CellTab(server, session)
+    with tab_handles["External Axis"]:
         carrier = CarrierPanel(server, session, set_base=cell.set_base)
     with tab_handles["Tool Setup"]:
         tool = ToolSetupTab(server, session)
