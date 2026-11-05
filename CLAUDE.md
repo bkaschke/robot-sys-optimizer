@@ -8,15 +8,15 @@ Full spec: `docs/PROJECT_PLAN.md`. It is the source of truth for scope and miles
 
 ## Status
 
-- **Current milestone:** M1 Robot kinematics (next). M0 is done on branch `m0-skeleton`.
-- **Blocker for M1:** Pinocchio (`pin`) and Coal have **no Windows wheels on PyPI**. Choose conda-forge (Miniforge) or WSL before starting M1.
+- **Current milestone:** M2 Viewer (next). M0 and M1 are done and merged to `main`.
+- **Known perf item for M6:** UR analytic IK takes ~0.8 ms per pose in pure Python. Vectorize it (batch numpy) or JIT it before building reachability maps.
 - **Branch policy:** one branch per milestone (`m0-skeleton`, `m1-kinematics`, …); merge to `main` when its "done when" check passes.
 - **Last updated:** 2026-11-04
 
 | Milestone | State | Done when |
 | --- | --- | --- |
 | M0 Skeleton | **done** 2026-11-04 | `python app.py` serves the page; `pytest` passes |
-| M1 Robot kinematics | todo | IK round-trip (q → FK → IK → FK) within 1e-6 m on 10,000 samples, all branches found |
+| M1 Robot kinematics | **done** 2026-11-04 (worst 4.9e-10 m) | IK round-trip (q → FK → IK → FK) within 1e-6 m on 10,000 samples, all branches found |
 | M2 Viewer | todo | Viewer robot pose matches Pinocchio FK for the same q |
 | M3 Tool Setup page | todo | Changing L stretches the collision capsule and moves the TCP correctly |
 | M4 Targets | todo | 10 mm grid on the curved panel has normals within 1° of analytic |
@@ -73,8 +73,9 @@ Viser (+ `yourdfpy`), Pinocchio (FK/Jacobian/RNEA), UR analytic IK (OPW later), 
 
 ```
 app.py            Viser entry point (build_app(server) is testable without blocking)
+environment.yml   conda env `rso` (all dependencies)
 docs/             PROJECT_PLAN.md (the spec)
-scripts/          make_golden_parts.py → assets/parts/*.stl
+scripts/          make_golden_parts.py → assets/parts/*.stl; import_ur_description.py
 ui/               Viser tabs: tool_setup, targets_ui, cell, optimize, results
 core/             schema, golden_parts, robot, ik/{ur,opw,numeric}, collision, tool,
                   process, carrier, standoff, targets, payload
@@ -97,19 +98,41 @@ The STLs in `assets/parts/` are generated from these; regenerate them if the bui
 
 ## Environment
 
-- Windows 10, Git Bash or PowerShell. Python **3.12** venv in `.venv/`. The system default 3.14 is too new for the robotics wheels.
-- `pyproject.toml` holds the ruff and pytest config only. Dependencies are in `requirements*.txt`. Packages (`core`, `opt`, `ui`) are imported from the repo root, not installed.
-- Pinocchio and Coal are not pip-installable on Windows (see Status). Decide on the environment at the start of M1 and record it here.
+- Windows 10, Git Bash or PowerShell. **Miniforge** is at `C:\Users\Ben\miniforge3`, not on PATH. The conda env **`rso`** (Python 3.12) is defined in `environment.yml`, the single source of dependencies.
+- Pinocchio and Coal come from conda-forge; there are no Windows wheels on PyPI. Pip-only packages (viser, yourdfpy, pydantic, trimesh, xacro) go in the `pip:` section of `environment.yml`.
+- **BLAS must be OpenBLAS.** The conda-forge MKL build kills the process (0xc06d007f) on any numpy matmul on this machine. `environment.yml` pins `libblas=*=*openblas`.
+- The old `.venv/` from M0 is obsolete (gitignored); do not use it.
+- `pyproject.toml` holds the ruff and pytest config only. Packages (`core`, `opt`, `ui`) are imported from the repo root, not installed.
 
 ## Commands
 
+Git Bash paths (in PowerShell use `$env:USERPROFILE\miniforge3\...`):
+
 ```
-py -3.12 -m venv .venv && .venv/Scripts/pip install -r requirements-dev.txt   # setup
-.venv/Scripts/python app.py [--port 8080]       # serve the GUI → http://localhost:8080
-.venv/Scripts/python -m pytest -q               # tests
-.venv/Scripts/ruff check . && .venv/Scripts/ruff format --check .   # lint + format
-.venv/Scripts/python scripts/make_golden_parts.py   # regenerate assets/parts/*.stl
+PY=/c/Users/Ben/miniforge3/envs/rso/python.exe
+RUFF=/c/Users/Ben/miniforge3/envs/rso/Library/bin/ruff.exe
+/c/Users/Ben/miniforge3/Scripts/conda.exe env update -n rso -f environment.yml --prune   # setup / sync
+$PY app.py [--port 8080]                  # serve the GUI → http://localhost:8080
+$PY -m pytest -q                          # tests (~35 s; 10k-sample IK round trip dominates)
+$RUFF check . && $RUFF format --check .   # lint + format
+$PY scripts/make_golden_parts.py          # regenerate assets/parts/*.stl
+$PY scripts/import_ur_description.py <clone> ur20   # re-import a UR model (see the script docstring)
 ```
+
+## Kinematics API (M1)
+
+- `core.robot.Robot.from_registry("ur20")` provides `fk(q)` → T_base_flange (4×4, in `base_link`), `frame_pose(q, link)`, `jacobian(q, offset_flange)` (6×n, rows lin/ang, base-aligned, at a point fixed to the flange), `manipulability`, `gravity_torques(q)`, and `static_torques(q, payload_kg, payload_com, wrench, wrench_point)`.
+- Sign convention: `wrench` is what the tool exerts **on** the environment (base-aligned), so τ = g(q) + J_comᵀ(−m·g) + Jᵀ·wrench.
+- Gravity defaults to −z in `base_link` (floor mount). Pass `gravity_base` for wall or ceiling mounts.
+- `core.ik.make_ik(robot)` dispatches on `spec.ik`. Every solver has `solve(T) → (k, 6)`. Analytic results are wrapped to (−π, π] with one row per branch (≤ 8). `expand_to_limits()` adds the ±2π copies a joint range allows.
+- `URAnalyticIK` measures the URDF↔DH frame offsets at construction; nothing UR-specific is hard-coded beyond the DH table in `spec.yaml`. `NumericIK` is multi-start DLS on Pinocchio and works for any chain.
+- The URDF rounds π/2 to 9 digits, so it differs from exact DH by about 1e-10. Joint-space comparisons near singularities therefore need about 1e-4 rad tolerance, while pose comparisons hold to about 1e-9.
+
+## Robot registry: UR20
+
+- `assets/robots/ur20/` contains `ur20.urdf` (generated from UR's ROS 2 description with xacro, mesh paths made relative), meshes, `spec.yaml` (DH, rated 20 kg, joint torques 738/738/433/107/107/107 N·m) and both licenses.
+- Wrist-moment limits are **null** on purpose (not in the sources we have), so `payload.is_complete()` is False and payload-diagram checks must refuse until they are filled in from the datasheet.
+- **Mesh license:** UR's "Terms and Conditions for Use of Graphical Documentation" (`meshes/LICENSE.txt`). It allows simulation and visualization use. Redistribution must include that file, and public displays should carry "© 2023 Universal Robots A/S. Use hereof is subject to Universal Robots A/S' Terms and Conditions for Use of Graphical Documentation." The URDF and xacro source are BSD-3.
 
 ## Working conventions
 
@@ -123,7 +146,7 @@ py -3.12 -m venv .venv && .venv/Scripts/pip install -r requirements-dev.txt   # 
 - 2026-11-04: Viser chosen over a custom Three.js frontend (plan § Architecture).
 - 2026-11-04: Repo layout follows the plan (packages at the repo root, not `src/`). The plan moved to `docs/PROJECT_PLAN.md`.
 - 2026-11-04: No TypeScript type generation and no custom WebSocket layer. Viser handles UI transport.
-- 2026-11-04: Python 3.12 venv.
+- 2026-11-04: Python 3.12. M1 switched from a venv to the Miniforge conda env `rso` (the user's choice over WSL), with OpenBLAS instead of MKL.
 - 2026-11-04: Ruflo is used lightly (memory and routing) for M0–M2. Revisit agent swarms at M5+.
 - 2026-11-04: Git: commit locally; **do not push** to `origin` unless the user asks.
 - 2026-11-04: The user approved fetching the UR20 description from Universal Robots' ROS 2 repo (BSD-3) in M1. Convert xacro → URDF with the pip `xacro` package.
