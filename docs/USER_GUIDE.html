@@ -27,7 +27,7 @@ blockquote{margin:12px 0;padding:4px 14px;border-left:3px solid var(--accent);co
 main{margin-left:0;padding:16px}}
 @media print{nav{display:none}main{margin:0;max-width:none}a{color:inherit}}
 </style></head><body>
-<nav><div class='title'>Robot Cell &amp; End-Effector Optimizer: User Guide</div><a class="h2" href="#1-quickstart-5-minutes">1. Quickstart (5 minutes)</a><a class="h2" href="#2-set-up-on-a-new-computer">2. Set up on a new computer</a><a class="h3" href="#21-prerequisites">2.1 Prerequisites</a><a class="h3" href="#22-clone-and-create-the-environment">2.2 Clone and create the environment</a><a class="h3" href="#23-check-the-installation">2.3 Check the installation</a><a class="h3" href="#24-first-launch">2.4 First launch</a><a class="h2" href="#3-how-it-works-concepts-and-conventions">3. How it works: concepts and conventions</a><a class="h3" href="#31-frames-and-units">3.1 Frames and units</a><a class="h3" href="#32-target-tolerances-per-group">3.2 Target tolerances (per group)</a><a class="h3" href="#33-the-parametric-end-effector">3.3 The parametric end effector</a><a class="h3" href="#34-what-feasible-means">3.4 What &quot;feasible&quot; means</a><a class="h3" href="#35-the-optimizer-in-three-layers">3.5 The optimizer in three layers</a><a class="h2" href="#4-tools-and-features-tab-by-tab">4. Tools and features, tab by tab</a><a class="h3" href="#top-of-the-panel">Top of the panel</a><a class="h3" href="#tool-setup-tab">Tool Setup tab</a><a class="h3" href="#cell-tab">Cell tab</a><a class="h3" href="#external-axis-tab">External Axis tab</a><a class="h3" href="#targets-tab">Targets tab</a><a class="h3" href="#optimize-tab">Optimize tab</a><a class="h3" href="#results-tab">Results tab</a><a class="h2" href="#5-worked-examples">5. Worked examples</a><a class="h3" href="#example-a-sand-a-flat-plate-from-one-base-static">Example A: sand a flat plate from one base (static)</a><a class="h3" href="#example-b-a-long-rail-part-with-a-7th-axis-rail-carrier">Example B: a long rail part with a 7th-axis rail carrier</a><a class="h3" href="#example-b2-design-a-mobile-robot-from-simple-shapes">Example B2: design a mobile robot from simple shapes</a><a class="h3" href="#example-c-the-shortest-probe-for-a-deep-hole">Example C: the shortest probe for a deep hole</a><a class="h3" href="#example-d-your-own-robot-cell">Example D: your own robot cell</a><a class="h2" href="#6-files-folders-and-formats">6. Files, folders and formats</a><a class="h2" href="#7-using-it-from-python-headless">7. Using it from Python (headless)</a><a class="h2" href="#8-troubleshooting-and-limitations">8. Troubleshooting and limitations</a><a class="h2" href="#9-for-developers">9. For developers</a><button id='theme' type='button'>Dark mode</button></nav>
+<nav><div class='title'>Robot Cell &amp; End-Effector Optimizer: User Guide</div><a class="h2" href="#1-quickstart-5-minutes">1. Quickstart (5 minutes)</a><a class="h2" href="#2-set-up-on-a-new-computer">2. Set up on a new computer</a><a class="h3" href="#21-prerequisites">2.1 Prerequisites</a><a class="h3" href="#22-clone-and-create-the-environment">2.2 Clone and create the environment</a><a class="h3" href="#23-check-the-installation">2.3 Check the installation</a><a class="h3" href="#24-first-launch">2.4 First launch</a><a class="h2" href="#3-how-it-works-concepts-and-conventions">3. How it works: concepts and conventions</a><a class="h3" href="#31-frames-and-units">3.1 Frames and units</a><a class="h3" href="#32-target-tolerances-per-group">3.2 Target tolerances (per group)</a><a class="h3" href="#33-the-parametric-end-effector">3.3 The parametric end effector</a><a class="h3" href="#34-what-feasible-means">3.4 What &quot;feasible&quot; means</a><a class="h3" href="#35-the-optimizer-in-three-layers">3.5 The optimizer in three layers</a><a class="h2" href="#4-tools-and-features-tab-by-tab">4. Tools and features, tab by tab</a><a class="h3" href="#top-of-the-panel">Top of the panel</a><a class="h3" href="#tool-setup-tab">Tool Setup tab</a><a class="h3" href="#cell-tab">Cell tab</a><a class="h3" href="#external-axis-tab">External Axis tab</a><a class="h3" href="#targets-tab">Targets tab</a><a class="h3" href="#optimize-tab">Optimize tab</a><a class="h3" href="#joint-configuration-zones">Joint-configuration zones</a><a class="h3" href="#results-tab">Results tab</a><a class="h2" href="#5-worked-examples">5. Worked examples</a><a class="h3" href="#example-a-sand-a-flat-plate-from-one-base-static">Example A: sand a flat plate from one base (static)</a><a class="h3" href="#example-b-a-long-rail-part-with-a-7th-axis-rail-carrier">Example B: a long rail part with a 7th-axis rail carrier</a><a class="h3" href="#example-b2-design-a-mobile-robot-from-simple-shapes">Example B2: design a mobile robot from simple shapes</a><a class="h3" href="#example-b3-avoid-joint-configuration-changes-on-the-rail">Example B3: avoid joint-configuration changes on the rail</a><a class="h3" href="#example-c-the-shortest-probe-for-a-deep-hole">Example C: the shortest probe for a deep hole</a><a class="h3" href="#example-d-your-own-robot-cell">Example D: your own robot cell</a><a class="h2" href="#6-files-folders-and-formats">6. Files, folders and formats</a><a class="h2" href="#7-using-it-from-python-headless">7. Using it from Python (headless)</a><a class="h2" href="#8-troubleshooting-and-limitations">8. Troubleshooting and limitations</a><a class="h2" href="#9-for-developers">9. For developers</a><button id='theme' type='button'>Dark mode</button></nav>
 <main>
 <h1 id="robot-cell--end-effector-optimizer-user-guide">Robot Cell &amp; End-Effector Optimizer: User Guide</h1>
 <p>A browser-based tool that answers two questions for a robotic process (sanding, scanning, grinding, gripping, spraying):</p>
@@ -330,7 +330,7 @@ $PY app.py --port 8080 [--dark]
 </tr>
 <tr>
 <td><strong>Display</strong></td>
-<td>Colour points by <em>group</em> or <em>feasibility</em>; show normals; <strong>Preview tool at point</strong> draws a see-through tool aimed into the surface at any point.</td>
+<td>Colour points by <em>group</em>, <em>feasibility</em>, or the selected solution's <em>zone</em> / <em>configuration</em>; show normals; <strong>Preview tool at point</strong> draws a see-through tool aimed into the surface at any point.</td>
 </tr>
 </tbody>
 </table>
@@ -354,7 +354,7 @@ $PY app.py --port 8080 [--dark]
 </tr>
 <tr>
 <td><strong>Station planner</strong></td>
-<td><strong>Plan stations</strong> finds the fewest stations that reach every point, within <em>Max stations</em> (static mode = 1). Each solution goes to the Results tab as soon as it finishes. <em>Candidate grid</em> sets the search resolution; <em>Refine</em> turns the exact fine-tuning on or off.</td>
+<td><strong>Plan stations</strong> finds the fewest stations that reach every point, within <em>Max stations</em> (static mode = 1). Each solution goes to the Results tab as soon as it finishes. <em>Candidate grid</em> sets the search resolution; <em>Refine</em> turns the exact fine-tuning on or off. <em>Joint configuration</em> = <strong>zones (minimize changes)</strong> groups each stop's points into zones that keep one arm configuration and puts each zone in path order (see <em>Joint-configuration zones</em> below); <em>Cost per config change</em> sets how much a change costs (a stop costs 5).</td>
 </tr>
 <tr>
 <td><strong>Tool geometry</strong></td>
@@ -362,10 +362,19 @@ $PY app.py --port 8080 [--dark]
 </tr>
 </tbody>
 </table>
+<h3 id="joint-configuration-zones">Joint-configuration zones</h3>
+<p>A UR arm can reach most poses in up to 8 ways: <strong>shoulder</strong> (S), <strong>elbow</strong> (E) and <strong>wrist</strong> (W) each have two branches, written as a label like <code>S-E+W-</code>. Moving from one branch to another needs a big reconfiguration motion, which you rarely want in the middle of a sanding pass. With <em>Joint configuration</em> = <strong>zones (minimize changes)</strong>, the planner:</p>
+<ol>
+<li>checks, for every point, which configurations can do it from its stop;</li>
+<li>picks the <strong>fewest configurations</strong> that cover the stop's points (exact), each point using its best solution in one of them; a stop can therefore have more than one <strong>zone</strong>;</li>
+<li>orders each zone's points as a serpentine <strong>path</strong> and picks joint values (±360° copies of the wrist joints) that keep the path continuous;</li>
+<li>counts <strong>configuration changes</strong> = extra zones at a stop + remaining jumps of joint 4 or 6 above 180° between neighbouring points, and adds <em>Cost per config change</em> × changes to the cost J. Because the planner also offers plans with more stops, a plan with one more stop and no changes can win.</li>
+</ol>
+<p>It also re-runs the tip-over and localization checks for the chosen solutions. It is about 3× slower than <em>best per point</em>. The Results tab lists the zones (<code>S1·Z1 S-E+W- 6 pts</code>), draws each zone's path as a thick coloured line, and <strong>Targets → Display → Color points by</strong> <code>zone</code> or <code>configuration</code> colours the points of the selected solution. The CSV and the HTML report list zone, path position and configuration per point. The Tool geometry optimizer uses the same setting.</p>
 <h3 id="results-tab">Results tab</h3>
 <ul>
 <li>
-<p><strong>Solution</strong>: the ranked list (best cost first). It shows a summary, the cost breakdown bars and the station list.</p>
+<p><strong>Solution</strong>: the ranked list (best cost first). It shows a summary (with the zones and configuration changes when zoning is on), the cost breakdown bars and the station list.</p>
 </li>
 <li>
 <p><strong>Scene</strong>: coloured station markers, <strong>lines to served points</strong>, and <strong>ghost robots</strong> posed at a real solution.</p>
@@ -413,6 +422,12 @@ $PY app.py --port 8080 [--dark]
 <li><strong>Add box</strong> → a battery or cabinet, or <strong>Add STL/OBJ/PLY body</strong> for a CAD model of your AMR (set <em>Mesh units</em> first).</li>
 <li><em>Mount on body</em> <code>riser</code> (or your column) → <strong>Snap robot to top of body</strong>.</li>
 <li>Give the chassis a <em>Mass</em>, tick <em>Tip-over check</em>, <strong>Apply base settings</strong>, then Optimize → <strong>Plan stations</strong>.</li>
+</ol>
+<h3 id="example-b3-avoid-joint-configuration-changes-on-the-rail">Example B3: avoid joint-configuration changes on the rail</h3>
+<ol>
+<li><strong>Project</strong> → <em>Examples</em> <code>rail_long_part</code> → <strong>Open example</strong>. Targets: select the face pointing to the wall (y+) and generate points with <em>Spacing</em> <code>250</code>.</li>
+<li>Optimize → <em>Station planner</em>: <em>Joint configuration</em> <code>best per point</code> → <strong>Plan stations</strong>. Targets → <em>Color points by</em> <code>configuration</code>: stops can mix two configurations, meaning the arm would reconfigure mid-pass (in the test version of this task every stop did).</li>
+<li>Switch to <code>zones (minimize changes)</code> → <strong>Plan stations</strong> again. The Results summary now lists the zones and the number of configuration changes (0 in the test version of this task, at almost the same cost), and the zone paths are drawn in the scene.</li>
 </ol>
 <h3 id="example-c-the-shortest-probe-for-a-deep-hole">Example C: the shortest probe for a deep hole</h3>
 <ol>
@@ -496,7 +511,7 @@ $PY app.py --port 8080 [--dark]
 <p><strong>Project file</strong> (<code>project.json</code>): the robot and base pose, base mode and carrier (its <code>bodies</code>: shape, size or mesh file, pose, attachment, mass), tool, part, targets and groups, optimizer settings, and the saved solutions. Older projects with <code>chassis</code> / <code>riser</code> / <code>track</code> still load; the External Axis tab converts them to bodies. The <code>work</code> section holds where you left off: joint pose, selection, per-point joint solutions of the feasibility check and of each plan, and panel settings. Saves are atomic (written to a temporary file, then renamed). <code>workspace/last_project.txt</code> records the folder to reopen.</p>
 <p><strong>TCP poses CSV</strong> has one row per point, in station order:</p>
 <ul>
-<li><code>point_id, group, status, reason, station, carrier</code>;</li>
+<li><code>point_id, group, status, reason, station, zone, seq, config, carrier</code> (zone / seq = path position / config label when zoning is on; rows then follow station → zone → path order);</li>
 <li>base pose (<code>base_x/y/z_mm, base_yaw_deg</code>);</li>
 <li>TCP in <strong>world</strong> (<code>tcp_world_x/y/z_mm</code>, quaternion <code>qw,qx,qy,qz</code>) and in the <strong>robot base frame</strong> (<code>tcp_base_*_mm</code>, <code>roll/pitch/yaw_deg</code>): use the base-frame values to program the robot at that station;</li>
 <li>joints <code>q1..q6_deg</code>;</li>
@@ -576,7 +591,8 @@ geo = optimize_tool(robot, ee, urdf, part_mesh, T_world_part, T_world_base, targ
 <p><strong>Known limitations (v1)</strong></p>
 <ul>
 <li>Planning features (heatmap, station planner, tool optimizer) need a <strong>UR-type arm</strong> (analytic IK and a full-turn base joint). Other uploaded robots can be displayed, jogged and feasibility-checked with numeric IK.</li>
-<li>Collisions are checked at each point only; the motion <strong>between</strong> points and stations is not checked. Travel distance ignores obstacles.</li>
+<li>Collisions are checked at each point only; the motion <strong>between</strong> points and stations is not checked (zones give an ordered path with continuous joints, but the path itself is not collision-checked). Travel distance ignores obstacles.</li>
+<li>Zoning works per stop with the stops the planner chose; it does not move points between stops to save a configuration change. The plans with other stop counts are the trade-off it offers.</li>
 <li>Payload checks are <strong>static</strong>: no acceleration loads. Beyond 800 mm COG offset the UR20 payload curve is a <strong>linear extrapolation (estimate)</strong>.</li>
 <li>The part footprint for standoffs is a convex hull, which is conservative.</li>
 <li>The <strong>brush</strong> works click by click (one dab per click): Viser reports clicks and box drags, not freehand mouse strokes. For big areas, select them and use <strong>Fill selection with rows/columns</strong>.</li>

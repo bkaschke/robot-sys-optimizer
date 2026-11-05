@@ -58,6 +58,9 @@ class PointResult:
     torque_util: float = 0.0
     limit_margin_deg: float = 0.0
     notes: list[str] = field(default_factory=list)
+    config: str = ""  # joint configuration label (core.configs), when zoning is on
+    zone: int | None = None  # zone index within the solution
+    seq: int | None = None  # position in the zone's path
 
 
 def _rz(a: float) -> np.ndarray:
@@ -151,8 +154,35 @@ class FeasibilityChecker:
 
     def check_point(self, pid: int, p, n, group: TargetGroup, max_poses: int | None = None) -> PointResult:
         """``max_poses`` caps the candidate TCP poses tried (fast screening in optimizers)."""
+        stage = [0]
+        for r in self._feasible(pid, p, n, group, max_poses, stage):
+            return r
+        return PointResult(pid, "unreachable", STAGES[stage[0]])
+
+    def check_point_configs(
+        self, pid: int, p, n, group: TargetGroup, max_poses: int | None = 40
+    ) -> dict[str, PointResult]:
+        """Best feasible solution for EACH joint configuration (core.configs labels), in one
+        pass over the candidate poses (most preferred pose first, as check_point). Stops
+        early once every configuration was found. Empty dict: unreachable."""
+        from core.configs import config_label
+
+        out: dict[str, PointResult] = {}
+        n_max = 8 if hasattr(self.ik, "a2") else 4
+        for r in self._feasible(pid, p, n, group, max_poses, [0], all_branches=True):
+            lab = config_label(self.ik, r.q)
+            if lab not in out:
+                r.config = lab
+                out[lab] = r
+                if len(out) == n_max:
+                    break
+        return out
+
+    def _feasible(self, pid, p, n, group, max_poses, stage, all_branches: bool = False):
+        """Yield feasible PointResults: candidate poses in preference order; per pose, the
+        branches best first (only the best one unless ``all_branches``). ``stage[0]`` is
+        set to the furthest check stage any candidate passed."""
         tcps = group.tcps or list(self.T_flange_tcp)
-        passed = 0  # number of STAGES some candidate got past
         R_bp = self.T_base_part[:3, :3]
         force_base = -self.force * (R_bp @ np.asarray(n, float))  # tool pushes into the surface
         for k, (tcp, spin, tilt, so, T_part_tcp) in enumerate(candidate_poses(p, n, group, tcps)):
@@ -162,7 +192,7 @@ class FeasibilityChecker:
             sols = self.ik.solve(T_base_flange)
             if len(sols) == 0:
                 continue
-            passed = max(passed, 1)
+            stage[0] = max(stage[0], 1)
             cands = []
             for s in sols:
                 ok = expand_to_limits(s[None], self.lo, self.hi)
@@ -171,7 +201,7 @@ class FeasibilityChecker:
                     cands.append(ok[np.argmax(margin)])
             if not cands:
                 continue
-            passed = max(passed, 2)
+            stage[0] = max(stage[0], 2)
             scored = []
             for q in cands:
                 pr = static_check(
@@ -190,7 +220,7 @@ class FeasibilityChecker:
                 scored.append((mu + 0.1 * lm, q, pr, mu, lm))
             if not scored:
                 continue
-            passed = max(passed, 3)
+            stage[0] = max(stage[0], 3)
             for _, q, pr, mu, lm in sorted(scored, key=lambda t: -t[0]):
                 if self.scene.collides(q, tcp):
                     continue
@@ -200,7 +230,7 @@ class FeasibilityChecker:
                     or pr.max_util > 0.9 * self.settings.torque_util
                     or np.degrees(lm) < 15.0
                 )
-                return PointResult(
+                yield PointResult(
                     pid,
                     "marginal" if marginal else "reachable",
                     "",
@@ -215,7 +245,8 @@ class FeasibilityChecker:
                     float(np.degrees(lm)),
                     pr.notes,
                 )
-        return PointResult(pid, "unreachable", STAGES[passed])
+                if not all_branches:
+                    break
 
     def check_all(
         self,
@@ -254,6 +285,9 @@ def result_to_data(r: PointResult):
         torque_util=float(r.torque_util),
         limit_margin_deg=float(r.limit_margin_deg),
         notes=[str(n) for n in r.notes],
+        config=r.config,
+        zone=r.zone,
+        seq=r.seq,
     )
 
 
@@ -272,4 +306,7 @@ def result_from_data(d) -> PointResult:
         torque_util=d.torque_util,
         limit_margin_deg=d.limit_margin_deg,
         notes=list(d.notes),
+        config=d.config,
+        zone=d.zone,
+        seq=d.seq,
     )

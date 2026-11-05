@@ -217,7 +217,7 @@ Every body collides with the arm and tool (from the upper arm on), and counts fo
 | **Refine part mesh** | **Tessellate part mesh** splits the part's triangles until no edge is longer than *Max edge length*. The shape does not change, but clicks, region growing, brushes and interpolated normals work on a finer mesh (useful for coarse CAD exports with long thin triangles). The refined mesh is saved as `<project>/assets/parts/<name>_refined_<N>mm.stl` and becomes the part; the selection and existing points are kept. |
 | **Groups & tolerances** | Each point belongs to a group, and each group has spin, tilt, standoff and an allowed TCP list. **Apply to group** saves them. |
 | **Edit points** | Assign to group, flip normals, or delete the points on the selected surface; delete all. **Import CSV** reads `x,y,z,nx,ny,nz[,group]` in mm or m. |
-| **Display** | Colour points by *group* or *feasibility*; show normals; **Preview tool at point** draws a see-through tool aimed into the surface at any point. |
+| **Display** | Colour points by *group*, *feasibility*, or the selected solution's *zone* / *configuration*; show normals; **Preview tool at point** draws a see-through tool aimed into the surface at any point. |
 
 Points are stored **in the part frame**, so moving the part moves them with it.
 
@@ -227,12 +227,23 @@ Points are stored **in the part frame**, so moving the part moves them with it.
 | --- | --- |
 | **Feasibility check** | **Check all targets** from the current base, with clearance, joint margin and torque limit as settings. The summary gives counts and reasons. *Inspect result* → **Move robot to this solution** jogs the arm to any point's solution. |
 | **Base placement (reachability)** | **Show base heatmap** draws where the base could stand on the floor (bright = all points reachable with the best worst-case manipulability) and marks the best spot. **Move base to best** moves it there. Ignores collisions: confirm with the feasibility check. |
-| **Station planner** | **Plan stations** finds the fewest stations that reach every point, within *Max stations* (static mode = 1). Each solution goes to the Results tab as soon as it finishes. *Candidate grid* sets the search resolution; *Refine* turns the exact fine-tuning on or off. |
+| **Station planner** | **Plan stations** finds the fewest stations that reach every point, within *Max stations* (static mode = 1). Each solution goes to the Results tab as soon as it finishes. *Candidate grid* sets the search resolution; *Refine* turns the exact fine-tuning on or off. *Joint configuration* = **zones (minimize changes)** groups each stop's points into zones that keep one arm configuration and puts each zone in path order (see *Joint-configuration zones* below); *Cost per config change* sets how much a change costs (a stop costs 5). |
 | **Tool geometry** | **Find shortest tool** first finds the shortest L that still reaches everything within the station limit, then tunes θ / d / roll. It shows a coverage-vs-length table. **Apply to tool** writes the values into Tool Setup. |
+
+### Joint-configuration zones
+
+A UR arm can reach most poses in up to 8 ways: **shoulder** (S), **elbow** (E) and **wrist** (W) each have two branches, written as a label like `S-E+W-`. Moving from one branch to another needs a big reconfiguration motion, which you rarely want in the middle of a sanding pass. With *Joint configuration* = **zones (minimize changes)**, the planner:
+
+1. checks, for every point, which configurations can do it from its stop;
+2. picks the **fewest configurations** that cover the stop's points (exact), each point using its best solution in one of them; a stop can therefore have more than one **zone**;
+3. orders each zone's points as a serpentine **path** and picks joint values (±360° copies of the wrist joints) that keep the path continuous;
+4. counts **configuration changes** = extra zones at a stop + remaining jumps of joint 4 or 6 above 180° between neighbouring points, and adds *Cost per config change* × changes to the cost J. Because the planner also offers plans with more stops, a plan with one more stop and no changes can win.
+
+It also re-runs the tip-over and localization checks for the chosen solutions. It is about 3× slower than *best per point*. The Results tab lists the zones (`S1·Z1 S-E+W- 6 pts`), draws each zone's path as a thick coloured line, and **Targets → Display → Color points by** `zone` or `configuration` colours the points of the selected solution. The CSV and the HTML report list zone, path position and configuration per point. The Tool geometry optimizer uses the same setting.
 
 ### Results tab
 
-- **Solution**: the ranked list (best cost first). It shows a summary, the cost breakdown bars and the station list.
+- **Solution**: the ranked list (best cost first). It shows a summary (with the zones and configuration changes when zoning is on), the cost breakdown bars and the station list.
 - **Scene**: coloured station markers, **lines to served points**, and **ghost robots** posed at a real solution.
 - **Move base to station**: puts the live robot at a station.
 - **Export**:
@@ -278,6 +289,12 @@ Shortcut: **Project** → *Examples* `mobile_amr` → **Open example** (four whe
 5. *Mount on body* `riser` (or your column) → **Snap robot to top of body**.
 6. Give the chassis a *Mass*, tick *Tip-over check*, **Apply base settings**, then Optimize → **Plan stations**.
 
+### Example B3: avoid joint-configuration changes on the rail
+
+1. **Project** → *Examples* `rail_long_part` → **Open example**. Targets: select the face pointing to the wall (y+) and generate points with *Spacing* `250`.
+2. Optimize → *Station planner*: *Joint configuration* `best per point` → **Plan stations**. Targets → *Color points by* `configuration`: stops can mix two configurations, meaning the arm would reconfigure mid-pass (in the test version of this task every stop did).
+3. Switch to `zones (minimize changes)` → **Plan stations** again. The Results summary now lists the zones and the number of configuration changes (0 in the test version of this task, at almost the same cost), and the zone paths are drawn in the scene.
+
 ### Example C: the shortest probe for a deep hole
 
 1. Cell → *Part* `deep_hole`, xyz `800, 0, 0` (100 mm hole, 300 mm deep).
@@ -316,7 +333,7 @@ Shortcut: **Project** → *Examples* `mobile_amr` → **Open example** (four whe
 **Project file** (`project.json`): the robot and base pose, base mode and carrier (its `bodies`: shape, size or mesh file, pose, attachment, mass), tool, part, targets and groups, optimizer settings, and the saved solutions. Older projects with `chassis` / `riser` / `track` still load; the External Axis tab converts them to bodies. The `work` section holds where you left off: joint pose, selection, per-point joint solutions of the feasibility check and of each plan, and panel settings. Saves are atomic (written to a temporary file, then renamed). `workspace/last_project.txt` records the folder to reopen.
 
 **TCP poses CSV** has one row per point, in station order:
-- `point_id, group, status, reason, station, carrier`;
+- `point_id, group, status, reason, station, zone, seq, config, carrier` (zone / seq = path position / config label when zoning is on; rows then follow station → zone → path order);
 - base pose (`base_x/y/z_mm, base_yaw_deg`);
 - TCP in **world** (`tcp_world_x/y/z_mm`, quaternion `qw,qx,qy,qz`) and in the **robot base frame** (`tcp_base_*_mm`, `roll/pitch/yaw_deg`): use the base-frame values to program the robot at that station;
 - joints `q1..q6_deg`;
@@ -378,7 +395,8 @@ For carriers, pass `sites=CarrierSites(Carrier(base), part_mesh, T_world_part)` 
 
 **Known limitations (v1)**
 - Planning features (heatmap, station planner, tool optimizer) need a **UR-type arm** (analytic IK and a full-turn base joint). Other uploaded robots can be displayed, jogged and feasibility-checked with numeric IK.
-- Collisions are checked at each point only; the motion **between** points and stations is not checked. Travel distance ignores obstacles.
+- Collisions are checked at each point only; the motion **between** points and stations is not checked (zones give an ordered path with continuous joints, but the path itself is not collision-checked). Travel distance ignores obstacles.
+- Zoning works per stop with the stops the planner chose; it does not move points between stops to save a configuration change. The plans with other stop counts are the trade-off it offers.
 - Payload checks are **static**: no acceleration loads. Beyond 800 mm COG offset the UR20 payload curve is a **linear extrapolation (estimate)**.
 - The part footprint for standoffs is a convex hull, which is conservative.
 - The **brush** works click by click (one dab per click): Viser reports clicks and box drags, not freehand mouse strokes. For big areas, select them and use **Fill selection with rows/columns**.

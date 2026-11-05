@@ -24,6 +24,7 @@ class ToolOptPanel:
         apply_values: Callable[[ExtensionValues], None],
         on_solution: Callable[[], None],
     ):
+        self.planner_options = None  # set by the app: StationsPanel.options
         self.s = session
         self.apply_values = apply_values
         self.on_solution = on_solution
@@ -60,6 +61,7 @@ class ToolOptPanel:
             return notify(event, "Cannot optimize", "Need a tool, a part and targets")
         if s.robot.spec.ik != "ur_analytic":
             return notify(event, "Not supported", "Needs a UR-type arm (v1)")
+        opts = self.planner_options() if self.planner_options else {"zoning": False, "config_cost": 1.0}
         robot = Robot(s.robot.spec)
         ee = s.tool
         urdf = s.resolve(ee.urdf) if ee.urdf else None
@@ -72,10 +74,13 @@ class ToolOptPanel:
             s.T_world_base.copy(),
             world_targets(s),
             part_footprint(s),
-            (s.extra.get("optimizer") or Optimizer()).weights,
+            (s.extra.get("optimizer") or Optimizer()).weights.model_copy(
+                update={"config": opts["config_cost"]}
+            ),
             int(self.max_stations.value),
         )
         st = GeometrySettings(L_tol=self.tol.value / 1000, shape_evals=int(self.shape_evals.value))
+        st.planner.zoning = opts["zoning"]
         sites = s.sites()
         if sites is None:
             args = (*args[:-1], 1)  # static base: one station

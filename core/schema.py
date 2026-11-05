@@ -14,7 +14,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from core.schema_work import PointResultData, WorkState  # noqa: F401 (re-exported)
+from core.schema_work import PointResultData, WorkState, Zone  # noqa: F401 (re-exported)
 
 SCHEMA_VERSION = 1
 
@@ -407,6 +407,7 @@ class Weights(_Model):
     limits: float = Field(default=0.2, ge=0)
     torque: float = Field(default=0.5, ge=0)
     standoff: float = Field(default=1.0, ge=0)  # soft: carrier closer than the preferred standoff
+    config: float = Field(default=1.0, ge=0)  # per joint-configuration change (zoning)
 
 
 class Margins(_Model):
@@ -446,6 +447,7 @@ class Solution(_Model):
     cost: float = 0.0
     breakdown: dict[str, float] = Field(default_factory=dict)
     tool_values: ExtensionValues | None = None
+    zones: list[Zone] = Field(default_factory=list)  # joint-configuration zones (zoning on)
 
     @model_validator(mode="after")
     def _station_refs(self) -> Solution:

@@ -17,6 +17,7 @@ from ui.session import HOME_Q, Session
 
 ROOT = "/results"
 STATION_COLORS = [(230, 60, 60), (40, 120, 230), (240, 170, 20), (150, 70, 200), (20, 170, 170), (90, 90, 90)]
+ZONE_COLORS = [(250, 120, 30), (30, 160, 230), (200, 60, 200), (40, 200, 120), (230, 200, 40), (120, 90, 220)]
 
 
 def station_T(st, session: Session | None = None) -> np.ndarray:
@@ -112,6 +113,18 @@ class ResultsTab:
             f"**{len(sol.stations)} station(s)**, {n - len(sol.unreached)}/{n} points reached, "
             f"cost **{sol.cost:.2f}**" + (f"  \nUnreached ids: {sol.unreached[:20]}" if sol.unreached else "")
         )
+        if sol.zones:
+            switches = len(sol.zones) - len({z.station for z in sol.zones})
+            jumps = sum(z.wrap_jumps for z in sol.zones)
+            per = " · ".join(
+                f"S{z.station + 1}·Z{i + 1} `{z.config}` {len(z.points)} pts"
+                + (f" ({z.wrap_jumps} jumps)" if z.wrap_jumps else "")
+                for i, z in enumerate(sol.zones)
+            )
+            self.summary.content += (
+                f"  \n**Zones**: {len(sol.zones)}, configuration changes **{switches + jumps}** "
+                f"({switches} zone switches, {jumps} wrist jumps)  \n{per}"
+            )
         total = max(sol.cost, 1e-9)
         rows = [
             f"`{k:<9}` {v:7.2f} {'█' * int(round(20 * v / total))}"
@@ -161,6 +174,19 @@ class ResultsTab:
                         precision="float32",
                     )
                 )
+            for zi, z in enumerate(sol.zones):  # zone paths: the order the points are processed
+                path = [where[p] for p in z.points if p in where]
+                if self.show_lines.value and z.station == k and len(path) > 1:
+                    seg = np.stack([Pw[path[:-1]], Pw[path[1:]]], axis=1)
+                    self._handles.append(
+                        self.server.scene.add_line_segments(
+                            f"{ROOT}/Z{zi + 1}_path",
+                            seg,
+                            ZONE_COLORS[zi % len(ZONE_COLORS)],
+                            thickness=3.0,
+                            thickness_units="screen",
+                        )
+                    )
             if self.show_ghosts.value:
                 q = next(
                     (

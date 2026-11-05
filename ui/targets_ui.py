@@ -38,6 +38,7 @@ class TargetsTab:
         self._mesh_key = None
         self._handles: dict[str, object] = {}
         self._busy = False
+        self.selected_results = None  # set by the app: point results of the selected solution
         gui = server.gui
 
         with gui.add_folder("Select surface"):
@@ -85,7 +86,9 @@ class TargetsTab:
             self.csv_units = gui.add_dropdown("CSV units", ("mm", "m"))
             self.csv = gui.add_upload_button("Import CSV (x,y,z,nx,ny,nz[,group])", mime_type="text/csv")
         with gui.add_folder("Display"):
-            self.color_by = gui.add_dropdown("Color points by", ("group", "feasibility"))
+            self.color_by = gui.add_dropdown(
+                "Color points by", ("group", "feasibility", "zone", "configuration")
+            )
             self.show_normals = gui.add_checkbox("Show normals", True)
             self.normal_len = gui.add_number("Normal length (mm)", 20.0, min=1.0, step=1.0)
             self.point_size = gui.add_number("Point size (mm)", 4.0, min=0.5, step=0.5)
@@ -373,9 +376,22 @@ class TargetsTab:
         self.preview_idx.max = max(1, len(P) - 1)
         if len(P) == 0:
             return
+        sel = self.selected_results() if self.selected_results else {}
         if self.color_by.value == "feasibility" and self.s.feasibility:
             res = self.s.feasibility
             colors = np.array([STATUS_COLORS[res[i].status] if i in res else UNCHECKED for i in ids])
+        elif self.color_by.value in ("zone", "configuration") and sel:
+            # selected solution (Results tab): zone index, or one colour per joint configuration
+            labels = sorted({r.config for r in sel.values() if r.config})
+            key = (lambda r: r.zone) if self.color_by.value == "zone" else (lambda r: labels.index(r.config))
+            colors = np.array(
+                [
+                    PALETTE[key(sel[i]) % len(PALETTE)]
+                    if i in sel and sel[i].config and sel[i].zone is not None
+                    else UNCHECKED
+                    for i in ids
+                ]
+            )
         else:
             colors = np.array(
                 [PALETTE[names.index(g) % len(PALETTE)] if g in names else PALETTE[-1] for g in G]

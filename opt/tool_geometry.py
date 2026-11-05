@@ -142,9 +142,23 @@ class _Evaluator:
             stations = [{d: s.carrier[d] for d in sites.dofs} for s in sol.stations]
         pref = np.array([sol.assignment.get(int(i), 0) for i in self.t.ids])
         assignment, res = verify(checker, self.t, stations, sites, pref)
+        zones, changes = [], 0
+        if self.st.planner.zoning:
+            from opt.zoning import zone_solution
+
+            zones, changes = zone_solution(
+                checker, self.t, stations, sites, assignment, res, self.st.planner.zoning_poses
+            )
         unreached = sorted(p for p, r in res.items() if r.status == "unreachable")
         cost, terms = cost_breakdown(
-            list(res.values()), len(unreached), xy, self.w, self.tm.length(v), self.L_ref, self.max_manip
+            list(res.values()),
+            len(unreached),
+            xy,
+            self.w,
+            self.tm.length(v),
+            self.L_ref,
+            self.max_manip,
+            config_changes=changes,
         )
         new = sol.model_copy(
             update={
@@ -153,6 +167,7 @@ class _Evaluator:
                 "cost": cost,
                 "breakdown": terms,
                 "tool_values": v,
+                "zones": zones,
             }
         )
         return cost, new, res

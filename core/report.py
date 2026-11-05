@@ -124,6 +124,25 @@ def build_report(r: ReportInput) -> str:
         )
     parts.append("</table>")
 
+    if sol.zones:
+        switches = len(sol.zones) - len({z.station for z in sol.zones})
+        jumps = sum(z.wrap_jumps for z in sol.zones)
+        parts.append(
+            f"<h2>Joint-configuration zones</h2><p class='note'>{len(sol.zones)} zones, "
+            f"{switches + jumps} configuration changes ({switches} zone switches, {jumps} wrist jumps &gt; "
+            "180°). Configuration = shoulder (S), elbow (E), wrist (W) branch.</p>"
+            "<table><tr><th>zone</th><th>station</th><th>configuration</th><th>points</th>"
+            "<th>wrist jumps</th><th>path (point ids)</th></tr>"
+        )
+        for i, z in enumerate(sol.zones):
+            ids = ", ".join(str(p) for p in z.points[:40]) + (" …" if len(z.points) > 40 else "")
+            parts.append(
+                f"<tr><td>Z{i + 1}</td><td>S{z.station + 1}</td><td>{_e(z.config)}</td>"
+                f"<td>{len(z.points)}</td><td>{z.wrap_jumps}</td>"
+                f"<td style='text-align:left'>{_e(ids)}</td></tr>"
+            )
+        parts.append("</table>")
+
     if r.envelope_svg:
         parts.append("<h2>Tool geometry (envelope sketch)</h2>" + r.envelope_svg)
     if r.length_samples:
@@ -142,6 +161,7 @@ def build_report(r: ReportInput) -> str:
     cols = [
         "point_id",
         "station",
+        *(["zone", "seq", "config"] if sol.zones else []),
         "status",
         "tcp",
         "tcp_world_x_mm",

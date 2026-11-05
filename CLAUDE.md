@@ -11,7 +11,7 @@ Full spec: `docs/PROJECT_PLAN.md`. It is the source of truth for scope and miles
 - **Current milestone:** none. v1 (M0–M10) is complete; see "Current state".
 - **IK speed:** use `core.ik.ur.solve_batch` (about 7 µs per pose, all 8 branches) for anything bulk. `URAnalyticIK.solve` (about 0.8 ms) is for one-off calls.
 - **Branch policy:** one branch per milestone (`m0-skeleton`, `m1-kinematics`, …); merge to `main` when its "done when" check passes.
-- **Last updated:** 2026-11-05 (post-v1: External Axis tab, examples, brush/single points/tessellation, HTML user guide, work state + autosave + reopen)
+- **Last updated:** 2026-11-05 (post-v1: External Axis tab, examples, brush/single points/tessellation, HTML user guide, work state + autosave + reopen, joint-configuration zoning)
 
 | Milestone | State | Done when |
 | --- | --- | --- |
@@ -290,6 +290,14 @@ $PY scripts/import_ur_description.py <clone> ur20   # re-import a UR model (see 
   - UR20: 20 kg up to 200 mm, 7 kg at 800 mm, linear estimate beyond (0 kg at about 1123 mm).
   - `core/payload.py` fails tools over the curve and notes when the estimate was used.
   - `is_complete()` accepts the curve in place of wrist moments.
+
+## Joint-configuration zoning (post-v1)
+
+- **Labels (`core/configs.py`):** `S±E±W±` = signs of the three factors of |det J|: horizontal reach a2·c2 + a3·c23 + d5·s234 (shoulder), sin q3 (elbow), sin q5 (wrist). They are distinct for all 8 analytic branches (tested on 200 random poses) and invariant to ±2π copies. Non-UR arms: `E±W±`.
+- **Checker:** `check_point` / `check_point_configs` share the generator `_feasible` (candidate poses in preference order, branches best first). `check_point_configs` returns the first feasible solution per label in ONE pass and stops once all 8 are found (`max_poses` 40 by default: unreachable configurations would otherwise cost a full pose sweep each). `PointResult` gained `config`, `zone`, `seq` (also in `PointResultData`).
+- **`opt/zoning.zone_solution`** runs after `verify` when `PlannerSettings.zoning`: per station, options per point → `min_zones` (exact: config subsets by size, ties by total quality) → `_robust` again for any changed solution (fall back to the verified one) → `order_path` (PCA serpentine) → `unwrap_path` (DP over 2π copies, wrist joints weighted 2×; jumps > 180° in joints 4/6 counted). Changes = Σ (zones − 1) + wrist jumps; `cost_breakdown(config_changes=...)` with `Weights.config` (default 1.0; GUI *Cost per config change*). `Solution.zones: list[Zone]` (`core/schema_work.Zone`). The tool optimizer's stage B (`cost_at_stations`) zones too when the planner setting is on.
+- **Measured** on the M9 wall-side rail task: without zoning every station had 2 configurations (4 changes); with zoning 0 changes, same 4 stations, J 18.86 → 18.87; planning 14 s → 47 s.
+- **GUI/exports:** Station planner *Joint configuration* dropdown (`ui.stations.ZONING`) + *Cost per config change* (both saved in panel settings; `ToolOptPanel.planner_options = StationsPanel.options`). Results: zone summary and zone path lines. Targets colour by `zone` / `configuration` of the selected solution (`TargetsTab.selected_results`, redrawn on Results selection). CSV gains `zone, seq, config` (rows station → zone → seq); the report gains a zones table.
 
 ## Work state, autosave, reopen (post-v1)
 

@@ -29,6 +29,18 @@ class PointResultData(_Model):
     torque_util: float = 0.0
     limit_margin_deg: float = 0.0
     notes: list[str] = Field(default_factory=list)
+    config: str = ""  # joint configuration label (core.configs)
+    zone: int | None = None
+    seq: int | None = None
+
+
+class Zone(_Model):
+    """Points of one station done in one joint configuration, in path order."""
+
+    station: int = Field(ge=0)
+    config: str
+    points: list[int] = Field(default_factory=list)  # point ids, path order
+    wrap_jumps: int = Field(default=0, ge=0)  # joint 4/6 jumps > 180 deg left in the path
 
 
 class WorkState(_Model):

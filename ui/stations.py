@@ -40,6 +40,9 @@ def part_footprint(s: Session) -> np.ndarray:
     return np.array([w[:, :2].min(axis=0), w[:, :2].max(axis=0)])
 
 
+ZONING = ("best per point", "zones (minimize changes)")
+
+
 class StationsPanel:
     def __init__(self, server: viser.ViserServer, session: Session, on_solution: Callable[[], None]):
         self.s = session
@@ -51,17 +54,28 @@ class StationsPanel:
             opt = self._optimizer()
             self.max_stations = gui.add_number("Max stations", opt.max_stations, min=1, max=12, step=1)
             gui.add_markdown(
-                "_Static base mode places one base (k = 1); set a carrier in "
-                "Cell → Base mode for several stations._"
+                "_Static base mode places one base (k = 1); set Mode = movable with a carrier in the "
+                "External Axis tab for several stations._"
             )
             self.step = gui.add_number("Candidate grid (mm)", 100.0, min=25.0, max=500.0, step=25.0)
             self.refine = gui.add_checkbox("Refine with exact check (CMA-ES)", True)
+            self.zoning = gui.add_dropdown("Joint configuration", ZONING)
+            self.config_cost = gui.add_number("Cost per config change", 1.0, min=0.0, step=0.5)
+            gui.add_markdown(
+                "_**zones**: each stop's points are grouped by joint configuration (shoulder/elbow/"
+                "wrist) into ordered paths; changes (zone boundaries and wrist jumps > 180°) cost "
+                "the value above (a stop costs 5). About 3× slower._"
+            )
             self.run = gui.add_button("Plan stations", color="green")
             self.stop = gui.add_button("Cancel", visible=False)
             self.progress = gui.add_progress_bar(0.0, visible=False)
             self.status = gui.add_markdown("_Results appear in the Results tab as they finish._")
         self.run.on_click(lambda e: self.start(e))
         self.stop.on_click(lambda e: self._cancel.set())
+
+    def options(self) -> dict:
+        """Planner options shared with the tool-geometry panel."""
+        return {"zoning": self.zoning.value == ZONING[1], "config_cost": float(self.config_cost.value)}
 
     def _optimizer(self) -> Optimizer:
         return self.s.extra.get("optimizer") or Optimizer()
@@ -80,6 +94,7 @@ class StationsPanel:
             max_stations=1 if static else int(self.max_stations.value),
             candidate_step=self.step.value / 1000,
             refine=self.refine.value,
+            zoning=self.options()["zoning"],
         )
         robot = Robot(s.robot.spec)
         tcp = s.tool.tcps[0].name
@@ -87,7 +102,7 @@ class StationsPanel:
         fp = part_footprint(s)
         mesh = s.part_mesh()
         T_base0, T_part = s.T_world_base.copy(), s.part.T_world_part.copy()
-        weights = self._optimizer().weights
+        weights = self._optimizer().weights.model_copy(update={"config": self.options()["config_cost"]})
         L = s.tool_model.length()
         L_ref = max(s.tool.extension.L[1], 1e-6)
         self._cancel.clear()

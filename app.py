@@ -138,6 +138,14 @@ def build_app(
     with tab_handles["Results"]:
         results = ResultsTab(server, session, set_base=cell.set_base)
     state["results"] = results
+    tool_opt.planner_options = stations.options
+
+    def selected_results() -> dict:
+        sol = results.selected()
+        return session.result_points.get(sol.label, {}) if sol is not None else {}
+
+    targets.selected_results = selected_results
+    results.choice.on_update(lambda e: targets._draw_points())  # zone / configuration colours
     results.tool_opt = tool_opt
     server.gui.add_markdown(UR_NOTICE)
 

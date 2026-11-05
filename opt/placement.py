@@ -44,6 +44,8 @@ class PlannerSettings:
     refine_radius: float = 0.3  # m: refined base stays within this of the set-cover cell
     screen_poses: int = 40  # candidate TCP poses per point during refinement
     time_limit_s: float = 10.0
+    zoning: bool = False  # group each station's points into joint-configuration zones
+    zoning_poses: int = 40  # candidate TCP poses per point when looking for configurations
 
 
 @dataclass
@@ -421,6 +423,12 @@ def plan_stations(
                         checker, t, idx, stations[s_i], sites, st, rmap.max_manip, weights.standoff
                     )
         assignment, results = verify(checker, t, stations, sites, first)
+        zones, changes = [], 0
+        if st.zoning:
+            from opt.zoning import zone_solution
+
+            say(f"zoning k={k}", (n + 1) / len(ks))
+            zones, changes = zone_solution(checker, t, stations, sites, assignment, results, st.zoning_poses)
         unreached = sorted(pid for pid, r in results.items() if r.status == "unreachable")
         Tst = [sites.T(v) for v in stations]
         penalty = float(np.mean([sites.accept(v)[1] for v in stations]))
@@ -434,6 +442,7 @@ def plan_stations(
             rmap.max_manip,
             travel=path_travel(stations, sites),
             standoff_penalty=penalty,
+            config_changes=changes,
         )
         full = getattr(sites, "full", lambda v: v)
         plural = "s" if len(stations) > 1 else ""
@@ -452,6 +461,7 @@ def plan_stations(
             unreached=unreached,
             cost=cost,
             breakdown=breakdown,
+            zones=zones,
         )
         out.append((sol, results))
         if on_solution is not None:

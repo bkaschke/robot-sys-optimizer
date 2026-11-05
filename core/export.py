@@ -50,6 +50,9 @@ CSV_COLUMNS = [
     "status",
     "reason",
     "station",
+    "zone",
+    "seq",
+    "config",
     "carrier",
     "tcp",
     "base_x_mm",
@@ -94,7 +97,8 @@ def tcp_rows(
     base: Base,
     T_world_base0: np.ndarray,
 ) -> list[dict]:
-    """One row per target point, in station order (unreached points last).
+    """One row per target point, in station order (unreached points last). With zoning,
+    rows follow station -> zone -> path order, and ``zone`` / ``seq`` / ``config`` are set.
 
     Poses are recomputed from the stored joint solution: T_world_tcp = T_world_base @ FK(q)
     @ T_flange_tcp, with the solution's tool geometry when it has one.
@@ -102,7 +106,14 @@ def tcp_rows(
     values = solution.tool_values
     groups = {p.id: p.group for p in targets.points}
     rows: list[dict] = []
-    order = sorted(solution.assignment.items(), key=lambda kv: (kv[1], kv[0]))
+
+    def key(kv):
+        r = point_results.get(kv[0])
+        z = r.zone if r is not None and r.zone is not None else -1
+        s = r.seq if r is not None and r.seq is not None else kv[0]
+        return (kv[1], z, s, kv[0])
+
+    order = sorted(solution.assignment.items(), key=key)
     for pid, k in order:
         st = solution.stations[k]
         T_wb = station_pose(base, st, T_world_base0)
@@ -127,6 +138,8 @@ def tcp_rows(
         T_wt = T_wb @ T_bt
         qw = matrix_to_wxyz(T_wt[:3, :3])
         rpy = np.degrees(matrix_to_rpy(T_bt[:3, :3]))
+        if r.zone is not None:
+            row.update(zone=r.zone + 1, seq=(r.seq or 0) + 1, config=r.config)
         row.update(
             status=r.status,
             tcp=r.tcp,
