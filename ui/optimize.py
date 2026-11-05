@@ -46,7 +46,6 @@ class OptimizeTab:
             self.pick = gui.add_slider("Point #", 0, 1, 1, 0)
             self.detail = gui.add_markdown("")
             self.goto = gui.add_button("Move robot to this solution")
-        gui.add_markdown("_Station optimizer (M7–M8): not built yet._")
 
         self.run.on_click(lambda e: self.start(e))
         self.stop.on_click(lambda e: self._cancel.set())
