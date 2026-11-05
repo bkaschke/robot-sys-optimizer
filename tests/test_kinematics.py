@@ -44,7 +44,7 @@ def test_registry_lists_ur20():
     spec = load_spec("ur20")
     assert spec.ik == "ur_analytic" and spec.flange_link == "tool0"
     assert spec.payload.rated_kg == 20
-    assert not spec.payload.is_complete()  # wrist moments intentionally unknown
+    assert spec.payload.is_complete()  # payload curve stands in for the unpublished wrist moments
 
 
 def test_unknown_robot_rejected():

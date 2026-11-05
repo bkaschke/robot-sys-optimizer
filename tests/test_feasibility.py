@@ -189,3 +189,30 @@ def test_ceiling_mount_flips_gravity(robot):
         assert np.allclose(robot.gravity_torques(q), -floor)
     finally:
         robot.set_mount(np.eye(3))
+
+
+# --- payload curve (UR20 datasheet) -----------------------------------------------------------
+
+
+def test_payload_curve_values(robot):
+    spec = robot.spec.payload
+    assert spec.allowed_kg(0) == (20.0, False)
+    assert spec.allowed_kg(200) == (20.0, False)
+    assert spec.allowed_kg(500)[0] == pytest.approx(13.5)  # halfway down 20 -> 7
+    assert spec.allowed_kg(800) == (7.0, False)
+    kg, extrap = spec.allowed_kg(1000)  # linear extrapolation (estimate)
+    assert extrap and kg == pytest.approx(7 - 13 / 600 * 200)
+    assert spec.allowed_kg(2000)[0] == 0.0
+
+
+def test_payload_curve_check(robot):
+    from core.payload import static_check
+
+    q = np.radians([0, -90, 90, -90, -90, 0])
+    ok = static_check(robot, q, 10.0, np.array([0, 0, 0.3]), util_limit=1.0)
+    assert ok.ok and not any("payload curve" in n for n in ok.notes)
+    heavy = static_check(robot, q, 15.0, np.array([0, 0, 0.6]), util_limit=1.0)  # curve: 9.6 kg at 600 mm
+    assert not heavy.ok and any("payload curve" in n for n in heavy.notes)
+    far = static_check(robot, q, 2.0, np.array([0, 0, 0.9]), util_limit=1.0)
+    assert any("extrapolated" in n for n in far.notes)
+    assert not any("skipped" in n for n in ok.notes)

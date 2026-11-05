@@ -1,12 +1,17 @@
-"""M9 checks. Done-when: on the long-rail scene, a 1-axis rail solution respects a 300 mm
-standoff and needs fewer stations than a mobile base.
+"""M9 checks (revised 2026-11-04 with the user: the plan's "rail needs fewer stations than a
+mobile base" was an oversight; it holds for some tasks only).
 
-The scene is the golden 6 m rail standing 0.4 m in front of a wall (keep-out); the task is
-deburring the wall-side face, so the robot must reach over the part. Both carriers carry
-the UR20 at the same 0.7 m mount height and keep 300 mm from the part. The rail carriage
-(0.5 m wide) runs right along the part; the mobile base (plan default 1.2 x 0.8 m chassis)
-keeps its robot further away and must also work under +-10 mm / +-1 deg localization error.
-(On the rail's *top* face both need 2 stations: the UR20's reach hides the difference.)
+Done-when, for BOTH carriers on the long-rail scene (6 m rail 0.4 m in front of a wall
+keep-out), on two tasks (top face; wall-side face, where the robot reaches over the part):
+  * every target reached, verified by the exact checker (collision, torque, payload curve);
+  * every station keeps >= 300 mm (3D, as the plan defines it) from the part and stays out
+    of the keep-out;
+  * carrier DOFs inside their travel ranges;
+  * mobile results hold under +-10 mm / +-1 deg localization error (built into verify);
+  * optimality: the planner starts from the exact minimum set cover over ALL candidates
+    (so candidate pruning never costs a station);
+  * regression: station counts no worse than recorded (top face rail 2 / mobile 2,
+    wall-side face rail 4 / mobile 5). Rail < mobile is not a requirement.
 """
 
 from pathlib import Path
@@ -23,11 +28,11 @@ from core.feasibility import FeasibilityChecker
 from core.ik import make_ik
 from core.robot import Robot
 from core.schema import Base, CarrierJoints, Keepout, Pose, Primitive, Standoffs, TargetGroup, Weights
-from core.standoff import Zones, carrier_ok, footprint
+from core.standoff import Zones, carrier_ok, distance_3d, footprint
 from core.tool import ToolModel, load_tool
 from core.transforms import make_T
-from opt.placement import PlannerSettings, Targets, plan_stations
-from opt.reachability import map_for_tool
+from opt.placement import PlannerSettings, Targets, min_stations, plan_stations
+from opt.reachability import coverage_matrix, map_for_tool
 from opt.sites import CarrierSites
 
 REPO = Path(__file__).resolve().parents[1]
@@ -178,51 +183,89 @@ def test_arm_collides_with_own_chassis():
 
 # --- done-when ------------------------------------------------------------------------------------
 
+TASKS = {
+    # name: (point y, point z in the part frame, normal) along x in [-3, 3]
+    "top": (0.0, 0.15, (0, 0, 1.0)),
+    "wall_side": (0.1, 0.075, (0, 1.0, 0)),
+}
+REGRESSION = {("top", "rail"): 2, ("top", "mobile"): 2, ("wall_side", "rail"): 4, ("wall_side", "mobile"): 5}
+
 
 @pytest.fixture(scope="module")
-def wall_scene():
+def rail_scene():
     robot = Robot.from_registry("ur20")
     ee = load_tool("orbital_sander")
     tm = ToolModel(ee, REPO / ee.urdf)
     rmap = map_for_tool(robot, tm.T_flange_tcp("pad"))
     T_part = make_T(p=(0, 0.8, 0.5))
     part = gp.long_rail()
-    xs = np.arange(-3.0, 3.001, 0.25)  # 25 points along the wall-side face
-    Pp = np.column_stack([xs, np.full_like(xs, 0.1), np.full_like(xs, 0.075)])
-    Np = np.tile([0, 1.0, 0], (len(xs), 1))
-    g = TargetGroup(name="far face", tilt_deg=10.0)
-    t = Targets(np.arange(len(xs)), Pp + T_part[:3, 3], Np, Pp, Np, [g] * len(xs), np.full(len(xs), 10.0))
+    cache: dict = {}
 
-    def plan(base: Base):
-        sites = CarrierSites(Carrier(base), part, T_part)
-        bb, wb = sites.scene_bodies()  # the arm must also clear its own carriage / riser / track
-        scene = CollisionScene(robot, tm, part, np.eye(4), T_part, base_bodies=bb, world_bodies=wb)
-        ch = FeasibilityChecker(robot, make_ik(robot), tm, scene, np.eye(4), T_part)
-        out = plan_stations(
-            rmap, ch, t, np.eye(4), None, Weights(), PlannerSettings(max_stations=5), sites=sites
+    def targets(task: str) -> Targets:
+        y, z, n = TASKS[task]
+        xs = np.arange(-3.0, 3.001, 0.25)
+        Pp = np.column_stack([xs, np.full_like(xs, y), np.full_like(xs, z)])
+        Np = np.tile(n, (len(xs), 1))
+        g = TargetGroup(name=task, tilt_deg=10.0)
+        return Targets(
+            np.arange(len(xs)), Pp + T_part[:3, 3], Np, Pp, Np, [g] * len(xs), np.full(len(xs), 10.0)
         )
-        full = [s for s, _ in out if not s.unreached]
-        return (min(full, key=lambda s: len(s.stations)) if full else None), sites
 
-    return plan, part, T_part, t
+    def plan(task: str, kind: str):
+        if (task, kind) not in cache:
+            base = rail_base() if kind == "rail" else mobile_base(localization_m=0.01, localization_deg=1.0)
+            sites = CarrierSites(Carrier(base), part, T_part)
+            bb, wb = sites.scene_bodies()  # the arm must also clear its own carriage / riser / track
+            scene = CollisionScene(robot, tm, part, np.eye(4), T_part, base_bodies=bb, world_bodies=wb)
+            ch = FeasibilityChecker(robot, make_ik(robot), tm, scene, np.eye(4), T_part)
+            t = targets(task)
+            out = plan_stations(
+                rmap, ch, t, np.eye(4), None, Weights(), PlannerSettings(max_stations=5), sites=sites
+            )
+            cache[(task, kind)] = (out, sites, t)
+        return cache[(task, kind)]
+
+    return plan, rmap, part, T_part
 
 
-def test_rail_needs_fewer_stations_than_mobile(wall_scene):
-    plan, part, T_part, t = wall_scene
-    rail, rail_sites = plan(rail_base())
-    mobile, _ = plan(mobile_base(localization_m=0.01, localization_deg=1.0))
-    assert rail is not None and len(rail.assignment) == len(t.ids)
-    assert mobile is None or len(rail.stations) < len(mobile.stations), (
-        f"rail {len(rail.stations)} vs mobile {len(mobile.stations) if mobile else None}"
-    )
+@pytest.mark.parametrize("task", list(TASKS))
+@pytest.mark.parametrize("kind", ["rail", "mobile"])
+def test_carrier_plan_is_valid_and_optimal(rail_scene, task, kind):
+    plan, rmap, part, T_part = rail_scene
+    out, sites, t = plan(task, kind)
+    full = [s for s, _ in out if not s.unreached]
+    assert full, f"{kind}/{task}: no full-coverage solution"
+    best = min(full, key=lambda s: len(s.stations))
+    assert len(best.assignment) == len(t.ids)
+
+    # standoff, keep-out and travel range at every station
     part_fp = footprint(part, T_part)
-    c = rail_sites.c
-    for st in rail.stations:
-        v = {"s": st.carrier["s"]}
-        assert -3.0 - 1e-9 <= v["s"] <= 3.0 + 1e-9
-        assert c.footprint(v).distance(part_fp) >= 0.3 - 1e-6  # 300 mm standoff respected
-        assert not c.footprint(v).intersects(box(-5, 1.3, 5, 3.0))  # never in the wall zone
+    c = sites.c
+    wall = box(-5, 1.3, 5, 3.0)
+    for st in best.stations:
+        v = {d: st.carrier[d] for d in c.dofs if d in st.carrier}
+        for d, (lo, hi) in zip(c.dofs, c.bounds, strict=True):
+            if d != "yaw":
+                assert lo - 1e-9 <= v[d] <= hi + 1e-9, (d, v[d])
+        fp = c.footprint(v)
+        # 300 mm standoff, in 3D as the plan defines it (Coal distance). In this scene the rail
+        # floats 0.5 m up with no stand, so a 0.4 m chassis may tuck partly under it: footprint
+        # distance can be < 300 mm while the 3D distance is not. Model real fixtures as part
+        # of the part mesh or as keep-outs.
+        d3 = distance_3d(c.moving_bodies(v) + c.static_bodies(), part, T_part)
+        assert d3 >= 0.3 - 1e-6, d3
+        assert not fp.intersects(wall)
         assert np.allclose(st.xyz, c.T_world_base(v)[:3, 3])
+
+    # optimality: the first k tried is the exact minimum cover over ALL candidates
+    cand = sites.candidates(t.P_world, PlannerSettings().candidate_step)
+    Ts = np.array([sites.T(v) for v in cand])
+    score, _ = coverage_matrix(rmap, t.P_world, t.N_world, t.cones, Ts[:, :3, 3], Ts[0, :3, :3])
+    k_full = min_stations(score >= PlannerSettings().reach_threshold)
+    assert min(len(s.stations) for s, _ in out) == k_full
+
+    # regression: never worse than the recorded count
+    assert len(best.stations) <= REGRESSION[(task, kind)], f"{kind}/{task}: {len(best.stations)} stations"
 
 
 # --- GUI ----------------------------------------------------------------------------------------

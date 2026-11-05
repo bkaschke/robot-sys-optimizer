@@ -49,18 +49,57 @@ class Pose(_Model):
 
 
 class PayloadSpec(_Model):
-    """Datasheet limits. ``None`` means unknown: payload checks must refuse to run."""
+    """Datasheet limits. ``None`` means unknown: payload checks must refuse to run.
+
+    ``curve_mm_kg`` is the manufacturer's payload curve: allowed payload (kg) against the
+    payload COG distance from the flange (mm), as (offset, kg) points with increasing
+    offset. Past the last point it is either refused ("none") or extrapolated linearly
+    from the last segment ("linear", an estimate) down to 0 kg.
+    """
 
     rated_kg: float | None = Field(default=None, gt=0)
     wrist_moment_Nm: list[float | None] = Field(default_factory=lambda: [None, None, None])
     joint_torque_Nm: list[float | None] = Field(default_factory=list)
+    curve_mm_kg: list[tuple[float, float]] | None = None
+    curve_extrapolate: Literal["none", "linear"] = "none"
+    curve_source: str = ""
+
+    @field_validator("curve_mm_kg")
+    @classmethod
+    def _curve(cls, v):
+        if v is None:
+            return v
+        if len(v) < 2:
+            raise ValueError("payload curve needs at least 2 points")
+        xs = [x for x, _ in v]
+        if any(b <= a for a, b in zip(xs, xs[1:], strict=False)) or xs[0] < 0:
+            raise ValueError("payload curve offsets must start >= 0 and increase")
+        if any(kg < 0 for _, kg in v):
+            raise ValueError("payload curve masses must be >= 0")
+        return v
+
+    def allowed_kg(self, offset_mm: float) -> tuple[float | None, bool]:
+        """(allowed payload at this COG offset, whether it is extrapolated). None = unknown."""
+        if self.curve_mm_kg is None:
+            return None, False
+        xs = [x for x, _ in self.curve_mm_kg]
+        ys = [y for _, y in self.curve_mm_kg]
+        if offset_mm <= xs[-1]:
+            import numpy as np
+
+            return float(np.interp(offset_mm, xs, ys)), False
+        if self.curve_extrapolate == "none":
+            return 0.0, False
+        slope = (ys[-1] - ys[-2]) / (xs[-1] - xs[-2])
+        return max(0.0, ys[-1] + slope * (offset_mm - xs[-1])), True
 
     def is_complete(self) -> bool:
+        """Rated payload, every joint torque, and a payload curve or all wrist moments."""
         return (
             self.rated_kg is not None
             and len(self.joint_torque_Nm) > 0
             and all(t is not None for t in self.joint_torque_Nm)
-            and all(m is not None for m in self.wrist_moment_Nm)
+            and (self.curve_mm_kg is not None or all(m is not None for m in self.wrist_moment_Nm))
         )
 
 

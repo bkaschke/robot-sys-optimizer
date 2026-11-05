@@ -2,8 +2,8 @@
 
 tau = g_arm(q) + J_com^T(-m g) + J_tcp^T F, where F is the process force the tool exerts
 on the part (along -target.z). Wrist-moment / payload-diagram checks need datasheet values
-in the robot's spec.yaml; while those are missing the check is reported as skipped,
-never guessed.
+in the robot's spec.yaml: the payload curve (allowed kg against COG offset from the
+flange) is used when present; without it the check is reported as skipped, never guessed.
 """
 
 from __future__ import annotations
@@ -63,6 +63,21 @@ def static_check(
     if rated is not None and mass_kg > rated:
         ok = False
         notes.append(f"tool mass {mass_kg:.1f} kg exceeds rated payload {rated:g} kg")
-    if not robot.spec.payload.is_complete():
-        notes.append("payload diagram / wrist moments not in spec.yaml: check skipped")
+    spec = robot.spec.payload
+    if spec.curve_mm_kg is not None:
+        offset_mm = 1000.0 * float(np.linalg.norm(com_flange))
+        allowed, extrapolated = spec.allowed_kg(offset_mm)
+        if mass_kg > allowed + 1e-9:
+            ok = False
+            notes.append(
+                f"tool {mass_kg:.1f} kg at {offset_mm:.0f} mm COG offset exceeds the payload curve "
+                f"({allowed:.1f} kg)"
+            )
+        if extrapolated:
+            notes.append(
+                f"COG offset {offset_mm:.0f} mm is beyond the datasheet curve: allowed payload "
+                "extrapolated linearly (estimate)"
+            )
+    elif not all(m is not None for m in spec.wrist_moment_Nm):
+        notes.append("no payload curve or wrist moments in spec.yaml: payload-diagram check skipped")
     return PayloadResult(util, float(util.max()), ok, notes)

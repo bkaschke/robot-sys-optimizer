@@ -23,6 +23,12 @@ payload:
   # Max joint efforts (N·m), shoulder_pan → wrist_3.
   # Source: ur_description config/ur20/joint_limits.yaml (cites UR20 User Manual v5.14).
   joint_torque_Nm: [738.0, 738.0, 433.0, 107.0, 107.0, 107.0]
-  # Allowed wrist moments are not in the URDF or manual extracts we have: fill from the
-  # UR20 payload diagram / datasheet before relying on wrist-moment checks.
+  # Wrist moments are not published (UR20 datasheet, Dec 2024): the payload curve is used instead.
   wrist_moment_Nm: [null, null, null]
+  # Payload curve, "full performance", read off the UR20 datasheet plot (Dec 2024):
+  # 20 kg up to 200 mm COG offset, 7 kg at 800 mm (end point confirmed by the user).
+  # Beyond 800 mm: linear extrapolation of the last segment (user-approved ESTIMATE),
+  # reaching 0 kg at ~1123 mm. The 25 kg "expanded payload" needs manual conditions: not used.
+  curve_mm_kg: [[0, 20], [200, 20], [800, 7]]
+  curve_extrapolate: linear
+  curve_source: "UR20 datasheet Dec 2024 (plot reading); >800 mm extrapolated estimate"
