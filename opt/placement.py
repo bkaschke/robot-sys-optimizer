@@ -23,7 +23,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from core.feasibility import FeasibilityChecker, PointResult
+from core.feasibility import CancelledError, FeasibilityChecker, PointResult
 from core.schema import Solution, Station, TargetGroup, Weights
 from core.transforms import make_T
 from opt.cost import cost_breakdown, path_length
@@ -93,7 +93,38 @@ def prune(covered: np.ndarray, mu: np.ndarray, keep: int) -> np.ndarray:
 # --- 3: set cover ------------------------------------------------------------------------------
 
 
-def set_cover(covered: np.ndarray, mu: np.ndarray, k: int, time_limit: float = 10.0) -> list[int] | None:
+def _solve(m, time_limit: float, cancelled: Callable[[], bool] | None):
+    """CP-SAT solve that a watcher thread stops (within 0.1 s) when ``cancelled()`` turns true."""
+    import threading
+
+    from ortools.sat.python import cp_model
+
+    solver = cp_model.CpSolver()
+    solver.parameters.max_time_in_seconds = time_limit
+    solver.parameters.num_workers = 8
+    done = threading.Event()
+
+    def watch() -> None:
+        while not done.wait(0.1):
+            if cancelled():
+                solver.stop_search()
+                return
+
+    if cancelled is not None:
+        threading.Thread(target=watch, daemon=True).start()
+    try:
+        return solver, solver.Solve(m)
+    finally:
+        done.set()
+
+
+def set_cover(
+    covered: np.ndarray,
+    mu: np.ndarray,
+    k: int,
+    time_limit: float = 10.0,
+    cancelled: Callable[[], bool] | None = None,
+) -> list[int] | None:
     """Exactly ``k`` (or fewer) bases maximizing coverage, then total best manipulability.
 
     Returns base indices, or None if CP-SAT finds nothing in the time limit.
@@ -120,10 +151,7 @@ def set_cover(covered: np.ndarray, mu: np.ndarray, k: int, time_limit: float = 1
     # coverage dominates (weight > any possible quality sum), then quality, then fewer bases
     big = 1000 * T + 1
     m.Maximize(big * 1000 * sum(terms_cov) + 1000 * sum(terms_q) - sum(x))
-    solver = cp_model.CpSolver()
-    solver.parameters.max_time_in_seconds = time_limit
-    solver.parameters.num_workers = 8
-    status = solver.Solve(m)
+    solver, status = _solve(m, time_limit, cancelled)
     if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         return None
     return [b for b in range(B) if solver.Value(x[b])]
@@ -142,7 +170,9 @@ def greedy_cover(covered: np.ndarray, mu: np.ndarray, k: int) -> list[int]:
     return chosen
 
 
-def min_stations(covered: np.ndarray, time_limit: float = 10.0) -> int:
+def min_stations(
+    covered: np.ndarray, time_limit: float = 10.0, cancelled: Callable[[], bool] | None = None
+) -> int:
     """Fewest bases covering every coverable target: exact minimum set cover (CP-SAT).
 
     Falls back to the greedy count (an upper bound, not a lower one) if CP-SAT does not
@@ -160,10 +190,7 @@ def min_stations(covered: np.ndarray, time_limit: float = 10.0) -> int:
     for c in cols:
         m.AddBoolOr([x[b] for b in c])
     m.Minimize(sum(x))
-    solver = cp_model.CpSolver()
-    solver.parameters.max_time_in_seconds = time_limit
-    solver.parameters.num_workers = 8
-    status = solver.Solve(m)
+    solver, status = _solve(m, time_limit, cancelled)
     if status == cp_model.OPTIMAL:
         return max(1, int(round(solver.ObjectiveValue())))
     return greedy
@@ -382,7 +409,11 @@ def plan_stations(
     say = progress or (lambda msg, f: None)
     sites = sites or FloorSites(T_world_base0, footprint_xy, st.footprint_margin, st.search_margin)
     say("coverage", 0.0)
-    cand = sites.candidates(t.P_world, st.candidate_step)
+    try:
+        cand = sites.candidates(t.P_world, st.candidate_step, cancelled)
+    except CancelledError:
+        say("cancelled", 1.0)
+        return []
     if not cand:
         say("no admissible station (standoff / keep-outs / travel range)", 1.0)
         return []
@@ -398,73 +429,82 @@ def plan_stations(
     keep = prune(covered, mu / rmap.max_manip, st.max_candidates)
     cand = [cand[i] for i in keep]
     covered, mu_n = covered[keep], mu[keep] / rmap.max_manip
-    k_min = min(min_stations(covered, st.time_limit_s), st.max_stations)
-    start = sites_start(sites, T_world_base0)
     out = []
-    ks = list(range(k_min, st.max_stations + 1))
-    for n, k in enumerate(ks):
-        if cancelled is not None and cancelled():
-            break
-        say(f"set cover k={k}", n / len(ks))
-        chosen = set_cover(covered, mu_n, k, st.time_limit_s) or greedy_cover(covered, mu_n, k)
-        if not chosen:
-            continue
-        stations = [dict(cand[i]) for i in chosen]
-        order = order_by(stations, sites, start)
-        stations, chosen = [stations[i] for i in order], [chosen[i] for i in order]
-        sub_cov, sub_mu = covered[chosen], mu_n[chosen]
-        first = np.argmax(np.where(sub_cov, sub_mu + 1, 0), axis=0)
-        if st.refine:
-            for s_i in range(len(stations)):
-                say(f"refine k={k} station {s_i + 1}", (n + (s_i + 1) / len(stations)) / len(ks))
-                idx = [i for i in range(len(t.ids)) if first[i] == s_i and sub_cov[s_i, i]]
-                if idx:
-                    stations[s_i] = refine_station(
-                        checker, t, idx, stations[s_i], sites, st, rmap.max_manip, weights.standoff
-                    )
-        assignment, results = verify(checker, t, stations, sites, first)
-        zones, changes = [], 0
-        if st.zoning:
-            from opt.zoning import zone_solution
+    prev, checker.cancelled = checker.cancelled, cancelled  # every exact check polls Cancel
+    try:
+        k_min = min(min_stations(covered, st.time_limit_s, cancelled), st.max_stations)
+        start = sites_start(sites, T_world_base0)
+        ks = list(range(k_min, st.max_stations + 1))
+        for n, k in enumerate(ks):
+            if cancelled is not None and cancelled():
+                break
+            say(f"set cover k={k}", n / len(ks))
+            chosen = set_cover(covered, mu_n, k, st.time_limit_s, cancelled) or greedy_cover(covered, mu_n, k)
+            if not chosen:
+                continue
+            stations = [dict(cand[i]) for i in chosen]
+            order = order_by(stations, sites, start)
+            stations, chosen = [stations[i] for i in order], [chosen[i] for i in order]
+            sub_cov, sub_mu = covered[chosen], mu_n[chosen]
+            first = np.argmax(np.where(sub_cov, sub_mu + 1, 0), axis=0)
+            if st.refine:
+                for s_i in range(len(stations)):
+                    say(f"refine k={k} station {s_i + 1}", (n + (s_i + 1) / len(stations)) / len(ks))
+                    idx = [i for i in range(len(t.ids)) if first[i] == s_i and sub_cov[s_i, i]]
+                    if idx:
+                        stations[s_i] = refine_station(
+                            checker, t, idx, stations[s_i], sites, st, rmap.max_manip, weights.standoff
+                        )
+            assignment, results = verify(checker, t, stations, sites, first)
+            zones, changes = [], 0
+            if st.zoning:
+                from opt.zoning import zone_solution
 
-            say(f"zoning k={k}", (n + 1) / len(ks))
-            zones, changes = zone_solution(checker, t, stations, sites, assignment, results, st.zoning_poses)
-        unreached = sorted(pid for pid, r in results.items() if r.status == "unreachable")
-        Tst = [sites.T(v) for v in stations]
-        penalty = float(np.mean([sites.accept(v)[1] for v in stations]))
-        cost, breakdown = cost_breakdown(
-            list(results.values()),
-            len(unreached),
-            np.array([T[:2, 3] for T in Tst]),
-            weights,
-            tool_length,
-            L_ref,
-            rmap.max_manip,
-            travel=path_travel(stations, sites),
-            standoff_penalty=penalty,
-            config_changes=changes,
-        )
-        full = getattr(sites, "full", lambda v: v)
-        plural = "s" if len(stations) > 1 else ""
-        reached = len(t.ids) - len(unreached)
-        sol = Solution(
-            label=f"{len(stations)} {sites.kind} station{plural}: {reached}/{len(t.ids)} reached",
-            stations=[
-                Station(
-                    xyz=tuple(float(x) for x in T[:3, 3]),
-                    yaw=float(np.arctan2(T[1, 0], T[0, 0])),
-                    carrier={a: float(b) for a, b in full(v).items()},
+                say(f"zoning k={k}", (n + 1) / len(ks))
+                zones, changes = zone_solution(
+                    checker, t, stations, sites, assignment, results, st.zoning_poses
                 )
-                for T, v in zip(Tst, stations, strict=True)
-            ],
-            assignment=assignment,
-            unreached=unreached,
-            cost=cost,
-            breakdown=breakdown,
-            zones=zones,
-        )
-        out.append((sol, results))
-        if on_solution is not None:
-            on_solution(sol, results)
+            unreached = sorted(pid for pid, r in results.items() if r.status == "unreachable")
+            Tst = [sites.T(v) for v in stations]
+            penalty = float(np.mean([sites.accept(v)[1] for v in stations]))
+            cost, breakdown = cost_breakdown(
+                list(results.values()),
+                len(unreached),
+                np.array([T[:2, 3] for T in Tst]),
+                weights,
+                tool_length,
+                L_ref,
+                rmap.max_manip,
+                travel=path_travel(stations, sites),
+                standoff_penalty=penalty,
+                config_changes=changes,
+            )
+            full = getattr(sites, "full", lambda v: v)
+            plural = "s" if len(stations) > 1 else ""
+            reached = len(t.ids) - len(unreached)
+            sol = Solution(
+                label=f"{len(stations)} {sites.kind} station{plural}: {reached}/{len(t.ids)} reached",
+                stations=[
+                    Station(
+                        xyz=tuple(float(x) for x in T[:3, 3]),
+                        yaw=float(np.arctan2(T[1, 0], T[0, 0])),
+                        carrier={a: float(b) for a, b in full(v).items()},
+                    )
+                    for T, v in zip(Tst, stations, strict=True)
+                ],
+                assignment=assignment,
+                unreached=unreached,
+                cost=cost,
+                breakdown=breakdown,
+                zones=zones,
+            )
+            out.append((sol, results))
+            if on_solution is not None:
+                on_solution(sol, results)
+    except CancelledError:
+        say("cancelled", 1.0)
+        return sorted(out, key=lambda sr: sr[0].cost)
+    finally:
+        checker.cancelled = prev
     say("done", 1.0)
     return sorted(out, key=lambda sr: sr[0].cost)

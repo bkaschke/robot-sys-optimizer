@@ -123,7 +123,13 @@ def candidate_poses(p, n, group: TargetGroup, tcps: list[str]):
                     yield tcp, spin, tilt, so, T
 
 
+class CancelledError(Exception):
+    """Raised inside a check when the checker's ``cancelled()`` returns True (user Cancel)."""
+
+
 class FeasibilityChecker:
+    cancelled = None  # optional () -> bool, polled once per candidate pose (Cancel within ~ms)
+
     def __init__(
         self,
         robot: Robot,
@@ -188,6 +194,8 @@ class FeasibilityChecker:
         for k, (tcp, spin, tilt, so, T_part_tcp) in enumerate(candidate_poses(p, n, group, tcps)):
             if max_poses is not None and k >= max_poses:
                 break
+            if self.cancelled is not None and self.cancelled():
+                raise CancelledError
             T_base_flange = self.T_base_part @ T_part_tcp @ self._T_tcp_flange[tcp]
             sols = self.ik.solve(T_base_flange)
             if len(sols) == 0:

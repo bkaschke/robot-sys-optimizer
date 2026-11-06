@@ -11,6 +11,7 @@ app reopens on the next start.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import threading
 import time
@@ -42,6 +43,21 @@ def _notify(event, title: str, body: str, ok: bool = False) -> None:
 def _dump(project: schema.Project) -> str:
     """The exact text core.schema.save_project writes (for 'changed since last save')."""
     return json.dumps(project.model_dump(mode="json"), indent=2) + "\n"
+
+
+def _example_copy(name: str) -> Path:
+    """Working folder for example ``name``: workspace/examples/<name>, <name>_2, ... The
+    first one that does not exist or is still an unchanged copy (same project.json as the
+    template) is used; a copy you changed is never reused or replaced."""
+    shipped = (EXAMPLES / name / "project.json").read_bytes()
+    base = REPO / "workspace" / "examples" / name
+    k = 1
+    while True:
+        d = base if k == 1 else base.with_name(f"{name}_{k}")
+        f = d / "project.json"
+        if not d.exists() or (f.is_file() and f.read_bytes() == shipped):
+            return d
+        k += 1
 
 
 def _project_dir(text: str) -> Path:
@@ -79,6 +95,11 @@ class ProjectPanel:
             self.upload = server.gui.add_upload_button("Open project.json", mime_type="application/json")
             self.example = server.gui.add_dropdown("Examples", (NO_EXAMPLE, *list_examples()))
             self.open_example = server.gui.add_button("Open example")
+            self.example_name = server.gui.add_text(
+                "New example name", "", hint="letters, digits, - and _ (examples/<name>/)"
+            )
+            self.example_overwrite = server.gui.add_checkbox("Overwrite existing example", False)
+            self.save_example = server.gui.add_button("Save as example")
             self.autosave = server.gui.add_checkbox(
                 "Autosave", True, hint="save to the project folder when changed"
             )
@@ -123,25 +144,55 @@ class ProjectPanel:
         def _(e) -> None:
             self.load_example(self.example.value, e)
 
+        @self.save_example.on_click
+        def _(e) -> None:
+            try:
+                path = self.save_as_example(self.example_name.value, self.example_overwrite.value)
+            except (OSError, ValidationError, ValueError) as err:
+                return _notify(e, "Save as example failed", str(err))
+            _notify(e, "Example saved", str(path), ok=True)
+
         if autosave_thread:
             threading.Thread(target=self._autosave_loop, daemon=True).start()
 
     def load_example(self, name: str, e=None) -> bool:
-        """Copy examples/<name> to workspace/examples/<name> (so saving never edits the
-        shipped copy) and load it. An existing workspace copy is replaced."""
+        """Examples are read-only templates: copy examples/<name> to a NEW working folder
+        workspace/examples/<name>[_2, _3, ...] and open that. Saving and autosave write the
+        copy; earlier copies (your edits) are never replaced."""
         if name not in list_examples():
             _notify(e, "No example", "Choose an example first")
             return False
-        dest = REPO / "workspace" / "examples" / name
-        if dest.exists():
-            shutil.rmtree(dest)
-        shutil.copytree(EXAMPLES / name, dest)
+        dest = _example_copy(name)
+        shutil.copytree(EXAMPLES / name, dest, dirs_exist_ok=True)
         self.folder.value = dest.relative_to(REPO).as_posix()
         return self._load(e, dest)
+
+    def save_as_example(self, name: str, overwrite: bool = False) -> Path:
+        """Write the current project to examples/<name>/ (with its project-local assets) so
+        it shows up under Examples. The only way the GUI writes into examples/."""
+        name = name.strip()
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", name):
+            raise ValueError("example name: 1-64 letters, digits, - or _")
+        dest = EXAMPLES / name
+        if (dest / "project.json").exists() and not overwrite:
+            raise ValueError(f"example '{name}' exists: tick 'Overwrite existing example'")
+        project = self.s.snapshot()
+        dest.mkdir(parents=True, exist_ok=True)
+        src_assets = Path(self.s.project_dir) / "assets"
+        if src_assets.is_dir() and src_assets.resolve() != (dest / "assets").resolve():
+            shutil.copytree(src_assets, dest / "assets", dirs_exist_ok=True)
+        tmp = dest / "project.json.tmp"
+        schema.save_project(project, tmp)
+        tmp.replace(dest / "project.json")
+        self.example.options = (NO_EXAMPLE, *list_examples())
+        return dest / "project.json"
 
     # --- saving -------------------------------------------------------------------------------
 
     def save_now(self, project_dir: Path | None = None) -> Path:
+        target = Path(project_dir if project_dir is not None else self.s.project_dir).resolve()
+        if target.is_relative_to(EXAMPLES.resolve()):
+            raise ValueError("examples/ holds read-only templates: use 'Save as example' to change one")
         with self._lock:
             path = save_project(self.s, project_dir)
             self._saved_json = path.read_text(encoding="utf-8")
@@ -190,6 +241,9 @@ class ProjectPanel:
     # --- loading ------------------------------------------------------------------------------
 
     def _load(self, e, project_dir: Path) -> bool:
+        d = Path(project_dir).resolve()
+        if d.is_relative_to(EXAMPLES.resolve()) and d.parent == EXAMPLES.resolve():
+            return self.load_example(d.name, e)  # never work inside the shipped templates
         try:
             load_project(self.s, project_dir)
         except (OSError, ValueError, ValidationError) as err:  # session untouched on failure

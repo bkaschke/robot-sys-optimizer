@@ -61,17 +61,33 @@ class Zones:
         return np.asarray(g.exterior.coords)
 
 
+_BVH: dict[int, tuple] = {}  # id(mesh) -> (mesh, BVH); the mesh is kept so its id stays unique
+
+
+def _bvh(m: trimesh.Trimesh):
+    """Coal BVH of a mesh, built once per mesh object (the planner calls distance_3d for
+    thousands of candidate stations with the same part and body meshes)."""
+    import coal
+
+    hit = _BVH.get(id(m))
+    if hit is not None and hit[0] is m:
+        return hit[1]
+    b = coal.BVHModelOBBRSS()
+    b.beginModel(len(m.faces), len(m.vertices))
+    b.addVertices(np.ascontiguousarray(m.vertices, dtype=float))
+    b.addTriangles(np.ascontiguousarray(m.faces, dtype=np.int64))
+    b.endModel()
+    if len(_BVH) > 64:
+        _BVH.clear()
+    _BVH[id(m)] = (m, b)
+    return b
+
+
 def distance_3d(bodies, part_mesh: trimesh.Trimesh, T_world_part: np.ndarray) -> float:
     """Smallest 3D distance between carrier bodies (core.carrier.Body) and the part (Coal)."""
     import coal
 
-    def bvh(m: trimesh.Trimesh):
-        b = coal.BVHModelOBBRSS()
-        b.beginModel(len(m.faces), len(m.vertices))
-        b.addVertices(np.ascontiguousarray(m.vertices, dtype=float))
-        b.addTriangles(np.ascontiguousarray(m.faces, dtype=np.int64))
-        b.endModel()
-        return b
+    bvh = _bvh
 
     def tf(T: np.ndarray):
         return coal.Transform3s(np.asarray(T[:3, :3]), np.asarray(T[:3, 3]))

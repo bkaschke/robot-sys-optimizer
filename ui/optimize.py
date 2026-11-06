@@ -19,6 +19,8 @@ from core.robot import Robot
 from ui.session import Session
 from ui.widgets import notify
 
+INSPECT_SOURCES = ("feasibility check", "selected plan (Results)")
+
 
 class OptimizeTab:
     def __init__(
@@ -43,6 +45,7 @@ class OptimizeTab:
             self.progress = gui.add_progress_bar(0.0, visible=False)
             self.summary = gui.add_markdown("_Not run yet._")
         with gui.add_folder("Inspect result"):
+            self.source = gui.add_dropdown("Show", INSPECT_SOURCES, initial_value=INSPECT_SOURCES[1])
             self.pick = gui.add_slider("Point #", 0, 1, 1, 0)
             self.detail = gui.add_markdown("")
             self.goto = gui.add_button("Move robot to this solution")
@@ -50,13 +53,21 @@ class OptimizeTab:
         self.run.on_click(lambda e: self.start(e))
         self.stop.on_click(lambda e: self._cancel.set())
         self.pick.on_update(lambda e: self._show_detail())
+        self.source.on_update(lambda e: self.refresh_inspect())
+        # set by app.py: () -> (Solution | None, {point id: PointResult}) of the Results selection
+        self.solution_points: Callable[[], tuple] | None = None
+        self.move_to_point: Callable[[object, int], None] | None = None  # (solution, point id)
 
         @self.goto.on_click
         def _(e) -> None:
             r = self._selected()
             if r is None or r.q is None:
                 return notify(e, "No solution", "This point has no feasible joint solution")
-            self.show_q(r.q)
+            sol = self._solution()
+            if sol is not None and self.move_to_point is not None:
+                self.move_to_point(sol, r.id)  # carrier / base to the point's station, then the arm
+            else:
+                self.show_q(r.q)
 
     # --- running -------------------------------------------------------------------------
 
@@ -124,14 +135,36 @@ class OptimizeTab:
             + ("" if done == total else f"  \n⚠ cancelled after {done}/{total} points")
             + "".join(f"  \n_{n}_" for n in notes)
         )
-        self.pick.max = max(1, len(res) - 1)
-        self._show_detail()
+        self.source.value = INSPECT_SOURCES[0]
+        self.refresh_inspect()
         self.on_results()
 
     # --- inspection ------------------------------------------------------------------------
 
+    def _solution(self):
+        """The Results selection when the inspector shows plan results, else None."""
+        if self.source.value != INSPECT_SOURCES[1] or self.solution_points is None:
+            return None
+        sol, _ = self.solution_points()
+        return sol
+
+    def _results(self) -> list:
+        if self.source.value == INSPECT_SOURCES[1] and self.solution_points is not None:
+            _, res = self.solution_points()
+            return [res[k] for k in sorted(res)]
+        return list(self.s.feasibility.values())
+
+    def refresh_inspect(self, source: str | None = None) -> None:
+        """Re-read the shown results (after a check, a new plan / tool result, or another
+        Results selection) so the inspector never shows a stale run."""
+        if source is not None and source != self.source.value:
+            self.source.value = source  # fires refresh_inspect again
+            return
+        self.pick.max = max(1, len(self._results()) - 1)
+        self._show_detail()
+
     def _selected(self):
-        res = list(self.s.feasibility.values())
+        res = self._results()
         if not res:
             return None
         return res[int(np.clip(self.pick.value, 0, len(res) - 1))]
@@ -139,14 +172,26 @@ class OptimizeTab:
     def _show_detail(self) -> None:
         r = self._selected()
         if r is None:
-            self.detail.content = ""
+            self.detail.content = (
+                "_No plan selected in Results._"
+                if self.source.value == INSPECT_SOURCES[1]
+                else "_Not run yet._"
+            )
             return
+        sol = self._solution()
+        where = ""
+        if sol is not None and r.id in sol.assignment:
+            where = f" at station **S{sol.assignment[r.id] + 1}**"
+            if r.zone is not None:
+                where += f", zone {r.zone + 1} #{(r.seq or 0) + 1} ({r.config})"
+        elif sol is not None:
+            where = f" ({sol.label})"
         if r.status == "unreachable":
-            self.detail.content = f"Point **{r.id}**: unreachable ({r.reason})"
+            self.detail.content = f"Point **{r.id}**{where}: unreachable ({r.reason})"
             return
         q = ", ".join(f"{v:.1f}" for v in np.degrees(r.q))
         self.detail.content = (
-            f"Point **{r.id}**: {r.status} with TCP `{r.tcp}`  \n"
+            f"Point **{r.id}**{where}: {r.status} with TCP `{r.tcp}`  \n"
             f"spin {r.spin_deg:.0f}°, tilt {r.tilt_deg:.1f}°, standoff {r.standoff * 1000:.0f} mm  \n"
             f"clearance {r.clearance * 1000:.1f} mm · manipulability {r.manipulability:.3f} · "
             f"torque {100 * r.torque_util:.0f}% · limit margin {r.limit_margin_deg:.0f}°  \n"

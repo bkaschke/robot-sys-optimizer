@@ -35,7 +35,9 @@ class ToolOptPanel:
         with gui.add_folder("Tool geometry"):
             opt = session.extra.get("optimizer") or Optimizer()
             self.max_stations = gui.add_number("Max stations", opt.max_stations, min=1, max=12, step=1)
-            self.tol = gui.add_number("Length tolerance (mm)", 1.0, min=0.2, max=20.0, step=0.5)
+            self.tol = gui.add_number(
+                "Length tolerance (mm)", 1.0, min=0.01, step=0.5
+            )  # user-defined, no upper limit
             self.shape_evals = gui.add_number("Bend/offset/roll evaluations", 30, min=0, max=300, step=5)
             self.run = gui.add_button("Find shortest tool", color="green")
             self.stop = gui.add_button("Cancel", visible=False)

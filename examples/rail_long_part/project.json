@@ -653,7 +653,7 @@
       "L",
       "base"
     ],
-    "max_stations": 1,
+    "max_stations": 4,
     "weights": {
       "L": 1.0,
       "unreached": 1000.0,

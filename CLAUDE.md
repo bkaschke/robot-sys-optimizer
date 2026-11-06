@@ -293,6 +293,15 @@ $PY scripts/import_ur_description.py <clone> ur20   # re-import a UR model (see 
   - `core/payload.py` fails tools over the curve and notes when the estimate was used.
   - `is_complete()` accepts the curve in place of wrist moments.
 
+## v2 phase 1 (branch `v2`, docs/V2_PLAN.md)
+
+- **Cancel:** `FeasibilityChecker.cancelled` (polled per candidate pose) raises `core.feasibility.CancelledError`; `plan_stations` sets it, catches it and returns the plans finished so far. CP-SAT solves go through `placement._solve` (a watcher thread calls `stop_search`). Site candidates poll every 256 samples. The tool optimizer passes it to every checker; stage B (`_shape_search`) keeps its incumbent in a shared list.
+- **Viser callbacks run on a thread pool** (concurrent, unordered). `ui.widgets.Latest` wraps drag callbacks (joint sliders, carrier sliders, pose gizmos/fields, part-move listener): calls arriving while one runs collapse into one run with the newest arguments; an idle call runs synchronously (tests rely on it). `PoseWidgets._apply(source="gizmo")` no longer writes the pose back to the gizmo being dragged.
+- **Carrier panel:** `draw()` (full, rebuilds `_zones` and body meshes) vs `_jog()` → `_move_bodies` (re-pose `_body_handles`, `_update_info`). `set_values(dofs)` moves carrier + base (used by Results → **Move robot to station** = `ResultsTab.go_to_station`, and `go_to_point`). `_carrier()` caches the Carrier per `Base` object (footprint caches live on it). `cell.pose_listeners` fire on part moves.
+- **Inspector:** Optimize → *Inspect result* → *Show* = feasibility check or the selected plan (`OptimizeTab.solution_points`, `move_to_point`; `refresh_inspect` on new results and Results selection).
+- **Examples are templates:** `load_example` copies to `workspace/examples/<name>[_k]`, reusing a copy only while its project.json equals the shipped one; `save_now` refuses folders under `examples/`; `save_as_example(name, overwrite)` is the only writer there. `save_project` to another folder copies `assets/` along. `Optimizer.max_stations` defaults to 4; `restore_work` puts the project's value into both panels before saved panel settings.
+- **Line endings:** the working tree is CRLF (autocrlf). PowerShell `.Replace("...`n...")` silently misses multi-line text; use the Edit tool or Python (`read_text` normalizes).
+
 ## Joint-configuration zoning (post-v1)
 
 - **Labels (`core/configs.py`):** `S±E±W±` = signs of the three factors of |det J|: horizontal reach a2·c2 + a3·c23 + d5·s234 (shoulder), sin q3 (elbow), sin q5 (wrist). They are distinct for all 8 analytic branches (tested on 200 random poses) and invariant to ±2π copies. Non-UR arms: `E±W±`.

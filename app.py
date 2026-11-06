@@ -8,12 +8,13 @@ import time
 import numpy as np
 import viser
 
+from core.schema import Optimizer
 from core.transforms import make_T
 from ui import settings as ui_settings
 from ui.carrier_ui import CarrierPanel
 from ui.cell import CellTab
 from ui.guide import GuideServer, add_guide_panel
-from ui.optimize import OptimizeTab
+from ui.optimize import INSPECT_SOURCES, OptimizeTab
 from ui.placement import PlacementPanel
 from ui.project_panel import ProjectPanel
 from ui.results import ResultsTab
@@ -22,6 +23,7 @@ from ui.stations import StationsPanel
 from ui.targets_ui import TargetsTab
 from ui.tool_opt import ToolOptPanel
 from ui.tool_setup import ToolSetupTab
+from ui.widgets import Latest
 
 TABS = ("Tool Setup", "Cell", "External Axis", "Targets", "Optimize", "Results")
 UR_NOTICE = (
@@ -91,6 +93,10 @@ def build_app(
             faces = np.asarray(sel[1], dtype=int)
             if m is not None and (len(faces) == 0 or faces.max() < len(m.faces)):
                 t.selection = faces
+        # the project's station limit first; saved panel settings (if any) override it
+        n = (session.extra.get("optimizer") or Optimizer()).max_stations
+        for panel in (state["stations"], state["tool_opt"]):
+            panel.max_stations.value = float(min(max(n, 1), 12))
         ui_settings.apply(state, session.ui)
         t.refresh()
 
@@ -100,6 +106,10 @@ def build_app(
         part = session.part
         session.selection = (part.mesh_path, [int(f) for f in t.selection]) if part is not None else None
         session.ui = ui_settings.collect(state)
+        opt = session.extra.get("optimizer") or Optimizer()
+        session.extra["optimizer"] = opt.model_copy(
+            update={"max_stations": int(state["stations"].max_stations.value)}
+        )
 
     session.before_save.append(collect_work)
     project = ProjectPanel(
@@ -120,6 +130,7 @@ def build_app(
     targets.tools.on_mesh_replaced = cell.refresh_part
     cell.part_listeners.append(targets.on_part_changed)
     cell.part_listeners.append(carrier.draw)
+    cell.pose_listeners.append(Latest(carrier.draw))  # standoff shells follow a moved part
 
     def on_results() -> None:
         targets.color_by.value = "feasibility"
@@ -128,13 +139,19 @@ def build_app(
     with tab_handles["Optimize"]:
         optimize = OptimizeTab(server, session, on_results, show_q=cell.set_q)
         placement = PlacementPanel(server, session, set_base=cell.set_base)
-        stations = StationsPanel(server, session, on_solution=lambda: state["results"].refresh())
+
+        def new_results() -> None:
+            """A plan or tool result arrived: list it, and inspect the selected plan."""
+            state["results"].refresh()
+            optimize.refresh_inspect(INSPECT_SOURCES[1])
+
+        stations = StationsPanel(server, session, on_solution=new_results)
 
         def apply_values(v) -> None:
             if tool._commit(lambda d: d["extension"]["nominal"].update(v.model_dump())):
                 tool._after(full=True)
 
-        tool_opt = ToolOptPanel(server, session, apply_values, on_solution=lambda: state["results"].refresh())
+        tool_opt = ToolOptPanel(server, session, apply_values, on_solution=new_results)
     with tab_handles["Results"]:
         results = ResultsTab(server, session, set_base=cell.set_base)
     state["results"] = results
@@ -145,8 +162,17 @@ def build_app(
         return session.result_points.get(sol.label, {}) if sol is not None else {}
 
     targets.selected_results = selected_results
-    results.choice.on_update(lambda e: targets._draw_points())  # zone / configuration colours
+    optimize.solution_points = lambda: (results.selected(), selected_results())
+    optimize.move_to_point = results.go_to_point
+
+    def on_selection(_e=None) -> None:
+        targets._draw_points()  # zone / configuration colours
+        optimize.refresh_inspect()  # the inspector follows the Results selection
+
+    results.choice.on_update(on_selection)
     results.tool_opt = tool_opt
+    results.move_carrier = carrier.set_values
+    results.set_q = cell.set_q
     server.gui.add_markdown(UR_NOTICE)
 
     state.update(

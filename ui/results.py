@@ -42,7 +42,7 @@ class ResultsTab:
         self.summary = gui.add_markdown("_No results yet: run the station planner (Optimize tab)._")
         self.breakdown = gui.add_markdown("")
         self.station = gui.add_dropdown("Station", ("-",))
-        self.goto = gui.add_button("Move base to station")
+        self.goto = gui.add_button("Move robot to station")
         self.show_lines = gui.add_checkbox("Lines to served points", True)
         self.show_ghosts = gui.add_checkbox("Ghost robots", True)
         self.clear = gui.add_button("Clear from scene")
@@ -50,6 +50,8 @@ class ResultsTab:
 
         self.export = ExportPanel(server, session, self.selected, length_samples=self._length_samples)
         self.tool_opt = None  # set by app.py: the tool-geometry panel (coverage-vs-L samples)
+        self.move_carrier: Callable[[dict], None] | None = None  # set by app.py: carrier DOFs
+        self.set_q: Callable[[np.ndarray], None] | None = None  # set by app.py: arm joints
 
         for w in (self.choice, self.show_lines, self.show_ghosts):
             w.on_update(lambda e: None if self._busy else self.draw())
@@ -59,12 +61,38 @@ class ResultsTab:
             sol = self.selected()
             if sol is None or self.station.value == "-":
                 return
-            k = int(self.station.value.split()[0][1:]) - 1
-            self.set_base(station_T(sol.stations[k], self.s))
+            self.go_to_station(sol, int(self.station.value.split()[0][1:]) - 1)
 
         @self.clear.on_click
         def _(e) -> None:
             self._drop()
+
+    def go_to_station(self, sol, k: int) -> None:
+        """Move the robot to station k of ``sol``: the carrier DOFs (which carry the base) when
+        a carrier is set up, else the base pose; then the arm to the joint solution of the
+        first point that station serves (path order when zoned)."""
+        st = sol.stations[k]
+        if self.move_carrier is not None and st.carrier and self.s.base.mode == "movable":
+            self.move_carrier(st.carrier)
+        else:
+            self.set_base(station_T(st, self.s))
+        res = self.s.result_points.get(sol.label, {})
+        order = [p for z in sol.zones if z.station == k for p in z.points]
+        order += sorted(p for p, s in sol.assignment.items() if s == k)
+        for pid in order:
+            r = res.get(pid)
+            if r is not None and r.q is not None and self.set_q is not None:
+                self.set_q(np.asarray(r.q))
+                break
+
+    def go_to_point(self, sol, pid: int) -> None:
+        """Robot (carrier, base, arm) to point ``pid`` as solved in ``sol``."""
+        k = sol.assignment.get(pid)
+        r = self.s.result_points.get(sol.label, {}).get(pid)
+        if k is not None:
+            self.go_to_station(sol, k)
+        if r is not None and r.q is not None and self.set_q is not None:
+            self.set_q(np.asarray(r.q))
 
     def _length_samples(self, sol) -> list:
         r = getattr(self.tool_opt, "result", None)

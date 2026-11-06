@@ -421,7 +421,7 @@ FreeVar = Literal["L", "theta", "d", "roll", "base", "stations"]
 
 class Optimizer(_Model):
     free: list[FreeVar] = Field(default_factory=lambda: ["L", "base"])
-    max_stations: int = Field(default=1, ge=1)
+    max_stations: int = Field(default=4, ge=1)  # movable bases; static mode always plans one base
     weights: Weights = Field(default_factory=Weights)
     margins: Margins = Field(default_factory=Margins)
 

@@ -7,6 +7,7 @@ exist there are looked up relative to the repo (bundled assets such as golden pa
 
 from __future__ import annotations
 
+import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -227,7 +228,14 @@ def load_mesh(path: Path, units: str = "m") -> trimesh.Trimesh:
 
 
 def save_project(session: Session, project_dir: Path | None = None) -> Path:
+    """Save to ``project_dir`` (default: the current folder). Saving to another folder
+    ("save as") copies the project-local ``assets/`` along, so relative asset paths keep
+    resolving."""
     if project_dir is not None:
+        old_assets = Path(session.project_dir) / "assets"
+        new = Path(project_dir)
+        if old_assets.is_dir() and old_assets.resolve() != (new / "assets").resolve():
+            shutil.copytree(old_assets, new / "assets", dirs_exist_ok=True)
         session.project_dir = project_dir
     session.project_dir.mkdir(parents=True, exist_ok=True)
     path = session.project_dir / "project.json"

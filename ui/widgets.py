@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import threading
 from pathlib import Path
 
 import numpy as np
@@ -16,6 +17,40 @@ MAX_UPLOAD = 200 * 1024 * 1024
 def safe_name(name: str) -> str:
     stem = re.sub(r"[^A-Za-z0-9._-]", "_", Path(name).name)
     return stem.lstrip(".") or "upload"
+
+
+class Latest:
+    """Wrap a callback so only the newest call runs (drag smoothing).
+
+    Viser runs GUI/scene callbacks on a thread pool: during a drag, dozens of events arrive
+    and run concurrently and out of order, and the browser waits for all of them. With this
+    wrapper, a call that arrives while ``fn`` is running only records its arguments; when
+    ``fn`` returns it runs once more with the newest ones. Intermediate events are dropped.
+    A call on an idle wrapper runs synchronously in the caller's thread (tests rely on it).
+    """
+
+    def __init__(self, fn):
+        self.fn = fn
+        self._lock = threading.Lock()
+        self._pending = None
+        self._running = False
+
+    def __call__(self, *args) -> None:
+        with self._lock:
+            self._pending = args
+            if self._running:
+                return
+            self._running = True
+        try:
+            while True:
+                with self._lock:
+                    args, self._pending = self._pending, None
+                    if args is None:
+                        return
+                self.fn(*args)
+        finally:
+            with self._lock:
+                self._running = False
 
 
 def notify(event, title: str, body: str, ok: bool = False) -> None:
@@ -36,20 +71,25 @@ class PoseWidgets:
         self.show = server.gui.add_checkbox("Show gizmo", True)
         self.set(T)
 
+        from_gizmo = Latest(
+            lambda: self._apply(make_T(wxyz_to_matrix(self.gizmo.wxyz), self.gizmo.position), source="gizmo")
+        )
+        from_fields = Latest(lambda: self._apply(self._from_fields(), source="fields"))
+
         @self.gizmo.on_update
         def _(_e) -> None:
             if not self._syncing:
-                self._apply(make_T(wxyz_to_matrix(self.gizmo.wxyz), self.gizmo.position), source="gizmo")
+                from_gizmo()
 
         @self.xyz.on_update
         def _(_e) -> None:
             if not self._syncing:
-                self._apply(self._from_fields(), source="fields")
+                from_fields()
 
         @self.rpy.on_update
         def _(_e) -> None:
             if not self._syncing:
-                self._apply(self._from_fields(), source="fields")
+                from_fields()
 
         @self.show.on_update
         def _(_e) -> None:
@@ -65,11 +105,14 @@ class PoseWidgets:
     def _from_fields(self) -> np.ndarray:
         return make_T(rpy_to_matrix(np.radians(self.rpy.value)), np.array(self.xyz.value) / 1000)
 
-    def set(self, T: np.ndarray) -> None:
+    def set(self, T: np.ndarray, gizmo: bool = True) -> None:
+        """Show pose T. ``gizmo=False`` while the user drags the gizmo: writing its pose back
+        mid-drag would fight the drag in the browser."""
         self._syncing = True
         try:
-            self.gizmo.wxyz = matrix_to_wxyz(T[:3, :3])
-            self.gizmo.position = T[:3, 3]
+            if gizmo:
+                self.gizmo.wxyz = matrix_to_wxyz(T[:3, :3])
+                self.gizmo.position = T[:3, 3]
             # full precision: rounding here would leak into the pose on the next field edit
             self.xyz.value = tuple(float(v) for v in T[:3, 3] * 1000)
             self.rpy.value = tuple(float(v) for v in np.degrees(matrix_to_rpy(T[:3, :3])))
@@ -77,7 +120,7 @@ class PoseWidgets:
             self._syncing = False
 
     def _apply(self, T: np.ndarray, source: str) -> None:
-        self.set(T)
+        self.set(T, gizmo=source != "gizmo")
         self._on_change(T)
 
     def remove(self) -> None:

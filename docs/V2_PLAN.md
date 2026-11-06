@@ -16,7 +16,9 @@ Source: `v1_feedback.txt` (user's notes after testing v1). Decisions marked **(u
 
 Measured baseline (this PC, map cached): mobile example 27 s (36 s with zoning); rail example 5 s (14 s with zoning). Exact checks (scalar IK, `check_point`) are about 60 % of planning time.
 
-## Phase 1: fixes (small, do first)
+## Phase 1: fixes (small, do first): **done 2026-11-05 on branch `v2`** (tests/test_v2_phase1.py, tests/test_cancel.py; 219 tests pass)
+
+Extra, found while measuring: the planner's candidate filter rebuilt the carrier footprint (mesh transform, hulls, union) for each of about 11,600 candidates (18 s on the mobile example). `Carrier.footprint` / `footprint_moving` now compute the outline once in the carriage frame and move it (identical polygons, 13× faster), and `standoff.distance_3d` caches the Coal BVHs. Mobile example plan 47 s → 31 s, same result. Carrier jog step 21 ms → 3 ms (bodies re-posed, carrier object cached per base).
 
 1. Examples: `max_stations` 4; the movable-base default ≥ 3. A test that opens each example through the GUI and plans to full coverage with the panel defaults.
 2. Cancel within about 1 s: `cancelled()` per point in `verify` / `zone_solution`, per CMA-ES evaluation, and a CP-SAT solution callback that stops the search. Tool optimizer passes it down to every plan.

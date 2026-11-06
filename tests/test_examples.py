@@ -34,8 +34,8 @@ def test_example_loads_and_plans(app, name, kind, n_bodies):
     assert np.allclose(s.T_world_base, c.T_world_base(c.clip(panel.values())), atol=1e-6)
     assert panel.editor.pick.options == tuple(b.name for b in s.base.bodies)
 
-    st = app["stations"]
-    st.max_stations.value = 4
+    st = app["stations"]  # the panel defaults after opening the example (v1: max stations stayed 1)
+    assert st.max_stations.value == 4
     st.start(block=True)
     assert s.results, st.status.content
     best = min((r for r in s.results if not r.unreached), key=lambda r: len(r.stations))

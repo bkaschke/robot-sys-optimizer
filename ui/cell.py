@@ -20,7 +20,7 @@ from core.transforms import (
 from core.urdf_import import URDFImportError, import_urdf_zip
 from ui.robot_view import RobotView
 from ui.session import MESH_EXTS, MOUNT_RPY, UNIT_SCALE, PartState, Session, load_mesh
-from ui.widgets import MAX_UPLOAD, PoseWidgets
+from ui.widgets import MAX_UPLOAD, Latest, PoseWidgets
 from ui.widgets import notify as _notify
 from ui.widgets import safe_name as _safe_name
 
@@ -45,7 +45,9 @@ class CellTab:
         self._busy = False  # set while the code (not the user) updates widgets
         self.listeners: list = []  # called with T_world_flange after any robot move
         self.part_listeners: list = []  # called after the part mesh/units change
+        self.pose_listeners: list = []  # called after the part is moved (gizmo or fields)
         self.on_part_click = None  # set by the Targets tab: fn(event)
+        self._jog_latest = Latest(self._on_slider)  # slider drags: newest value only
 
         with server.gui.add_folder("Robot"):
             robots = (*list_robots(), UPLOADED)
@@ -169,6 +171,8 @@ class CellTab:
     def _on_part_pose(self, T: np.ndarray) -> None:
         if self.s.part is not None:
             self.s.part.T_world_part = T
+            for fn in self.pose_listeners:  # e.g. the carrier standoff shells follow the part
+                fn()
 
     # --- scene refresh ------------------------------------------------------------
 
@@ -219,7 +223,7 @@ class CellTab:
                 sl = self.server.gui.add_slider(
                     name, float(np.degrees(lo)), float(np.degrees(hi)), 0.1, float(np.degrees(v))
                 )
-                sl.on_update(lambda _e: self._on_slider())
+                sl.on_update(lambda _e: self._jog_latest())
                 self.sliders.append(sl)
         self.robot_choice.value = s.robot_name or UPLOADED
         self.mount.value = s.mount

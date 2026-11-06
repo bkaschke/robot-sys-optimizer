@@ -54,7 +54,7 @@ Then try a full job on the test plate:
 
 Tick **Dark mode** at the top of the panel at any time.
 
-**Ready-made examples:** **Project** → *Examples* → `rail_long_part` (UR20 on a 7th-axis rail) or `mobile_amr` (UR20 on a mobile robot built from simple shapes) → **Open example** → **Optimize** → **Plan stations**. The example is copied to `workspace/examples/<name>/` first, so saving never changes the shipped copy.
+**Ready-made examples:** **Project** → *Examples* → `rail_long_part` (UR20 on a 7th-axis rail) or `mobile_amr` (UR20 on a mobile robot built from simple shapes) → **Open example** → **Optimize** → **Plan stations**. Examples are read-only templates: opening one makes a working copy in `workspace/examples/<name>/` (`<name>_2`, … when an earlier copy has your changes, which is never replaced), and saving or autosave only ever writes that copy.
 
 ---
 
@@ -208,7 +208,7 @@ The cost J weighs tool length, unreached points, extra stations, travel, manipul
 - **Project**: *Folder* (relative to the repo, or absolute), **Save** / **Load** (`<folder>/project.json`), **Download project.json**, **Open project.json** (upload). Loading never half-applies: a broken project leaves the current session untouched.
   - **Autosave** (on by default) saves to the current project folder every *Autosave every (min)* minutes (default 2) when something changed. The line under it shows the last save time.
   - **Reopen where you left off**: the app remembers the last project you saved, loaded or autosaved, and opens it at the next start. Start with `--fresh` (e.g. `scripts\run_app.bat --fresh`) for the default cell instead.
-  - A project brings back the whole cell **and** where you were: the arm's joint pose, the surface selection, feasibility colours, every plan's joint solutions (ghost robots, CSV export without re-planning), the selected solution, and the panel settings (spacing, brush, check and planner settings, display options, dark mode). *Examples* + **Open example** loads a shipped example project (copied to `workspace/examples/<name>/`).
+  - A project brings back the whole cell **and** where you were: the arm's joint pose, the surface selection, feasibility colours, every plan's joint solutions (ghost robots, CSV export without re-planning), the selected solution, and the panel settings (spacing, brush, check and planner settings, display options, dark mode). *Examples* + **Open example** opens a working copy of a shipped example (see Quickstart). To add or update an example, type a *New example name* and click **Save as example** (tick *Overwrite existing example* to replace one); this is the only way the app writes into `examples/`. Saving a project to another folder takes its uploaded meshes (`assets/`) along.
 
 ### Tool Setup tab
 
@@ -241,7 +241,7 @@ Build the carrier (external axis) the robot rides on, mount the robot on it, and
 | **Robot mount** | *Mount on body* + **Snap robot to top of body** puts the robot base on the top centre of that body (keeps the yaw). Fine-tune with *Mount xyz / rpy* (robot base in the carriage frame) or **Drag mount with gizmo**. |
 | **Standoff and safety** | *Part standoff min / preferred*: carrier-to-part distance; the minimum is hard, closer than preferred adds a cost. It is measured in 3D, so a carrier may sit partly under a raised part: model fixtures and stands as part of the mesh or as keep-outs. *Keep-outs*: floor rectangles `x0,y0,x1,y1; ...` in mm. *Localization* (mobile): position/heading error every stop must tolerate. *Tip-over check* (mobile, needs a mass on at least one body). |
 | **Apply base settings** | Commits the axis-type and safety fields. Body and mount edits apply immediately. |
-| **Carrier position** | Sliders move the carrier, and the robot with it. The readout gives the footprint-to-part distance. |
+| **Carrier position** | Sliders move the carrier, and the robot with it. The readout gives the footprint-to-part distance; it and the red/amber standoff outlines follow the part when you move it. |
 
 Every body collides with the arm and tool (from the upper arm on), and counts for standoff and keep-outs. Bodies touching the floor form the **support polygon** for the tip-over check (e.g. the four wheels), and every body's mass counts. Drawing: red line = minimum standoff, amber = preferred, red boxes = keep-outs.
 
@@ -263,10 +263,10 @@ Points are stored **in the part frame**, so moving the part moves them with it.
 
 | Section | What it does |
 | --- | --- |
-| **Feasibility check** | **Check all targets** from the current base, with clearance, joint margin and torque limit as settings. The summary gives counts and reasons. *Inspect result* → **Move robot to this solution** jogs the arm to any point's solution. |
+| **Feasibility check** | **Check all targets** from the current base, with clearance, joint margin and torque limit as settings. The summary gives counts and reasons. *Inspect result* shows either the feasibility check or, by default, the **plan selected in the Results tab** (*Show*); it switches to each new plan or tool result automatically. **Move robot to this solution** moves the carrier (or base) to the point's station and the arm to its solution. |
 | **Base placement (reachability)** | **Show base heatmap** draws where the base could stand on the floor (bright = all points reachable with the best worst-case manipulability) and marks the best spot. **Move base to best** moves it there. Ignores collisions: confirm with the feasibility check. |
-| **Station planner** | **Plan stations** finds the fewest stations that reach every point, within *Max stations* (static mode = 1). Each solution goes to the Results tab as soon as it finishes. *Candidate grid* sets the search resolution; *Refine* turns the exact fine-tuning on or off. *Joint configuration* = **zones (minimize changes)** groups each stop's points into zones that keep one arm configuration and puts each zone in path order (see *Joint-configuration zones* below); *Cost per config change* sets how much a change costs (a stop costs 5). |
-| **Tool geometry** | **Find shortest tool** first finds the shortest L that still reaches everything within the station limit, then tunes θ / d / roll. It shows a coverage-vs-length table. **Apply to tool** writes the values into Tool Setup. |
+| **Station planner** | **Plan stations** finds the fewest stations that reach every point, within *Max stations* (static mode = 1). Each solution goes to the Results tab as soon as it finishes. *Candidate grid* sets the search resolution; *Refine* turns the exact fine-tuning on or off. **Cancel** stops within about a second and keeps the plans already finished. *Joint configuration* = **zones (minimize changes)** groups each stop's points into zones that keep one arm configuration and puts each zone in path order (see *Joint-configuration zones* below); *Cost per config change* sets how much a change costs (a stop costs 5). |
+| **Tool geometry** | **Find shortest tool** first finds the shortest L that still reaches everything within the station limit, then tunes θ / d / roll. It shows a coverage-vs-length table. *Length tolerance* (mm) is up to you (no upper limit). **Cancel** stops within about a second and keeps the best result so far. **Apply to tool** writes the values into Tool Setup. |
 
 ### Joint-configuration zones
 
@@ -283,7 +283,7 @@ It also re-runs the tip-over and localization checks for the chosen solutions. I
 
 - **Solution**: the ranked list (best cost first). It shows a summary (with the zones and configuration changes when zoning is on), the cost breakdown bars and the station list.
 - **Scene**: coloured station markers, **lines to served points**, and **ghost robots** posed at a real solution.
-- **Move base to station**: puts the live robot at a station.
+- **Move robot to station**: moves the carrier to the station's axis values (the robot base rides on it; static: the base itself) and the arm to the first point that station serves.
 - **Export**:
   - **TCP poses (CSV)**
   - **Optimized tool URDF (zip)**

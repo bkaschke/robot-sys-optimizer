@@ -23,6 +23,7 @@ from xml.sax.saxutils import quoteattr
 import numpy as np
 import pinocchio as pin
 import trimesh
+from shapely.affinity import affine_transform
 from shapely.geometry import MultiPoint, Polygon
 from shapely.ops import unary_union
 
@@ -226,12 +227,44 @@ class Carrier:
             return []
         return self._bodies("fixed", self.T_frame)
 
-    def footprint(self, v: dict) -> Polygon | None:
+    @staticmethod
+    def _hulls(bodies: list[Body]) -> Polygon | None:
         polys = []
-        for body in self.moving_bodies(v) + self.static_bodies():
+        for body in bodies:
             w = body.mesh.vertices @ body.T[:3, :3].T + body.T[:3, 3]
             polys.append(MultiPoint(w[:, :2]).convex_hull)
         return unary_union(polys) if polys else None
+
+    def _local(self, key: str, make):
+        """Cached geometry computed in the carriage frame (the bodies are rigid in it)."""
+        cache = self.__dict__.setdefault("_local_cache", {})
+        if key not in cache:
+            cache[key] = make()
+        return cache[key]
+
+    def _moved(self, poly: Polygon | None, T: np.ndarray) -> Polygon | None:
+        """Carriage-frame polygon -> world xy, for a carriage pose that only turns about z."""
+        if poly is None:
+            return None
+        return affine_transform(poly, [T[0, 0], T[0, 1], T[1, 0], T[1, 1], T[0, 3], T[1, 3]])
+
+    def footprint(self, v: dict) -> Polygon | None:
+        """Floor footprint (union of each body's convex hull) at DOF values v. The carriage
+        outline is computed once in the carriage frame and moved, which keeps the planner's
+        standoff filter (thousands of candidates) and the GUI jog cheap."""
+        if self.kind == "static":
+            return None
+        Tc = self.T_world_carriage(v)
+        if abs(Tc[2, 2] - 1.0) > 1e-9:  # tilted carriage: project the bodies directly
+            moving = self._hulls(self.moving_bodies(v))
+        else:
+            local = self._local("fp", lambda: self._hulls(self._bodies("carriage", np.eye(4))))
+            moving = self._moved(local, Tc)
+        static = self._local("fp_static", lambda: self._hulls(self.static_bodies()))
+        polys = [p for p in (moving, static) if p is not None]
+        if not polys:
+            return None
+        return polys[0] if len(polys) == 1 else unary_union(polys)
 
     # --- planning helpers ----------------------------------------------------------------------
 
@@ -318,12 +351,19 @@ class Carrier:
     def footprint_moving(self, v: dict) -> Polygon:
         """Support polygon: convex hull of the carriage bodies that reach the floor (lowest
         within 20 mm of the lowest carriage point), e.g. the chassis or the wheels."""
-        world = [b.mesh.vertices @ b.T[:3, :3].T + b.T[:3, 3] for b in self.moving_bodies(v)]
-        if not world:
-            raise ValueError("carrier has no carriage bodies")
-        z0 = min(w[:, 2].min() for w in world)
-        pts = np.vstack([w for w in world if w[:, 2].min() <= z0 + 0.02])
-        return MultiPoint(pts[:, :2]).convex_hull
+
+        def support(bodies: list[Body]) -> Polygon:
+            world = [b.mesh.vertices @ b.T[:3, :3].T + b.T[:3, 3] for b in bodies]
+            if not world:
+                raise ValueError("carrier has no carriage bodies")
+            z0 = min(w[:, 2].min() for w in world)
+            pts = np.vstack([w for w in world if w[:, 2].min() <= z0 + 0.02])
+            return MultiPoint(pts[:, :2]).convex_hull
+
+        Tc = self.T_world_carriage(v)
+        if abs(Tc[2, 2] - 1.0) > 1e-9:
+            return support(self.moving_bodies(v))
+        return self._moved(self._local("support", lambda: support(self._bodies("carriage", np.eye(4)))), Tc)
 
     # --- URDF ---------------------------------------------------------------------------------
 

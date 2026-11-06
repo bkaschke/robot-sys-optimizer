@@ -71,7 +71,7 @@ main{margin-left:0;padding:16px}}
 <li><strong>Project</strong> (top of the panel) → <strong>Save</strong> stores everything in <code>workspace/default/project.json</code>. Autosave also does this every 2 minutes, and the next start reopens the project where you left off.</li>
 </ol>
 <p>Tick <strong>Dark mode</strong> at the top of the panel at any time.</p>
-<p><strong>Ready-made examples:</strong> <strong>Project</strong> → <em>Examples</em> → <code>rail_long_part</code> (UR20 on a 7th-axis rail) or <code>mobile_amr</code> (UR20 on a mobile robot built from simple shapes) → <strong>Open example</strong> → <strong>Optimize</strong> → <strong>Plan stations</strong>. The example is copied to <code>workspace/examples/&lt;name&gt;/</code> first, so saving never changes the shipped copy.</p>
+<p><strong>Ready-made examples:</strong> <strong>Project</strong> → <em>Examples</em> → <code>rail_long_part</code> (UR20 on a 7th-axis rail) or <code>mobile_amr</code> (UR20 on a mobile robot built from simple shapes) → <strong>Open example</strong> → <strong>Optimize</strong> → <strong>Plan stations</strong>. Examples are read-only templates: opening one makes a working copy in <code>workspace/examples/&lt;name&gt;/</code> (<code>&lt;name&gt;_2</code>, … when an earlier copy has your changes, which is never replaced), and saving or autosave only ever writes that copy.</p>
 <hr />
 <h2 id="2-set-up-on-a-new-computer">2. Set up on a new computer</h2>
 <p>Tested on <strong>Windows 10/11</strong>. Linux and macOS should work with the same conda environment but have not been tested. <strong>No conda or internet on that PC?</strong> Use the portable copy in <a href="#25-portable-copy-for-a-pc-without-conda-or-internet">2.5</a>.</p>
@@ -229,7 +229,7 @@ $PY scripts/make_portable.py          # -&gt; dist/robot-sys-optimizer-portable-
 <ul>
 <li><strong>Autosave</strong> (on by default) saves to the current project folder every <em>Autosave every (min)</em> minutes (default 2) when something changed. The line under it shows the last save time.</li>
 <li><strong>Reopen where you left off</strong>: the app remembers the last project you saved, loaded or autosaved, and opens it at the next start. Start with <code>--fresh</code> (e.g. <code>scripts\run_app.bat --fresh</code>) for the default cell instead.</li>
-<li>A project brings back the whole cell <strong>and</strong> where you were: the arm's joint pose, the surface selection, feasibility colours, every plan's joint solutions (ghost robots, CSV export without re-planning), the selected solution, and the panel settings (spacing, brush, check and planner settings, display options, dark mode). <em>Examples</em> + <strong>Open example</strong> loads a shipped example project (copied to <code>workspace/examples/&lt;name&gt;/</code>).</li>
+<li>A project brings back the whole cell <strong>and</strong> where you were: the arm's joint pose, the surface selection, feasibility colours, every plan's joint solutions (ghost robots, CSV export without re-planning), the selected solution, and the panel settings (spacing, brush, check and planner settings, display options, dark mode). <em>Examples</em> + <strong>Open example</strong> opens a working copy of a shipped example (see Quickstart). To add or update an example, type a <em>New example name</em> and click <strong>Save as example</strong> (tick <em>Overwrite existing example</em> to replace one); this is the only way the app writes into <code>examples/</code>. Saving a project to another folder takes its uploaded meshes (<code>assets/</code>) along.</li>
 </ul>
 </li>
 </ul>
@@ -320,7 +320,7 @@ $PY scripts/make_portable.py          # -&gt; dist/robot-sys-optimizer-portable-
 </tr>
 <tr>
 <td><strong>Carrier position</strong></td>
-<td>Sliders move the carrier, and the robot with it. The readout gives the footprint-to-part distance.</td>
+<td>Sliders move the carrier, and the robot with it. The readout gives the footprint-to-part distance; it and the red/amber standoff outlines follow the part when you move it.</td>
 </tr>
 </tbody>
 </table>
@@ -376,7 +376,7 @@ $PY scripts/make_portable.py          # -&gt; dist/robot-sys-optimizer-portable-
 <tbody>
 <tr>
 <td><strong>Feasibility check</strong></td>
-<td><strong>Check all targets</strong> from the current base, with clearance, joint margin and torque limit as settings. The summary gives counts and reasons. <em>Inspect result</em> → <strong>Move robot to this solution</strong> jogs the arm to any point's solution.</td>
+<td><strong>Check all targets</strong> from the current base, with clearance, joint margin and torque limit as settings. The summary gives counts and reasons. <em>Inspect result</em> shows either the feasibility check or, by default, the <strong>plan selected in the Results tab</strong> (<em>Show</em>); it switches to each new plan or tool result automatically. <strong>Move robot to this solution</strong> moves the carrier (or base) to the point's station and the arm to its solution.</td>
 </tr>
 <tr>
 <td><strong>Base placement (reachability)</strong></td>
@@ -384,11 +384,11 @@ $PY scripts/make_portable.py          # -&gt; dist/robot-sys-optimizer-portable-
 </tr>
 <tr>
 <td><strong>Station planner</strong></td>
-<td><strong>Plan stations</strong> finds the fewest stations that reach every point, within <em>Max stations</em> (static mode = 1). Each solution goes to the Results tab as soon as it finishes. <em>Candidate grid</em> sets the search resolution; <em>Refine</em> turns the exact fine-tuning on or off. <em>Joint configuration</em> = <strong>zones (minimize changes)</strong> groups each stop's points into zones that keep one arm configuration and puts each zone in path order (see <em>Joint-configuration zones</em> below); <em>Cost per config change</em> sets how much a change costs (a stop costs 5).</td>
+<td><strong>Plan stations</strong> finds the fewest stations that reach every point, within <em>Max stations</em> (static mode = 1). Each solution goes to the Results tab as soon as it finishes. <em>Candidate grid</em> sets the search resolution; <em>Refine</em> turns the exact fine-tuning on or off. <strong>Cancel</strong> stops within about a second and keeps the plans already finished. <em>Joint configuration</em> = <strong>zones (minimize changes)</strong> groups each stop's points into zones that keep one arm configuration and puts each zone in path order (see <em>Joint-configuration zones</em> below); <em>Cost per config change</em> sets how much a change costs (a stop costs 5).</td>
 </tr>
 <tr>
 <td><strong>Tool geometry</strong></td>
-<td><strong>Find shortest tool</strong> first finds the shortest L that still reaches everything within the station limit, then tunes θ / d / roll. It shows a coverage-vs-length table. <strong>Apply to tool</strong> writes the values into Tool Setup.</td>
+<td><strong>Find shortest tool</strong> first finds the shortest L that still reaches everything within the station limit, then tunes θ / d / roll. It shows a coverage-vs-length table. <em>Length tolerance</em> (mm) is up to you (no upper limit). <strong>Cancel</strong> stops within about a second and keeps the best result so far. <strong>Apply to tool</strong> writes the values into Tool Setup.</td>
 </tr>
 </tbody>
 </table>
@@ -410,7 +410,7 @@ $PY scripts/make_portable.py          # -&gt; dist/robot-sys-optimizer-portable-
 <p><strong>Scene</strong>: coloured station markers, <strong>lines to served points</strong>, and <strong>ghost robots</strong> posed at a real solution.</p>
 </li>
 <li>
-<p><strong>Move base to station</strong>: puts the live robot at a station.</p>
+<p><strong>Move robot to station</strong>: moves the carrier to the station's axis values (the robot base rides on it; static: the base itself) and the arm to the first point that station serves.</p>
 </li>
 <li>
 <p><strong>Export</strong>:</p>

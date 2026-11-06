@@ -23,7 +23,7 @@ import numpy as np
 import trimesh
 
 from core.collision import CollisionScene
-from core.feasibility import FeasibilityChecker, PointResult
+from core.feasibility import CancelledError, FeasibilityChecker, PointResult
 from core.ik import make_ik
 from core.robot import Robot
 from core.schema import EndEffector, ExtensionValues, Solution, Weights
@@ -92,6 +92,7 @@ class _Evaluator:
         self.tcp = ee.tcps[0].name
         self.L_ref = max(ee.extension.L[1], 1e-6)
         self.max_manip = 1.0  # set from the reachability map on the first plan
+        self.cancelled: Callable[[], bool] | None = None  # polled by every exact check
 
     def tool(self, v: ExtensionValues) -> ToolModel:
         self.tm.ee = self.ee.model_copy(
@@ -105,7 +106,9 @@ class _Evaluator:
         scene = CollisionScene(
             self.robot, tm, self.part, self.T_base0, self.T_part, base_bodies=bb, world_bodies=wb
         )
-        return FeasibilityChecker(self.robot, self.ik, tm, scene, self.T_base0, self.T_part)
+        checker = FeasibilityChecker(self.robot, self.ik, tm, scene, self.T_base0, self.T_part)
+        checker.cancelled = self.cancelled
+        return checker
 
     def plan(self, v: ExtensionValues, cancelled=None):
         checker = self.checker(v)
@@ -205,6 +208,7 @@ def optimize_tool(
         st,
         sites=sites,
     )
+    ev.cancelled = cancelled
     x = ee.extension
     base_v = ExtensionValues(
         L=x.nominal.L,
@@ -248,6 +252,8 @@ def optimize_tool(
         samples.sort(key=lambda s: s.L)
         best = max(samples, key=lambda s: s.reached) if samples else None
         msg = "no tool length in range reaches every target"
+        if cancelled is not None and cancelled():
+            msg = "cancelled before a tool length reached every target"
         if best:
             msg += f" (best: {best.reached}/{n} at L = {best.L * 1000:.0f} mm)"
         return GeometryResult(False, base_v, None, {}, samples, msg)
@@ -271,8 +277,6 @@ def optimize_tool(
         if getattr(x, k)[1] - getattr(x, k)[0] > 1e-9 and (k == "roll_deg" or x.type == "bent")
     ]
     if active and st.shape_evals > 0 and not (cancelled is not None and cancelled()):
-        import cma
-
         bounds = np.array([getattr(x, k) for k in active], float)
 
         def values(u: np.ndarray) -> ExtensionValues:
@@ -284,35 +288,51 @@ def optimize_tool(
                 }
             )
 
-        best_cost, best_sol, best_res = ev.cost_at_stations(v_best, sol)
-        u0 = np.array(
-            [
-                (getattr(v_best, k) - bounds[i, 0]) / (bounds[i, 1] - bounds[i, 0])
-                for i, k in enumerate(active)
-            ]
-        )
-        if len(u0) == 1:  # CMA-ES does not support 1-D: pad with a coordinate values() ignores
-            u0 = np.append(u0, 0.5)
-        es = cma.CMAEvolutionStrategy(
-            u0, 0.25, {"bounds": [0, 1], "maxfevals": st.shape_evals, "verbose": -9, "seed": 2, "popsize": 6}
-        )
-        evals = 0
-        while not es.stop():
-            us = es.ask()
-            costs = []
-            for u in us:
-                c, s_new, r_new = ev.cost_at_stations(values(np.asarray(u)), sol)
-                costs.append(c)
-                if c < best_cost:
-                    best_cost, best_sol, best_res = c, s_new, r_new
-                evals += 1
-                say(f"shape {evals}/{st.shape_evals}", 0.6 + 0.4 * evals / st.shape_evals)
-            es.tell(us, costs)
-        sol, res, v_best = best_sol, best_res, best_sol.tool_values
+        best = [float("inf"), sol, res]  # cost, solution, results: updated as the search runs
+        try:
+            _shape_search(ev, st, v_best, sol, active, values, say, best)
+        except CancelledError:  # keep the best shape found so far
+            pass
+        sol, res = best[1], best[2]
+        v_best = sol.tool_values
     label = f"L {v_best.L * 1000:.0f} mm" + "".join(
         f", {k.split('_')[0]} {getattr(v_best, k):.1f}" for k in active
     )
     sol = sol.model_copy(update={"label": f"{label}: {sol.label}"})
     samples.sort(key=lambda s: s.L)
-    say("done", 1.0)
-    return GeometryResult(True, v_best, sol, res, samples, f"minimal L = {L_min * 1000:.1f} mm")
+    stopped = cancelled is not None and cancelled()
+    say("cancelled" if stopped else "done", 1.0)
+    msg = f"minimal L = {L_min * 1000:.1f} mm" + (" (cancelled: best found so far)" if stopped else "")
+    return GeometryResult(True, v_best, sol, res, samples, msg)
+
+
+def _shape_search(ev, st, v_best, sol, active, values, say, best: list) -> None:
+    """Stage B: CMA-ES over the active shape variables (normalized to [0, 1]) at the stage A
+    stations. ``best`` = [cost, solution, results] is updated in place after every
+    evaluation, so a CancelledError raised mid-way loses nothing already found."""
+    import cma
+
+    def consider(c, s_new, r_new) -> None:
+        if c < best[0]:
+            best[:] = [c, s_new, r_new]
+
+    consider(*ev.cost_at_stations(v_best, sol))
+    x = ev.ee.extension
+    lo_hi = [getattr(x, k) for k in active]
+    u0 = np.array([(getattr(v_best, k) - a) / (b - a) for k, (a, b) in zip(active, lo_hi, strict=True)])
+    if len(u0) == 1:  # CMA-ES does not support 1-D: pad with a coordinate values() ignores
+        u0 = np.append(u0, 0.5)
+    es = cma.CMAEvolutionStrategy(
+        u0, 0.25, {"bounds": [0, 1], "maxfevals": st.shape_evals, "verbose": -9, "seed": 2, "popsize": 6}
+    )
+    evals = 0
+    while not es.stop():
+        us = es.ask()
+        costs = []
+        for u in us:
+            c, s_new, r_new = ev.cost_at_stations(values(np.asarray(u)), sol)
+            costs.append(c)
+            consider(c, s_new, r_new)
+            evals += 1
+            say(f"shape {evals}/{st.shape_evals}", 0.6 + 0.4 * evals / st.shape_evals)
+        es.tell(us, costs)

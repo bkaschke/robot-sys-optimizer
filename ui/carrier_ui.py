@@ -22,7 +22,7 @@ from core.standoff import Zones, footprint
 from core.transforms import make_T, matrix_to_wxyz
 from ui.carrier_bodies import BodyEditor
 from ui.session import Session
-from ui.widgets import notify
+from ui.widgets import Latest, notify
 
 ROOT = "/cell/carrier"
 
@@ -75,6 +75,9 @@ class CarrierPanel:
         self._dof: dict = {}
         self._dof_sig = None
         self._busy = False
+        self._body_handles: dict = {}  # body name -> scene mesh handle (re-posed on jog)
+        self._moving_names: list[str] = []
+        self._zones = None  # standoff zones for the current part pose (rebuilt in draw)
         self.bodies: list[Primitive] = []
         self.mount_pose = Pose()
         gui = server.gui
@@ -98,6 +101,7 @@ class CarrierPanel:
         self.apply = gui.add_button("Apply base settings", color="green")
         self.dof_folder = gui.add_folder("Carrier position")
         self.info = gui.add_markdown("")
+        self._jog_latest = Latest(self._jog)  # slider drags: newest value only
         self.apply.on_click(lambda e: self.commit(e))
         # aliases kept for scripts/tests written against the M9 panel
         self.mount_xyz, self.mount_rpy = self.editor.mount_xyz, self.editor.mount_rpy
@@ -196,7 +200,15 @@ class CarrierPanel:
     def _carrier(self, base: Base | None = None):
         from core.carrier import Carrier
 
-        return Carrier(base or self.s.base, self.s.T_world_base, resolve=self.s.resolve)
+        b = base or self.s.base
+        if b.mode == "movable":  # movable carriers do not depend on T_world_base: reuse (caches)
+            hit = getattr(self, "_carrier_cache", None)
+            if hit is not None and hit[0] is b:
+                return hit[1]
+            c = Carrier(b, self.s.T_world_base, resolve=self.s.resolve)
+            self._carrier_cache = (b, c)
+            return c
+        return Carrier(b, self.s.T_world_base, resolve=self.s.resolve)
 
     # --- DOF sliders and drawing ---------------------------------------------------------------
 
@@ -222,7 +234,7 @@ class CarrierPanel:
                             1.0 if n == "yaw" else 10.0,
                             float(conv(v0.get(n, lo))),
                         )
-                        sl.on_update(lambda e: self._jog())
+                        sl.on_update(lambda e: self._jog_latest())
                         self._dof[n] = sl
         if c is not None:
             self._jog()
@@ -248,43 +260,78 @@ class CarrierPanel:
         if self._busy or self.s.base.mode != "movable":
             return
         c = self._carrier()
-        self.set_base(c.T_world_base(c.clip(self.values())))
-        self.draw()
+        v = c.clip(self.values())
+        self.set_base(c.T_world_base(v))
+        self._move_bodies(c, v)
+
+    def set_values(self, values: dict) -> None:
+        """Move the carrier to DOF values (SI units, e.g. a planned station): sliders, robot
+        base and bodies together."""
+        if self.s.base.mode != "movable" or not self._dof:
+            return
+        self._busy = True
+        try:
+            for n, sl in self._dof.items():
+                if n in values:
+                    x = float(np.degrees(values[n]) if n == "yaw" else values[n] * 1000)
+                    sl.value = float(np.clip(x, sl.min, sl.max))
+        finally:
+            self._busy = False
+        self._jog()
+
+    def _move_bodies(self, c, v: dict) -> None:
+        """Jog: re-pose the existing body meshes (no mesh re-send) and update the readout.
+        Falls back to a full draw when the body set changed."""
+        moving = c.moving_bodies(v)
+        if [b.name for b in moving] != self._moving_names:
+            return self.draw()
+        for body in moving:
+            h = self._body_handles[body.name]
+            h.wxyz = matrix_to_wxyz(body.T[:3, :3])
+            h.position = body.T[:3, 3]
+        self._update_info(c, v)
+        self.editor.place_gizmos()
+
+    def _update_info(self, c, v: dict) -> None:
+        fp = c.footprint(v)
+        if self._zones is not None:
+            zc = self._zones.check(fp) if fp is not None else None
+            state = "ok" if zc is None or zc.ok else f"violates {zc.reason}"
+            dist = f"{zc.part_distance * 1000:.0f} mm" if zc is not None else "n/a"
+            self.info.content = f"Carrier footprint to part: **{dist}** ({state})"
+        else:
+            self.info.content = f"{len(c.specs)} carrier bodies"
 
     def draw(self) -> None:
         for h in self._handles:
             h.remove()
-        self._handles = []
+        self._handles, self._body_handles, self._moving_names = [], {}, []
         b = self.s.base
         zones = None
         if self.s.part is not None:
             zones = Zones(b, footprint(self.s.part_mesh(), self.s.part.T_world_part))
+        self._zones = zones
         if b.mode == "movable":
             c = self._carrier()
             v = c.clip(self.values())
             picked = self.editor.pick.value
-            for body in c.moving_bodies(v) + c.static_bodies():
+            moving = c.moving_bodies(v)
+            self._moving_names = [body.name for body in moving]
+            for body in moving + c.static_bodies():
                 fixed = any(p.name == body.name and p.attach == "fixed" for p in c.specs)
                 color = PICKED_COLOR if body.name == picked else (FIXED_COLOR if fixed else BODY_COLOR)
-                self._handles.append(
-                    self.server.scene.add_mesh_simple(
-                        f"{ROOT}/{body.name}",
-                        body.mesh.vertices,
-                        body.mesh.faces,
-                        color=color,
-                        opacity=0.6,
-                        wxyz=matrix_to_wxyz(body.T[:3, :3]),
-                        position=body.T[:3, 3],
-                    )
+                h = self.server.scene.add_mesh_simple(
+                    f"{ROOT}/{body.name}",
+                    body.mesh.vertices,
+                    body.mesh.faces,
+                    color=color,
+                    opacity=0.6,
+                    wxyz=matrix_to_wxyz(body.T[:3, :3]),
+                    position=body.T[:3, 3],
                 )
-            fp = c.footprint(v)
-            if zones is not None:
-                zc = zones.check(fp) if fp is not None else None
-                state = "ok" if zc is None or zc.ok else f"violates {zc.reason}"
-                dist = f"{zc.part_distance * 1000:.0f} mm" if zc is not None else "n/a"
-                self.info.content = f"Carrier footprint to part: **{dist}** ({state})"
-            else:
-                self.info.content = f"{len(c.specs)} carrier bodies"
+                self._handles.append(h)
+                self._body_handles[body.name] = h
+            self._update_info(c, v)
         else:
             self.info.content = "_Static base: the planner places one base (k = 1). Set Mode to movable._"
         if zones is not None:

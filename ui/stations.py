@@ -147,6 +147,12 @@ class StationsPanel:
                 self.status.content = (
                     f"Best: **{best.label}**, cost {best.cost:.2f}" if best else "_No solution found._"
                 )
+                if self._cancel.is_set():
+                    self.status.content = "**Cancelled.** " + (
+                        f"Best so far: **{best.label}**, cost {best.cost:.2f}"
+                        if best
+                        else "_No plan finished._"
+                    )
             except Exception as err:  # report in the GUI instead of dying silently in a thread
                 self.status.content = f"⚠ planning failed: {err}"
                 raise

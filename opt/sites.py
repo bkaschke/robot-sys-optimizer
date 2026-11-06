@@ -23,6 +23,19 @@ from core.standoff import Zones, carrier_ok, footprint
 from core.transforms import make_T
 
 
+def _accepted(sites, samples, cancelled=None) -> list[dict]:
+    """Samples passing ``sites.accept``; polls ``cancelled`` every 256 samples."""
+    from core.feasibility import CancelledError
+
+    out = []
+    for i, v in enumerate(samples):
+        if cancelled is not None and i % 256 == 0 and cancelled():
+            raise CancelledError
+        if sites.accept(v)[0]:
+            out.append(v)
+    return out
+
+
 class FloorSites:
     """Robot base anywhere on the floor at fixed height/orientation (no carrier model)."""
 
@@ -37,13 +50,13 @@ class FloorSites:
         self.dofs = ["x", "y"]
         self.bounds = None  # set from the targets in candidates()
 
-    def candidates(self, P_world: np.ndarray, step: float) -> list[dict]:
+    def candidates(self, P_world: np.ndarray, step: float, cancelled=None) -> list[dict]:
         lo = P_world[:, :2].min(axis=0) - self.half
         hi = P_world[:, :2].max(axis=0) + self.half
         self.bounds = np.array([[lo[0], hi[0]], [lo[1], hi[1]]])
         xs = np.arange(lo[0], hi[0] + 1e-9, step)
         ys = np.arange(lo[1], hi[1] + 1e-9, step)
-        return [{"x": float(x), "y": float(y)} for y in ys for x in xs if self.accept({"x": x, "y": y})[0]]
+        return _accepted(self, ({"x": float(x), "y": float(y)} for y in ys for x in xs), cancelled)
 
     def T(self, v: dict) -> np.ndarray:
         return make_T(self.R, (v["x"], v["y"], self.z))
@@ -100,8 +113,8 @@ class CarrierSites:
     def full(self, v: dict) -> dict:
         return {**v, **self._lift}
 
-    def candidates(self, P_world: np.ndarray, step: float) -> list[dict]:
-        return [v for v in self.c.samples(step) if self.accept(v)[0]]
+    def candidates(self, P_world: np.ndarray, step: float, cancelled=None) -> list[dict]:
+        return _accepted(self, self.c.samples(step), cancelled)
 
     def T(self, v: dict) -> np.ndarray:
         return self.c.T_world_base(self.full(v))
