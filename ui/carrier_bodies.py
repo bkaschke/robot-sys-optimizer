@@ -28,7 +28,7 @@ from core.transforms import (
     rpy_to_matrix,
     wxyz_to_matrix,
 )
-from ui.widgets import MAX_UPLOAD, notify, safe_name
+from ui.widgets import MAX_UPLOAD, GizmoStyle, notify, safe_name
 
 if TYPE_CHECKING:
     from ui.carrier_ui import CarrierPanel
@@ -304,6 +304,7 @@ class BodyEditor:
     def _place(self, handle, name: str, T: np.ndarray, cb):
         if handle is None:
             handle = self.server.scene.add_transform_controls(name, scale=0.35)
+            GizmoStyle.register(handle, 0.35)
             handle.on_update(cb)
         self._busy = True
         try:

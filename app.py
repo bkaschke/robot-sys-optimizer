@@ -200,6 +200,8 @@ def build_app(
 
     results.choice.on_update(on_selection)
     results.tool_opt = tool_opt
+    stations.on_start = lambda: sim.reset("a new station plan started")
+    tool_opt.on_start = lambda: sim.reset("the tool optimizer started")
     results.move_carrier = carrier.set_values
     results.set_q = cell.set_q
     workflow.cell, workflow.carrier, workflow.results = cell, carrier, results
@@ -210,6 +212,7 @@ def build_app(
     if autosave_thread:  # the real app: keep step status, banners and visibility current
         workflow.hooks.append(objects.apply_visibility)
         workflow.hooks.append(tool_opt.update_hint)  # pose-limits hint follows the tool type
+        workflow.hooks.append(sim.check_targets)  # paths are cleared when the targets change
         workflow.start_watch()
     server.gui.add_markdown(UR_NOTICE)
 

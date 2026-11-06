@@ -52,6 +52,7 @@ class SimPanel:
         self._cancel = threading.Event()
         self._playing = threading.Event()
         self._station = None
+        self._targets_key = None
         gui = server.gui
         self.folder = gui.add_folder("Paths & simulation", order=order)  # open, above Export
         with self.folder:
@@ -121,6 +122,7 @@ class SimPanel:
         pts = {p.id: (np.array(p.p, float), np.array(p.n, float)) for p in s.targets.points}
         poses = [station_pose(s.base, st, s.T_world_base) for st in sol.stations]
         mesh = s.part_mesh()
+        targets_key = s.targets.model_dump_json()  # paths belong to these targets
         self._cancel.clear()
         self.build_btn.visible, self.stop.visible, self.progress.visible = False, True, True
         self.progress.value = 0.0
@@ -140,6 +142,7 @@ class SimPanel:
                     progress=lambda f: setattr(self.progress, "value", 100.0 * f),
                 )
                 self.label = sol.label
+                self._targets_key = targets_key
                 self._after_build()
             except CancelledError:
                 self.info.content = "**Cancelled.**"
@@ -176,6 +179,22 @@ class SimPanel:
         if n:
             self.frame.value = 0
             self.go_to(0)
+
+    def reset(self, why: str = "") -> None:
+        """Forget the built paths (a new plan / tool run started, or the targets changed)."""
+        if self.plan is None and not self._handles:
+            return
+        self.pause()
+        self.plan, self.label, self._targets_key = None, None, None
+        self.clear()
+        self.frame.disabled = self.play.disabled = self.export.disabled = True
+        self.status.content = ""
+        self.info.content = f"_Paths cleared{': ' + why if why else ''}. **Build paths** again._"
+
+    def check_targets(self) -> None:
+        """Clear the paths when the targets changed since they were built (watcher, 1 s)."""
+        if self.plan is not None and self._targets_key != self.s.targets.model_dump_json():
+            self.reset("the targets changed")
 
     def on_selection(self) -> None:
         """Results selection changed: paths of another plan are cleared (not misleadingly

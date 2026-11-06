@@ -13,6 +13,7 @@ import viser
 
 from core.transforms import make_T, rpy_to_matrix
 from ui.session import Session
+from ui.widgets import GizmoStyle
 
 OBJECTS = ("Robot", "Carrier", "Tool", "Part", "Targets", "Results")
 GIZMOS = ("none", "Robot base", "Part", "Tool mount", "Carrier body")
@@ -29,6 +30,10 @@ class ObjectsPanel:
                 name: gui.add_checkbox(name, True, hint=f"show / hide {name.lower()}") for name in OBJECTS
             }
             self.gizmo = gui.add_dropdown("Drag gizmo on", GIZMOS, initial_value="Robot base")
+            self.gizmo_size = gui.add_slider("Gizmo size", 0.25, 4.0, 0.25, GizmoStyle.size)
+            self.gizmo_top = gui.add_checkbox(
+                "Gizmos always on top", GizmoStyle.on_top, hint="drawn through bodies, so they can be grabbed"
+            )
             with gui.add_folder("Jog", expand_by_default=True):
                 self.move = gui.add_dropdown("Move", MOVE)
                 self.step = gui.add_number("Step (mm)", 50.0, min=0.1, step=10.0)
@@ -41,6 +46,8 @@ class ObjectsPanel:
         for w in self.show.values():
             w.on_update(lambda e: self.apply_visibility())
         self.gizmo.on_update(lambda e: self.apply_gizmo())
+        self.gizmo_size.on_update(lambda e: GizmoStyle.apply(size=self.gizmo_size.value))
+        self.gizmo_top.on_update(lambda e: GizmoStyle.apply(on_top=self.gizmo_top.value))
         for axis, group in (("x", self.jx), ("y", self.jy), ("z", self.jz), ("rz", self.jr)):
             group.on_click(lambda e, a=axis: self.jog(a, -1.0 if e.target.value.startswith("−") else 1.0))
 

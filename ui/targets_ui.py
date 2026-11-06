@@ -361,7 +361,7 @@ class TargetsTab:
             sub = m.submesh([self.selection], append=True)
             verts = sub.vertices + 5e-4 * sub.vertex_normals  # draw just above the part
             self._handles["sel"] = self.server.scene.add_mesh_simple(
-                f"{PART}/selection", verts, sub.faces, color=SEL_COLOR, opacity=0.6
+                f"{PART}/selection", verts, sub.faces, color=SEL_COLOR, opacity=0.6, side="double"
             )
         area = m.area_faces[self.selection].sum() * 1e4 if m is not None and n else 0.0
         self.sel_info.content = f"Selected: {n} faces, {area:.1f} cm²" if n else "_Nothing selected._"

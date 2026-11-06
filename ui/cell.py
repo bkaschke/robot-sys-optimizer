@@ -26,6 +26,7 @@ from ui.widgets import safe_name as _safe_name
 
 BASE_NODE = "/cell/base"
 PART_NODE = "/cell/part"
+PART_COLOR = (205, 208, 214)
 UPLOADED = "(uploaded URDF)"
 
 
@@ -71,8 +72,16 @@ class CellTab:
             self.part_choice = server.gui.add_dropdown(
                 "Part", (*GOLDEN_PARTS, "(uploaded mesh)", "(none)"), initial_value="(none)"
             )
+            self.upload_units = server.gui.add_dropdown(
+                "Upload units",
+                tuple(UNIT_SCALE),
+                initial_value="mm",
+                hint="units of the file you upload next",
+            )
             self.part_upload = server.gui.add_upload_button("Upload mesh (.stl/.obj/.ply)")
-            self.part_units = server.gui.add_dropdown("Units", tuple(UNIT_SCALE), initial_value="m")
+            self.part_units = server.gui.add_dropdown(
+                "Units", tuple(UNIT_SCALE), initial_value="mm", hint="units of the current part mesh"
+            )
             self.part_pose = PoseWidgets(server, PART_NODE, np.eye(4), self._on_part_pose)
 
         self._wire()
@@ -144,11 +153,11 @@ class CellTab:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(f.content)
             try:
-                load_mesh(path, self.part_units.value)
+                load_mesh(path, self.upload_units.value)
             except Exception as err:  # trimesh raises many types on bad files
                 return _notify(e, "Mesh load failed", str(err))
             T = self.s.part.T_world_part if self.s.part else make_T(p=(1.0, 0.0, 0.5))
-            self.s.part = PartState(self.s.relative(path), self.part_units.value, T)
+            self.s.part = PartState(self.s.relative(path), self.upload_units.value, T)
             self.refresh_part()
 
         @self.part_units.on_update
@@ -278,7 +287,10 @@ class CellTab:
         )
         self.part_units.value = part.units
         self.part_pose.set(part.T_world_part)
-        self.part_handle = self.server.scene.add_mesh_trimesh(f"{PART_NODE}/mesh", self.s.part_mesh())
+        m = self.s.part_mesh()
+        self.part_handle = self.server.scene.add_mesh_simple(  # double-sided: never see-through
+            f"{PART_NODE}/mesh", m.vertices, m.faces, color=PART_COLOR, side="double"
+        )
         self.part_handle.on_click(self._part_clicked)
         for fn in self.part_listeners:
             fn()

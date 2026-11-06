@@ -88,15 +88,19 @@ class PathPlan:
 def sequences(sol, results: dict[int, PointResult], P_part: dict[int, np.ndarray]) -> dict[int, list]:
     """Per station: [(zone index | None, [point ids in path order])]."""
     out: dict[int, list] = {}
+
+    def usable(p: int) -> bool:  # solved, and still a target (points deleted after planning are skipped)
+        return p in P_part and results.get(p) is not None and results[p].q is not None
+
     if sol.zones:
         for zi, z in enumerate(sol.zones):
-            pts = [p for p in z.points if results.get(p) is not None and results[p].q is not None]
+            pts = [p for p in z.points if usable(p)]
             if pts:
                 out.setdefault(z.station, []).append((zi, pts))
         return out
     by: dict[int, list[int]] = {}
     for pid, k in sol.assignment.items():
-        if results.get(pid) is not None and results[pid].q is not None:
+        if usable(pid):
             by.setdefault(k, []).append(pid)
     for k, pids in by.items():
         pids = sorted(pids)

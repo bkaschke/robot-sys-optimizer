@@ -65,6 +65,7 @@ class ToolView:
                 hl.mesh.vertices,
                 hl.mesh.faces,
                 color=LINK_COLOR,
+                side="double",
                 wxyz=matrix_to_wxyz(hl.T_head_link[:3, :3]),
                 position=hl.T_head_link[:3, 3],
             )

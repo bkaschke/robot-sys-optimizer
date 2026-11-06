@@ -428,6 +428,7 @@ class CarrierPanel:
                     body.mesh.faces,
                     color=color,
                     opacity=0.6,
+                    side="double",  # STL bodies: never see-through from one side
                     wxyz=matrix_to_wxyz(body.T[:3, :3]),
                     position=body.T[:3, 3],
                 )

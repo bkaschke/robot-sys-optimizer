@@ -33,6 +33,7 @@ class ToolOptPanel:
         self.result: GeometryResult | None = None
         self._thread: threading.Thread | None = None
         self._cancel = threading.Event()
+        self.on_start: Callable[[], None] | None = None  # set by app.py: e.g. clear old paths
         gui = server.gui
         with gui.add_folder("Tool geometry"):
             opt = session.extra.get("optimizer") or Optimizer()
@@ -129,6 +130,8 @@ class ToolOptPanel:
         sites = s.sites()
         if sites is None:
             args = (*args[:-1], 1)  # static base: one station
+        if self.on_start is not None:
+            self.on_start()
         self._cancel.clear()
         self.run.visible, self.stop.visible, self.progress.visible = False, True, True
         self.apply.disabled = True

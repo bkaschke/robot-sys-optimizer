@@ -50,6 +50,7 @@ class StationsPanel:
         self.on_solution = on_solution
         self._thread: threading.Thread | None = None
         self._cancel = threading.Event()
+        self.on_start: Callable[[], None] | None = None  # set by app.py: e.g. clear old paths
         gui = server.gui
         with gui.add_folder("Station planner"):
             opt = self._optimizer()
@@ -114,6 +115,8 @@ class StationsPanel:
         L_ref = length_ref(s.tool.extension)
         self._cancel.clear()
         self.run.visible, self.stop.visible, self.progress.visible = False, True, True
+        if self.on_start is not None:
+            self.on_start()
         s.results, s.result_points = [], {}
         self.on_solution()
         stamp = stamp_for(s, "plan")  # the setup this run plans for (out-of-date tracking)

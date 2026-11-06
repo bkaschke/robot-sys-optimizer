@@ -53,6 +53,37 @@ class Latest:
                 self._running = False
 
 
+class GizmoStyle:
+    """Size and draw-on-top of every drag gizmo (Objects panel). Gizmos register with their
+    base scale and get the current style at once; panels create some of them later."""
+
+    size = 1.0
+    on_top = True  # drawn through bodies: a gizmo inside a body can still be grabbed
+    _items: list = []  # (handle, base scale)
+
+    @classmethod
+    def register(cls, handle, base: float) -> None:
+        cls._items.append((handle, base))
+        cls._style(handle, base)
+
+    @classmethod
+    def _style(cls, handle, base: float) -> bool:
+        try:
+            handle.scale = base * cls.size
+            handle.depth_test = not cls.on_top
+            return True
+        except Exception:  # removed handle or stopped server: forget it
+            return False
+
+    @classmethod
+    def apply(cls, size: float | None = None, on_top: bool | None = None) -> None:
+        if size is not None:
+            cls.size = float(size)
+        if on_top is not None:
+            cls.on_top = bool(on_top)
+        cls._items = [(h, b) for h, b in cls._items if cls._style(h, b)]
+
+
 def notify(event, title: str, body: str, ok: bool = False) -> None:
     client = getattr(event, "client", None)
     if client is not None:
@@ -66,6 +97,7 @@ class PoseWidgets:
         self._on_change = on_change
         self._syncing = False
         self.gizmo = server.scene.add_transform_controls(node, scale=scale, visible=True)
+        GizmoStyle.register(self.gizmo, scale)
         self.xyz = server.gui.add_vector3("xyz (mm)", (0.0, 0.0, 0.0), step=1.0)
         self.rpy = server.gui.add_vector3("rpy (deg)", (0.0, 0.0, 0.0), step=0.5)
         self.show = server.gui.add_checkbox("Show gizmo", True)
