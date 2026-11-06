@@ -21,10 +21,15 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def main() -> int:
     args = sys.argv[1:]
-    size = 4
-    if args[:1] == ["--size"]:
-        size, args = int(args[1]), args[2:]
+    size, first = 4, ""
+    while args[:1] in (["--size"], ["--from"]):
+        if args[0] == "--size":
+            size = int(args[1])
+        else:
+            first = args[1]  # resume: start at this test file (e.g. test_tool.py)
+        args = args[2:]
     files = sorted(str(p.relative_to(ROOT).as_posix()) for p in (ROOT / "tests").glob("test_*.py"))
+    files = [f for f in files if Path(f).name >= first]
     batches = [files[i : i + size] for i in range(0, len(files), size)]
     total = {"passed": 0, "failed": 0, "error": 0}
     failed_batches = []

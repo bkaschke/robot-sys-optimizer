@@ -125,7 +125,11 @@ def build_app(
     project = ProjectPanel(
         server, session, on_loaded=on_loaded, remember=remember, autosave_thread=autosave_thread
     )
-    objects = ObjectsPanel(server, session)
+    tree = server.gui.add_panel()  # object tree on the left of the 3D view (v3 feedback item 1)
+    with tree.add_tab("Objects"):
+        objects = ObjectsPanel(server, session)
+    tree.dock_left()
+    tree.set_width(290)
     workflow = Workflow(server, session)
     state["workflow"] = workflow
     tabs = server.gui.add_tab_group()
@@ -148,6 +152,7 @@ def build_app(
     targets.tools.on_mesh_replaced = cell.refresh_part
     cell.part_listeners.append(targets.on_part_changed)
     cell.part_listeners.append(carrier.draw)
+
     def part_moved() -> None:
         carrier.realign()  # a track aligned with the part follows it
         carrier.draw()  # standoff shells follow a moved part
@@ -215,6 +220,8 @@ def build_app(
     workflow.cell, workflow.carrier, workflow.results = cell, carrier, results
     objects.cell, objects.carrier, objects.tool = cell, carrier, tool
     objects.targets, objects.results, objects.sim = targets, results, sim
+    objects.stayouts = stayouts
+    objects.rebuild_tree()
     workflow.refresh(force=True)
     objects.apply_gizmo()
     if autosave_thread:  # the real app: keep step status, banners and visibility current

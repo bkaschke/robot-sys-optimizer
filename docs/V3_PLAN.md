@@ -10,9 +10,13 @@ Branch `v4` (from `main` at a572f3f). Decisions marked **(user)** were answered 
 | 4 | Start a new study | **(user):** **New empty study**: no robot, no tool, no part, no stay-out geometry, no carrier (everything chosen from scratch; the GUI works without a robot until one is chosen). **New part, same cell**: clears the part, the surface selection, targets, results, stop locations, feasibility and paths; keeps robot, tool, carrier and stay-out zones. |
 | 5 | Red zone on the floor; stay-out zones | The red floor zone is a carrier keep-out (2D, carrier only; the arm ignores it). **(user):** 3D stay-out **boxes and STL meshes** that the **arm, tool and carrier** all avoid (planner, check, paths), drawn as see-through red volumes, editable with a gizmo, saved in the project. |
 | 6 | Default units mm for imports | Part upload and CSV import default to mm (carrier meshes already do). |
-| 7 | STL see-through from one side | Part, carrier and stay-out meshes drawn double-sided; normals fixed on load. |
+| 7 | STL see-through from one side | Part, carrier, tool head and stay-out meshes drawn double-sided. Normals are deliberately not "repaired" on load (flipping faces could silently flip the generated target normals of existing parts). |
 | 8 | Gizmo size; gizmo inside a body cannot be grabbed | *Gizmo size* slider for all gizmos and *Gizmos always on top* (drawn through bodies, so they can be grabbed). |
 | 9 | Paths should clear | Paths cleared when the station planner or the tool optimizer starts, or the targets change. |
+
+## Status: all nine items done on branch `v4` (2026-11-06)
+
+Tests: tests/test_v4_quick.py (9, 6, 7, 8), test_v4_study.py (4), test_v4_stayout.py (5), test_v4_sides.py (2, 3), test_v4_tree.py (1). Also: tests run in a private temporary workspace (tests/conftest.py, `RSO_WORKSPACE`) after test runs had been writing into the user's workspace; `scripts/test_batches.py` runs the suite in low-memory batches.
 
 ## Order
 
