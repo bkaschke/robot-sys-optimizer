@@ -125,7 +125,7 @@ $PY app.py --port 8080 [--dark]
 </code></pre>
 <p>The first station plan or heatmap for a tool builds a <strong>reachability map</strong> (about 50–70 s), which is cached in <code>cache/reachability/</code>. Later runs reuse it in seconds. The cache is not in git; each computer builds its own.</p>
 <h3 id="25-portable-copy-for-a-pc-without-conda-or-internet">2.5 Portable copy for a PC without conda or internet</h3>
-<p>For a PC where you cannot install Miniforge or download packages, build one zip on a set-up computer and copy it over. The zip contains the app and its complete Python environment (Pinocchio and Coal included). Nothing is installed on the target PC: no admin rights, conda, Git or network are needed.</p>
+<p>For a PC where you cannot install Miniforge or download packages, build one zip on a set-up computer and copy it over. The zip contains the app, its complete Python environment (Pinocchio and Coal included) and the reachability maps already built on the set-up computer (so the first plan on the target PC does not spend a minute building them; leave them out with <code>--no-maps</code>). Nothing is installed on the target PC: no admin rights, conda, Git or network are needed.</p>
 <p><strong>On the set-up computer</strong> (commit your changes first: the zip holds the last commit):</p>
 <pre><code class="language-bash">C:/Users/&lt;you&gt;/miniforge3/Scripts/conda.exe install -n base -c conda-forge conda-pack   # once
 $PY scripts/make_portable.py          # -&gt; dist/robot-sys-optimizer-portable-&lt;commit&gt;.zip (a few minutes)
@@ -281,7 +281,7 @@ $PY scripts/make_portable.py          # -&gt; dist/robot-sys-optimizer-portable-
 </tr>
 <tr>
 <td><strong>Standoff and safety</strong></td>
-<td><em>Part standoff min / preferred</em>: carrier-to-part distance; the minimum is hard, closer than preferred adds a cost. It is measured in 3D, so a carrier may sit partly under a raised part: model fixtures and stands as part of the mesh or as keep-outs. <em>Keep-outs</em>: floor rectangles <code>x0,y0,x1,y1; ...</code> in mm. <em>Localization</em> (mobile): position/heading error every stop must tolerate. <em>Tip-over check</em> (mobile, needs a mass on at least one body).</td>
+<td><em>Part standoff min / preferred</em>: carrier-to-part distance; the minimum is hard, closer than preferred adds a cost. It is measured in 3D, so a carrier may sit partly under a raised part: model fixtures and stands as part of the mesh or as keep-outs. <em>Keep-outs</em>: floor rectangles <code>x0,y0,x1,y1; ...</code> in mm. <em>Localization</em> (mobile): position/heading error every stop must tolerate. <strong>Mobile base: <em>Side facing the part</em> + <em>Fixed standoff (mm)</em></strong> — pick which side of the base turns towards the part (front = carriage +x, left = +y) and one gap between the base outline and the part outline (top view). Every stop then sits exactly at that gap with that side facing the part: the stops lie on one contour around the part (like a rail wrapped around it), which keeps one safety distance everywhere and makes planning much faster. Choose <em>free (search the heading)</em> for the older free x / y / heading search with <em>Part standoff min / preferred</em>. <em>Tip-over check</em> (mobile, needs a mass on at least one body).</td>
 </tr>
 <tr>
 <td><strong>Apply base settings</strong></td>
@@ -389,7 +389,7 @@ $PY scripts/make_portable.py          # -&gt; dist/robot-sys-optimizer-portable-
 </tr>
 <tr>
 <td><strong>Station planner</strong></td>
-<td><strong>Plan stations</strong> finds the fewest stations that reach every point, within <em>Max stations</em> (static mode = 1). Each solution goes to the Results tab as soon as it finishes. <em>Candidate grid</em> sets the search resolution; <em>Refine</em> turns the exact fine-tuning on or off. <strong>Cancel</strong> stops within about a second and keeps the plans already finished. <em>Joint configuration</em> = <strong>zones (minimize changes)</strong> groups each stop's points into zones that keep one arm configuration and puts each zone in path order (see <em>Joint-configuration zones</em> below); <em>Cost per config change</em> sets how much a change costs (a stop costs 5).</td>
+<td><strong>Plan stations</strong> finds the fewest stations that reach every point, within <em>Max stations</em> (static mode = 1). Each solution goes to the Results tab as soon as it finishes. <em>Candidate grid</em> sets the search resolution; <em>Refine</em> turns the exact fine-tuning on or off. Plans appear quickly: every station count is first verified at its first-guess stops (a few seconds each), then the most promising one or two are refined and replace their quick version when better. <strong>Cancel</strong> stops within about a second and keeps the plans already finished. <em>Joint configuration</em> = <strong>zones (minimize changes)</strong> groups each stop's points into zones that keep one arm configuration and puts each zone in path order (see <em>Joint-configuration zones</em> below); <em>Cost per config change</em> sets how much a change costs (a stop costs 5).</td>
 </tr>
 <tr>
 <td><strong>Tool geometry</strong></td>

@@ -195,6 +195,8 @@ def solve_batch(ik: URAnalyticIK, T_base_flange: np.ndarray, return_singular: bo
                 q[:, b] = wrap_to_pi(np.stack([q1, q2, q3, q4, q5, q6], axis=1))
                 valid[:, b] = ok_r & ok5 & ok3
             singular |= ok_r & ~ok5
+    # the scalar solver also accepts r within _EPS below |d4| (clipped arcsin): defer those too
+    singular |= ~ok_r & (r >= abs(ik.d4) - _EPS)
     if return_singular:
         return q, valid, singular
     return q, valid

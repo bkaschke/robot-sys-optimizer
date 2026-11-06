@@ -80,6 +80,8 @@ def mobile_base() -> Base:
         localization_m=0.01,
         localization_deg=1.0,
         tip_over=True,
+        facing="front",  # v2: the robot side faces the part, one fixed 400 mm standoff (opt.contour)
+        fixed_standoff_m=0.4,
     )
 
 

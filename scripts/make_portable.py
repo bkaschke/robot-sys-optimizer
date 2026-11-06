@@ -3,7 +3,9 @@
     python scripts/make_portable.py [--prefix ENV_FOLDER] [--out dist]
 
 The zip holds the committed repo files (``git archive HEAD``) plus the conda environment packed
-with conda-pack under ``env/``. On the target PC: unzip anywhere writable and double-click
+with conda-pack under ``env/``, and the reachability maps already built on this PC
+(``cache/reachability/*.npz``; keyed by robot + tool geometry, so the target PC reuses them).
+On the target PC: unzip anywhere writable and double-click
 ``Start Robot Optimizer.bat``. The first start runs ``conda-unpack`` once to fix the paths
 inside the environment; nothing is installed and no admin rights or network are needed.
 
@@ -67,6 +69,9 @@ def main(argv: list[str] | None = None) -> Path:
         "--prefix", default=sys.prefix, help="conda env folder to pack (default: the running one)"
     )
     ap.add_argument("--out", type=Path, default=ROOT / "dist", help="output folder (default dist/)")
+    ap.add_argument(
+        "--no-maps", dest="maps", action="store_false", help="leave out the cached reachability maps (cache/)"
+    )
     a = ap.parse_args(argv)
 
     if git("status", "--porcelain", "--untracked-files=no"):
@@ -90,8 +95,14 @@ def main(argv: list[str] | None = None) -> Path:
             with zipfile.ZipFile(env_zip) as e:
                 n_env = copy_entries(e, z, f"{TOP}/env/")
             z.writestr(f"{TOP}/Start Robot Optimizer.bat", START.replace("\n", "\r\n"))
+            maps = sorted((ROOT / "cache" / "reachability").glob("*.npz")) if a.maps else []
+            for m in maps:  # prebuilt reachability maps: no ~1 min build on the target PC
+                z.write(m, f"{TOP}/cache/reachability/{m.name}")
         tmp_final.replace(final)
-    print(f"Done: {final} ({final.stat().st_size / 2**20:.0f} MB; {n_repo} repo files, {n_env} env files)")
+    print(
+        f"Done: {final} ({final.stat().st_size / 2**20:.0f} MB; {n_repo} repo files, {n_env} env files, "
+        f"{len(maps)} reachability maps)"
+    )
     return final
 
 

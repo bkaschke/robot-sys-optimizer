@@ -59,6 +59,7 @@ DEFAULTS = {
         localization_deg=1.0,
     ),
 }
+FACING = ("free (search the heading)", "front", "back", "left", "right")
 BODY_COLOR, FIXED_COLOR, PICKED_COLOR = (120, 130, 150), (150, 140, 120), (90, 140, 220)
 
 
@@ -105,6 +106,10 @@ class CarrierPanel:
         self.editor = BodyEditor(server, self)
         self.safety_folder = gui.add_folder("Standoff and safety", expand_by_default=False)
         with self.safety_folder:
+            self.facing = gui.add_dropdown("Side facing the part", FACING, hint="mobile: fixed heading")
+            self.fixed_so = gui.add_number(
+                "Fixed standoff (mm)", 400.0, min=0.0, step=10.0, hint="mobile base outline to part outline"
+            )
             self.so = gui.add_vector2("Part standoff min / preferred (mm)", (300.0, 400.0), step=10.0)
             self.env = gui.add_number("Keep-out clearance (mm)", 100.0, min=0.0, step=10.0)
             self.keepouts = gui.add_text("Keep-outs (mm)", "", hint="x0,y0,x1,y1; x0,y0,x1,y1 (floor boxes)")
@@ -124,7 +129,7 @@ class CarrierPanel:
             self.commit(e)
 
         self.locked = False
-        for w in (self.mode, self.kind):
+        for w in (self.mode, self.kind, self.facing):
             w.on_update(lambda e: self.update_visibility())
         self.load(session.base)
         self.refresh()
@@ -144,6 +149,10 @@ class CarrierPanel:
         self.ty.visible = movable and kind in ("mobile", "gantry")
         self.tyaw.visible = movable and kind == "mobile"
         self.loc.visible = self.tip.visible = movable and kind == "mobile"
+        contour = movable and kind == "mobile" and self.facing.value != FACING[0]
+        self.facing.visible = movable and kind == "mobile"
+        self.fixed_so.visible = contour  # one fixed standoff replaces min / preferred
+        self.so.visible = not contour
         _label(
             self.tx,
             "Planner search x (mm)"
@@ -196,6 +205,9 @@ class CarrierPanel:
                 ",".join(f"{v * 1000:.0f}" for v in (*k.min_xy, *k.max_xy)) for k in b.keepouts
             )
             self.loc.value = (b.localization_m * 1000, b.localization_deg)
+            self.facing.value = b.facing or FACING[0]
+            fixed = b.fixed_standoff_m if b.fixed_standoff_m is not None else so.carrier_part_min
+            self.fixed_so.value = fixed * 1000
             self.tip.value = b.tip_over
             self.bodies = list(b.bodies)
             self.mount_pose = b.T_mount
@@ -237,6 +249,10 @@ class CarrierPanel:
             localization_m=self.loc.value[0] / 1000,
             localization_deg=self.loc.value[1],
             tip_over=self.tip.value,
+            facing=None if (kind != "mobile" or self.facing.value == FACING[0]) else self.facing.value,
+            fixed_standoff_m=(
+                self.fixed_so.value / 1000 if kind == "mobile" and self.facing.value != FACING[0] else None
+            ),
         )
 
     def commit(self, event=None) -> bool:

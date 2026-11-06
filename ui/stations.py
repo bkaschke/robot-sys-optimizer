@@ -11,7 +11,7 @@ import viser
 
 from core import targets as tg
 from core.collision import CollisionScene
-from core.feasibility import FeasibilityChecker
+from core.feasibility import CancelledError, FeasibilityChecker
 from core.ik import make_ik
 from core.robot import Robot
 from core.schema import Optimizer, TargetGroup
@@ -119,9 +119,18 @@ class StationsPanel:
         stamp = stamp_for(s, "plan")  # the setup this run plans for (out-of-date tracking)
 
         def streamed(sol, res) -> None:
+            # a refined plan replaces the quick plan with the same number of stations
+            for old in [
+                r for r in s.results if len(r.stations) == len(sol.stations) and r.tool_values is None
+            ]:
+                s.result_points.pop(old.label, None)
+                s.stamps.pop(old.label, None)
+            keep = [
+                r for r in s.results if not (len(r.stations) == len(sol.stations) and r.tool_values is None)
+            ]
             s.stamps[sol.label] = stamp
             s.result_points[sol.label] = res
-            s.results = sorted([*s.results, sol], key=lambda x: x.cost)
+            s.results = sorted([*keep, sol], key=lambda x: x.cost)
             self.on_solution()
 
         def say(msg: str, f: float) -> None:
@@ -131,7 +140,7 @@ class StationsPanel:
         def work() -> None:
             try:
                 say("loading reachability map (first time per tool length: ~1 min)", 0.0)
-                rmap = map_for_tool(robot, s.tool_model.T_flange_tcp(tcp))
+                rmap = map_for_tool(robot, s.tool_model.T_flange_tcp(tcp), cancelled=self._cancel.is_set)
                 bb, wb = sites.scene_bodies() if sites is not None else ([], [])
                 scene = CollisionScene(
                     robot, s.tool_model, mesh, T_base0, T_part, base_bodies=bb, world_bodies=wb
@@ -162,6 +171,8 @@ class StationsPanel:
                         if best
                         else "_No plan finished._"
                     )
+            except CancelledError:  # Cancel while the reachability map was being built
+                self.status.content = "**Cancelled** (while building the reachability map)."
             except Exception as err:  # report in the GUI instead of dying silently in a thread
                 self.status.content = f"⚠ planning failed: {err}"
                 raise

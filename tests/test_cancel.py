@@ -23,29 +23,33 @@ def app():
     server.stop()
 
 
-def _cancel_after(panel, delay: float) -> float:
-    """Start the panel's job, press Cancel after ``delay`` s; seconds from Cancel to stop."""
+def _cancel_after(panel, stage: str, text) -> float:
+    """Start the panel's job, press Cancel once its progress text shows ``stage`` (inside the
+    exact-check stages, whatever the machine load); seconds from Cancel to stop."""
     panel.start()
-    time.sleep(delay)
-    assert panel._thread.is_alive(), "job finished before Cancel: test scene too small"
+    t_end = time.perf_counter() + 120
+    while stage not in text().lower() and panel._thread.is_alive() and time.perf_counter() < t_end:
+        time.sleep(0.05)
+    assert panel._thread.is_alive(), f"job finished before Cancel (last status: {text()})"
+    where = text()
     t0 = time.perf_counter()
     panel._cancel.set()
     panel._thread.join(timeout=30)
-    assert not panel._thread.is_alive()
-    return time.perf_counter() - t0
+    assert not panel._thread.is_alive(), f"still running 30 s after Cancel at: {where}"
+    dt = time.perf_counter() - t0
+    assert dt < 2.0, f"Cancel took {dt:.1f} s at: {where}"
+    return dt
 
 
 def test_station_planner_cancels_fast(app):
     panel = app["stations"]
-    dt = _cancel_after(panel, 6.0)  # past the map load and set cover, inside refinement
-    assert dt < 2.0, f"Cancel took {dt:.1f} s"
+    _cancel_after(panel, "quick plan", lambda: panel.status.content)  # inside the exact checks
     assert "Cancelled" in panel.status.content
 
 
 def test_tool_optimizer_cancels_fast(app):
     panel = app["tool_opt"]
-    dt = _cancel_after(panel, 6.0)
-    assert dt < 2.0, f"Cancel took {dt:.1f} s"
+    _cancel_after(panel, "l scan", lambda: panel.info.content)  # inside the first plan of the L scan
 
 
 def test_checker_raises_when_cancelled(app):
@@ -64,6 +68,19 @@ def test_checker_raises_when_cancelled(app):
     p = s.targets.points[0]
     with pytest.raises(CancelledError):
         ch.check_point(0, np.array(p.p), np.array(p.n), s.targets.groups[0])
+
+
+def test_map_build_stops_on_cancel(tmp_path):
+    """A first-time reachability map build (about a minute) also honours Cancel."""
+    from core.robot import Robot
+    from opt.reachability import map_for_tool
+
+    flag = threading.Event()
+    threading.Timer(0.5, flag.set).start()
+    t0 = time.perf_counter()
+    with pytest.raises(CancelledError):
+        map_for_tool(Robot.from_registry("ur20"), np.eye(4), cache_dir=tmp_path, cancelled=flag.is_set)
+    assert time.perf_counter() - t0 < 3.0 and not list(tmp_path.glob("*.npz"))
 
 
 def test_cp_sat_stops_on_cancel():

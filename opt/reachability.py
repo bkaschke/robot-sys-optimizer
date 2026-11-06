@@ -86,6 +86,7 @@ class ReachMap:
         T_flange_tcp: np.ndarray,
         settings: MapSettings = DEFAULT_SETTINGS,
         progress: Callable[[float], None] | None = None,
+        cancelled: Callable[[], bool] | None = None,
     ) -> ReachMap:
         if robot.spec.ik != "ur_analytic":
             raise NotImplementedError("reachability maps need the UR analytic solver (v1)")
@@ -113,6 +114,10 @@ class ReachMap:
         T[:, 3, 3] = 1.0
         for i, r in enumerate(r_vals):
             for j, z in enumerate(z_vals):
+                if cancelled is not None and cancelled():  # Cancel during a first-time build
+                    from core.feasibility import CancelledError
+
+                    raise CancelledError
                 T[:, :3, 3] = (r, 0.0, z)
                 q, valid = solve_batch(ik, T @ T_tcp_flange)
                 valid &= within_limits(q, lo, hi)
@@ -128,7 +133,8 @@ class ReachMap:
 
     @staticmethod
     def cache_key(robot: Robot, T_flange_tcp: np.ndarray, settings: MapSettings) -> str:
-        urdf = (robot.spec.folder / robot.spec.urdf).read_bytes()
+        # line endings normalized: a CRLF checkout and an LF clone share the cached maps
+        urdf = (robot.spec.folder / robot.spec.urdf).read_bytes().replace(b"\r\n", b"\n")
         payload = {
             "v": MAP_VERSION,
             "robot": robot.spec.name,
@@ -148,6 +154,7 @@ class ReachMap:
         settings: MapSettings = DEFAULT_SETTINGS,
         progress: Callable[[float], None] | None = None,
         cache_dir: Path = CACHE_DIR,
+        cancelled: Callable[[], bool] | None = None,
     ) -> ReachMap:
         path = cache_dir / f"{cls.cache_key(robot, T_flange_tcp, settings)}.npz"
         if path.is_file():
@@ -161,7 +168,7 @@ class ReachMap:
                 d["manip"],
                 float(d["max_manip"]),
             )
-        m = cls.build(robot, T_flange_tcp, settings, progress)
+        m = cls.build(robot, T_flange_tcp, settings, progress, cancelled)
         cache_dir.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(".tmp.npz")
         np.savez_compressed(
@@ -243,13 +250,15 @@ def map_for_tool(
     settings: MapSettings = DEFAULT_SETTINGS,
     progress: Callable[[float], None] | None = None,
     cache_dir: Path = CACHE_DIR,
+    cancelled: Callable[[], bool] | None = None,
 ):
     """Shared flange map for straight tools; a dedicated (cached) map otherwise."""
     if is_straight(T_flange_tcp):
         return OffsetMap(
-            ReachMap.load_or_build(robot, np.eye(4), settings, progress, cache_dir), T_flange_tcp[2, 3]
+            ReachMap.load_or_build(robot, np.eye(4), settings, progress, cache_dir, cancelled),
+            T_flange_tcp[2, 3],
         )
-    return ReachMap.load_or_build(robot, T_flange_tcp, settings, progress, cache_dir)
+    return ReachMap.load_or_build(robot, T_flange_tcp, settings, progress, cache_dir, cancelled)
 
 
 # --- base voting ------------------------------------------------------------------------------

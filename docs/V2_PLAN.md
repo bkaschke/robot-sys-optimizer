@@ -40,7 +40,7 @@ In movable mode the Cell base fields are always read-only (the robot can never l
 - **Object tree** folder: robot, carrier (bodies), part, tool, targets, keep-outs; each with visible, select (shows its gizmo, hides the others) and jog.
 - **Arrow jog**: ±X / ±Y / ±yaw (and ±s for a rail) button groups with a step size. Rail jog is clamped to the travel; mobile jog has no limits.
 
-## Phase 3: mobile setup and planner speed
+## Phase 3: mobile setup and planner speed: **done on branch `v3`** (tests/test_v3_phase3.py). Mobile example 47 s → 12 s (first full plan ~4 s); the contour plan is also cheaper (J 7.34 vs 7.81). Not reached: under 10 s (the quick pass verifies every station count with 6 localization re-checks per point). Moved to phase 4: the general flange map (only the new tool model needs it); process-level parallelism not done (single-process speedups were enough so far).
 
 - **Mobile standoff (user):** one fixed distance measured from the **mobile base outline to the part outline** (top view). The user picks **which side of the mobile base faces the part** (front / back / left / right). Stops then lie on the offset contour of the part footprint at that distance, with the heading set by the contour normal and the chosen side: a 1-D "virtual rail" around the part instead of an x, y, yaw search. Localization tolerance stays.
 - Exact checks in batches: candidate poses of a point go through `solve_batch` (about 7 µs per pose against 0.4 ms) before limits, torque and collision.

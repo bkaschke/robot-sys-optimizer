@@ -46,6 +46,8 @@ class PlannerSettings:
     time_limit_s: float = 10.0
     zoning: bool = False  # group each station's points into joint-configuration zones
     zoning_poses: int = 40  # candidate TCP poses per point when looking for configurations
+    quick_first: bool = True  # verify every k without refinement first, then refine the best
+    refine_top: int = 2  # how many of the quick plans get the (slow) exact refinement
 
 
 @dataclass
@@ -285,6 +287,19 @@ def refine_station(
         s, _ = exact_station_score(checker, t, idx, sites.T(v), st.screen_poses, max_manip)
         return -s + 0.1 * w_standoff * pen
 
+    if len(names) == 1:  # rail s / mobile contour t: a 1-D grid, then a finer one around the best
+        r = st.refine_radius
+        best_u, best_f = 0.0, f(np.zeros(1))
+        for us in (np.linspace(-r, r, 9), None):
+            if us is None:
+                us = best_u + np.array([-1.0, 1.0]) * r / 8
+            for u in us:
+                if abs(u) <= r + 1e-12 and u != 0.0:
+                    fu = f(np.array([u]))
+                    if fu < best_f:
+                        best_u, best_f = float(u), fu
+        return vals(np.array([best_u]))
+
     dim = max(2, len(names))  # CMA-ES needs >= 2 dims; extra coordinates are ignored
     es = cma.CMAEvolutionStrategy(
         np.zeros(dim), st.refine_sigma, {"maxfevals": st.refine_evals, "verbose": -9, "seed": 1, "popsize": 6}
@@ -443,10 +458,11 @@ def plan_stations(
         k_min = min(min_stations(covered, st.time_limit_s, cancelled), st.max_stations)
         start = sites_start(sites, T_world_base0)
         ks = list(range(k_min, st.max_stations + 1))
+        jobs = []  # per station count: (k, stations, preferred station per target, coverage)
         for n, k in enumerate(ks):
             if cancelled is not None and cancelled():
                 break
-            say(f"set cover k={k}", n / len(ks))
+            say(f"set cover k={k}", 0.2 * n / len(ks))
             chosen = set_cover(covered, mu_n, k, st.time_limit_s, cancelled) or greedy_cover(covered, mu_n, k)
             if not chosen:
                 continue
@@ -454,21 +470,16 @@ def plan_stations(
             order = order_by(stations, sites, start)
             stations, chosen = [stations[i] for i in order], [chosen[i] for i in order]
             sub_cov, sub_mu = covered[chosen], mu_n[chosen]
-            first = np.argmax(np.where(sub_cov, sub_mu + 1, 0), axis=0)
-            if st.refine:
-                for s_i in range(len(stations)):
-                    say(f"refine k={k} station {s_i + 1}", (n + (s_i + 1) / len(stations)) / len(ks))
-                    idx = [i for i in range(len(t.ids)) if first[i] == s_i and sub_cov[s_i, i]]
-                    if idx:
-                        stations[s_i] = refine_station(
-                            checker, t, idx, stations[s_i], sites, st, rmap.max_manip, weights.standoff
-                        )
+            jobs.append((k, stations, np.argmax(np.where(sub_cov, sub_mu + 1, 0), axis=0), sub_cov))
+
+        def finish(stations: list[dict], first: np.ndarray, k: int, f: float):
+            """Exact verification (+ zoning) and cost of one station set."""
             assignment, results = verify(checker, t, stations, sites, first)
             zones, changes = [], 0
             if st.zoning:
                 from opt.zoning import zone_solution
 
-                say(f"zoning k={k}", (n + 1) / len(ks))
+                say(f"zoning k={k}", f)
                 zones, changes = zone_solution(
                     checker, t, stations, sites, assignment, results, st.zoning_poses
                 )
@@ -506,9 +517,63 @@ def plan_stations(
                 breakdown=breakdown,
                 zones=zones,
             )
-            out.append((sol, results))
+            return sol, results
+
+        def refine(
+            k: int, stations: list[dict], first: np.ndarray, sub_cov: np.ndarray, f0: float, f1: float
+        ):
+            stations = list(stations)
+            for s_i in range(len(stations)):
+                say(f"refine k={k} station {s_i + 1}", f0 + (f1 - f0) * (s_i + 1) / len(stations))
+                idx = [i for i in range(len(t.ids)) if first[i] == s_i and sub_cov[s_i, i]]
+                if idx:
+                    stations[s_i] = refine_station(
+                        checker, t, idx, stations[s_i], sites, st, rmap.max_manip, weights.standoff
+                    )
+            return stations
+
+        def emit(sol, results) -> None:
+            out[:] = [(a, b) for a, b in out if len(a.stations) != len(sol.stations)] + [(sol, results)]
             if on_solution is not None:
                 on_solution(sol, results)
+
+        if st.refine and not st.quick_first:  # v1 behaviour: refine every station count
+            for n, (k, stations, first, sub_cov) in enumerate(jobs):
+                f0 = 0.2 + 0.8 * n / len(jobs)
+                stations = refine(k, stations, first, sub_cov, f0, f0 + 0.6 / len(jobs))
+                emit(*finish(stations, first, k, f0 + 0.8 / len(jobs)))
+        else:
+            # quick pass: every station count verified at its set-cover stations (seconds)
+            for n, (k, stations, first, _) in enumerate(jobs):
+                say(f"quick plan k={k}", 0.2 + 0.3 * n / max(len(jobs), 1))
+                emit(*finish(stations, first, k, 0.2 + 0.3 * (n + 1) / max(len(jobs), 1)))
+            if st.refine:
+                # refine the most promising plans (fewest unreached, then cost); a refined plan
+                # replaces the quick one when it is better
+                quick = {len(sol.stations): sol for sol, _ in out}
+                rank = sorted(
+                    jobs,
+                    key=lambda j: (
+                        (len(quick[j[0]].unreached), quick[j[0]].cost) if j[0] in quick else (1e9, 0)
+                    ),
+                )
+                best = quick[rank[0][0]] if rank and rank[0][0] in quick else None
+                top = [  # skip plans that are clearly worse than the best quick one
+                    j
+                    for j in rank[: st.refine_top]
+                    if best is None
+                    or j[0] not in quick
+                    or (
+                        len(quick[j[0]].unreached) <= len(best.unreached)
+                        and quick[j[0]].cost <= 1.3 * best.cost + 1.0
+                    )
+                ]
+                for n, (k, stations, first, sub_cov) in enumerate(top):
+                    f0 = 0.5 + 0.5 * n / len(top)
+                    new = finish(refine(k, stations, first, sub_cov, f0, f0 + 0.4 / len(top)), first, k, f0)
+                    old = quick.get(k)
+                    if old is None or (len(new[0].unreached), new[0].cost) < (len(old.unreached), old.cost):
+                        emit(*new)
     except CancelledError:
         say("cancelled", 1.0)
         return sorted(out, key=lambda sr: sr[0].cost)

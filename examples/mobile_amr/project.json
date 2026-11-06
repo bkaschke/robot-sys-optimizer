@@ -289,7 +289,9 @@
     "localization_m": 0.01,
     "localization_deg": 1.0,
     "tip_over": true,
-    "tip_margin_m": 0.05
+    "tip_margin_m": 0.05,
+    "facing": "front",
+    "fixed_standoff_m": 0.4
   },
   "end_effector": {
     "name": "orbital_sander",

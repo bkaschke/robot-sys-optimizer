@@ -8,6 +8,7 @@ from collections.abc import Callable
 
 import viser
 
+from core.feasibility import CancelledError
 from core.robot import Robot
 from core.schema import ExtensionValues, Optimizer
 from opt.tool_geometry import GeometryResult, GeometrySettings, optimize_tool
@@ -126,6 +127,8 @@ class ToolOptPanel:
                     *args, st=st, progress=say, cancelled=self._cancel.is_set, sites=sites
                 )
                 self._show()
+            except CancelledError:  # Cancel while a reachability map was being built
+                self.info.content = "**Cancelled** (while building the reachability map)."
             except Exception as err:
                 self.info.content = f"⚠ tool optimization failed: {err}"
                 raise

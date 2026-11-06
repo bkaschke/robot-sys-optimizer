@@ -112,7 +112,7 @@ class _Evaluator:
 
     def plan(self, v: ExtensionValues, cancelled=None):
         checker = self.checker(v)
-        rmap = map_for_tool(self.robot, self.tm.T_flange_tcp(self.tcp))
+        rmap = map_for_tool(self.robot, self.tm.T_flange_tcp(self.tcp), cancelled=cancelled)
         self.max_manip = rmap.max_manip
         ps = PlannerSettings(**{**self.st.planner.__dict__, "max_stations": self.max_stations})
         out = plan_stations(
