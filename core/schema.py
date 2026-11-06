@@ -226,6 +226,16 @@ class Base(_Model):
     # part with the heading given (opt.contour); either None: free x, y, yaw search (v1).
     facing: Literal["front", "back", "left", "right"] | None = None
     fixed_standoff_m: float | None = Field(default=None, ge=0)
+    # v3 feedback: several robot sides may face the part (the planner picks per stop; empty:
+    # ``facing``), the part sides (part frame) the mobile base may work from (empty: all), and
+    # a rail / gantry track kept along the part's long axis
+    facings: list[Literal["front", "back", "left", "right"]] = Field(default_factory=list)
+    part_sides: list[Literal["+x", "-x", "+y", "-y"]] = Field(default_factory=list)
+    align_to_part: bool = False
+
+    def robot_sides(self) -> list[str]:
+        """Robot sides allowed to face the part (mobile contour mode)."""
+        return list(dict.fromkeys(self.facings)) or ([self.facing] if self.facing else [])
 
     @model_validator(mode="after")
     def _carrier(self) -> Base:

@@ -160,12 +160,13 @@ def test_quick_plans_stream_before_refinement():
 def test_gui_facing_fields(app):
     car, s = app["carrier"], app["session"]
     assert app["project"].load_example("mobile_amr")
-    assert car.facing.visible and car.facing.value == "front" and car.fixed_so.visible and not car.so.visible
-    car.facing.value = car.facing.options[0]  # free heading search (v1)
+    box = car.side_boxes  # v3 feedback: robot sides are checkboxes (several allowed)
+    assert box["front"].visible and box["front"].value and car.fixed_so.visible and not car.so.visible
+    box["front"].value = False  # none ticked: free heading search (v1)
     assert not car.fixed_so.visible and car.so.visible
-    assert car.commit() and s.base.facing is None and s.base.fixed_standoff_m is None
-    car.facing.value = "left"
+    assert car.commit() and s.base.robot_sides() == [] and s.base.fixed_standoff_m is None
+    box["left"].value = True
     car.fixed_so.value = 500.0
-    assert car.commit() and s.base.facing == "left" and s.base.fixed_standoff_m == pytest.approx(0.5)
+    assert car.commit() and s.base.robot_sides() == ["left"] and s.base.fixed_standoff_m == pytest.approx(0.5)
     car.kind.value = "rail"
-    assert not car.facing.visible and not car.fixed_so.visible
+    assert not box["front"].visible and not car.fixed_so.visible and car.align.visible

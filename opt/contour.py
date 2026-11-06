@@ -25,7 +25,11 @@ SIDES = {"front": (1.0, 0.0), "back": (-1.0, 0.0), "left": (0.0, 1.0), "right": 
 
 
 class ContourSites(CarrierSites):
-    """CarrierSites for a mobile base on its fixed-standoff contour: DOF ``t`` (m)."""
+    """CarrierSites for a mobile base on its fixed-standoff contour: DOF ``t`` (m).
+
+    One path per robot side allowed to face the part (``Base.robot_sides``), laid end to end
+    in ``t``; samples along part sides that are not allowed (``Base.part_sides``, part frame)
+    are kept in the table but never accepted."""
 
     def __init__(self, carrier, part_mesh, T_world_part, step: float = 0.02, obstacles=None):
         super().__init__(carrier, part_mesh, T_world_part, obstacles)
@@ -33,31 +37,46 @@ class ContourSites(CarrierSites):
         if self.zones.part is None:
             raise ValueError("contour stops need a part")
         self.d = float(b.fixed_standoff_m)
-        side = np.array(SIDES[b.facing])
         self.zones.min = max(self.d - 0.002, 0.0)  # 2 mm for the interpolation between samples
         self.zones.pref = self.zones.min  # one fixed standoff: no preferred-distance penalty
-        self.side_angle = float(np.arctan2(side[1], side[0]))
+        self.part_sides = set(b.part_sides)
+        R = np.asarray(T_world_part, float)[:3, :3] if T_world_part is not None else np.eye(3)
+        self._R_part = R
         local = carrier._local("fp", lambda: carrier._hulls(carrier._bodies("carriage", np.eye(4))))
-        reach = float(np.max(np.asarray(local.exterior.coords) @ side))  # centre -> facing edge
-        self.table = self._build(reach, step)
-        L = float(self.table[-1, 0])
+        tables, t0 = [], 0.0
+        self.sides = b.robot_sides()
+        for k, name in enumerate(self.sides):
+            side = np.array(SIDES[name])
+            reach = float(np.max(np.asarray(local.exterior.coords) @ side))  # centre -> facing edge
+            tb = self._build(reach, step, float(np.arctan2(side[1], side[0])))
+            tb[:, 0] += t0
+            t0 = float(tb[-1, 0]) + 1e-6  # segments end to end (no interpolation across them)
+            tables.append(np.column_stack([tb, np.full(len(tb), k)]))
+        self.table = np.vstack(tables)  # t, x, y, yaw, allowed, segment
         self.dofs = ["t"]
-        self.bounds = np.array([[0.0, L]])
+        self.bounds = np.array([[0.0, float(self.table[-1, 0])]])
         self.kind = "mobile"
 
     # --- path ---------------------------------------------------------------------------------
 
-    def _pose(self, c: np.ndarray, toward: np.ndarray) -> dict:
-        """Base centre c, facing side turned to point ``toward`` (world xy)."""
+    def _pose(self, c: np.ndarray, toward: np.ndarray, side_angle: float) -> dict:
+        """Base centre c, the facing side (at ``side_angle`` in the base) turned to ``toward``."""
         u = toward - c
-        yaw = float(np.arctan2(u[1], u[0])) - self.side_angle
+        yaw = float(np.arctan2(u[1], u[0])) - side_angle
         return {"x": float(c[0]), "y": float(c[1]), "yaw": float((yaw + np.pi) % (2 * np.pi) - np.pi)}
 
     def _gap(self, v: dict) -> float:
         return float(self.c.footprint(v).distance(self.zones.part))
 
-    def _build(self, reach: float, step: float) -> np.ndarray:
-        """Rows (t, x, y, yaw) along the path, closed (last row = first)."""
+    def _part_side(self, out: np.ndarray) -> str:
+        """Which side of the part (its own frame) a world floor direction points to."""
+        n = self._R_part.T @ np.array([out[0], out[1], 0.0])
+        if abs(n[0]) >= abs(n[1]):
+            return "+x" if n[0] > 0 else "-x"
+        return "+y" if n[1] > 0 else "-y"
+
+    def _build(self, reach: float, step: float, side_angle: float) -> np.ndarray:
+        """Rows (t, x, y, yaw, allowed) along one side's path, closed (last row = first)."""
         part = self.zones.part
         ring = part.buffer(self.d + reach, quad_segs=16).exterior
         n = max(16, int(np.ceil(ring.length / step)))
@@ -66,34 +85,44 @@ class ContourSites(CarrierSites):
             c = np.asarray(ring.interpolate(s).coords[0])
             near = np.asarray(part.exterior.interpolate(part.exterior.project(Point(c))).coords[0])
             out = (c - near) / max(np.linalg.norm(c - near), 1e-12)
-            v = self._pose(c, near)
+            v = self._pose(c, near, side_angle)
             for _ in range(8):  # slide along the normal until the gap is d (within 0.1 mm)
                 err = self.d - self._gap(v)
                 if abs(err) < 1e-4:
                     break
                 c = c + err * out
-                v = self._pose(c, near)
-            rows.append((v["x"], v["y"], v["yaw"]))
+                v = self._pose(c, near, side_angle)
+            ok = not self.part_sides or self._part_side(out) in self.part_sides
+            rows.append((v["x"], v["y"], v["yaw"], 1.0 if ok else 0.0))
         P = np.array(rows + rows[:1])
         seg = np.linalg.norm(np.diff(P[:, :2], axis=0), axis=1)
         t = np.concatenate([[0.0], np.cumsum(seg)])
         return np.column_stack([t, P])
+
+    def _row(self, t: float) -> int:
+        tb = self.table
+        return int(np.clip(np.searchsorted(tb[:, 0], t) - 1, 0, len(tb) - 2))
 
     def full(self, v: dict) -> dict:
         if "x" in v:  # already a full pose (localization perturbations)
             return {**v, **self._lift}
         tb = self.table
         t = float(np.clip(v["t"], tb[0, 0], tb[-1, 0]))
-        i = int(np.clip(np.searchsorted(tb[:, 0], t) - 1, 0, len(tb) - 2))
-        w = (t - tb[i, 0]) / max(tb[i + 1, 0] - tb[i, 0], 1e-12)
-        dyaw = (tb[i + 1, 3] - tb[i, 3] + np.pi) % (2 * np.pi) - np.pi
+        i = self._row(t)
+        j = i + 1 if tb[i + 1, 5] == tb[i, 5] else i  # never interpolate across two sides
+        w = (t - tb[i, 0]) / max(tb[j, 0] - tb[i, 0], 1e-12) if j != i else 0.0
+        dyaw = (tb[j, 3] - tb[i, 3] + np.pi) % (2 * np.pi) - np.pi
         return {
             "t": t,
-            "x": float(tb[i, 1] + w * (tb[i + 1, 1] - tb[i, 1])),
-            "y": float(tb[i, 2] + w * (tb[i + 1, 2] - tb[i, 2])),
+            "x": float(tb[i, 1] + w * (tb[j, 1] - tb[i, 1])),
+            "y": float(tb[i, 2] + w * (tb[j, 2] - tb[i, 2])),
             "yaw": float(tb[i, 3] + w * dyaw),
             **self._lift,
         }
+
+    def side_at(self, v: dict) -> str:
+        """Robot side facing the part at stop v."""
+        return self.sides[int(self.table[self._row(float(v["t"])), 5])]
 
     # --- planner interface ------------------------------------------------------------------------
 
@@ -105,7 +134,9 @@ class ContourSites(CarrierSites):
         return _accepted(self, ({"t": float(t)} for t in np.linspace(0.0, L, n, endpoint=False)), cancelled)
 
     def accept(self, v: dict) -> tuple[bool, float]:
-        """Keep-outs and the standoff (exact on the path, so only keep-outs usually fail)."""
+        """Allowed part side, keep-outs, stay-out zones and the standoff (exact on the path)."""
+        if "t" in v and self.table[self._row(float(v["t"])), 4] < 0.5:
+            return False, 1.0  # along a part side the base may not work from
         f = self.full(v)
         fp = self.c.footprint(f)
         zc = self.zones.check(fp)

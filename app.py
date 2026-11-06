@@ -148,7 +148,11 @@ def build_app(
     targets.tools.on_mesh_replaced = cell.refresh_part
     cell.part_listeners.append(targets.on_part_changed)
     cell.part_listeners.append(carrier.draw)
-    cell.pose_listeners.append(Latest(carrier.draw))  # standoff shells follow a moved part
+    def part_moved() -> None:
+        carrier.realign()  # a track aligned with the part follows it
+        carrier.draw()  # standoff shells follow a moved part
+
+    cell.pose_listeners.append(Latest(part_moved))
 
     def on_results() -> None:
         targets.color_by.value = "feasibility"

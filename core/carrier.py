@@ -78,6 +78,29 @@ def safe_name(name: str) -> str:
     return re.sub(r"[^A-Za-z0-9_]", "_", name) or "body"
 
 
+def aligned_track_pose(base: Base, part_fp) -> Pose:
+    """Rail / gantry frame turned along the part's long axis (the long side of the part
+    footprint's minimum-area rectangle) and centred on the part along that axis. The track
+    keeps its height, its side of the part and its distance from the part's centre line."""
+    rect = part_fp.minimum_rotated_rectangle
+    c4 = np.asarray(rect.exterior.coords)[:4]
+    edges = np.roll(c4, -1, axis=0) - c4
+    u = edges[int(np.argmax(np.linalg.norm(edges, axis=1)))]
+    u = u / max(np.linalg.norm(u), 1e-12)
+    T = pose_to_matrix(base.pose)
+    if u @ T[:2, 0] < 0:  # keep the track's current direction (no 180 deg flip)
+        u = -u
+    n = np.array([-u[1], u[0]])
+    centre = np.asarray(rect.centroid.coords[0])
+    lateral = float((T[:2, 3] - centre) @ n)  # keep the side and the distance
+    origin = centre + lateral * n
+    roll, pitch = base.pose.rpy[0], base.pose.rpy[1]
+    return Pose(
+        xyz=(float(origin[0]), float(origin[1]), base.pose.xyz[2]),
+        rpy=(roll, pitch, float(np.arctan2(u[1], u[0]))),
+    )
+
+
 def body_list(base: Base) -> list[Primitive]:
     """The carrier's bodies with unique names. Legacy chassis/riser/track are converted:
     the riser sits on the chassis top, the track is centred on the rail travel range."""

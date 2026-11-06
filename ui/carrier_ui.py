@@ -19,7 +19,8 @@ from pydantic import ValidationError
 from core.carrier import migrate
 from core.schema import Base, CarrierJoints, Keepout, Pose, Primitive, Standoffs
 from core.standoff import Zones, footprint
-from core.transforms import make_T, matrix_to_wxyz
+from core.transforms import make_T, matrix_to_wxyz, pose_to_matrix
+from ui import carrier_mobile
 from ui.carrier_bodies import BodyEditor
 from ui.session import Session
 from ui.widgets import Latest, notify
@@ -59,7 +60,6 @@ DEFAULTS = {
         localization_deg=1.0,
     ),
 }
-FACING = ("free (search the heading)", "front", "back", "left", "right")
 BODY_COLOR, FIXED_COLOR, PICKED_COLOR = (120, 130, 150), (150, 140, 120), (90, 140, 220)
 
 
@@ -103,13 +103,11 @@ class CarrierPanel:
             self.ty = gui.add_vector2("Travel y (mm)", (-1000.0, 1000.0), step=10.0)
             self.tyaw = gui.add_vector2("Yaw range (deg)", (-180.0, 180.0), step=5.0)
             self.lift = gui.add_vector2("Lift range (mm, 0 0 = none)", (0.0, 0.0), step=10.0)
+            carrier_mobile.build_align(gui, self)
         self.editor = BodyEditor(server, self)
         self.safety_folder = gui.add_folder("Standoff and safety", expand_by_default=False)
         with self.safety_folder:
-            self.facing = gui.add_dropdown("Side facing the part", FACING, hint="mobile: fixed heading")
-            self.fixed_so = gui.add_number(
-                "Fixed standoff (mm)", 400.0, min=0.0, step=10.0, hint="mobile base outline to part outline"
-            )
+            carrier_mobile.build_mobile(gui, self)  # robot sides, fixed standoff, part sides
             self.so = gui.add_vector2("Part standoff min / preferred (mm)", (300.0, 400.0), step=10.0)
             self.env = gui.add_number("Keep-out clearance (mm)", 100.0, min=0.0, step=10.0)
             self.keepouts = gui.add_text("Keep-outs (mm)", "", hint="x0,y0,x1,y1; x0,y0,x1,y1 (floor boxes)")
@@ -129,7 +127,7 @@ class CarrierPanel:
             self.commit(e)
 
         self.locked = False
-        for w in (self.mode, self.kind, self.facing):
+        for w in (self.mode, self.kind, *carrier_mobile.widgets(self)):
             w.on_update(lambda e: self.update_visibility())
         self.load(session.base)
         self.refresh()
@@ -149,10 +147,7 @@ class CarrierPanel:
         self.ty.visible = movable and kind in ("mobile", "gantry")
         self.tyaw.visible = movable and kind == "mobile"
         self.loc.visible = self.tip.visible = movable and kind == "mobile"
-        contour = movable and kind == "mobile" and self.facing.value != FACING[0]
-        self.facing.visible = movable and kind == "mobile"
-        self.fixed_so.visible = contour  # one fixed standoff replaces min / preferred
-        self.so.visible = not contour
+        carrier_mobile.show(self, movable, kind)
         _label(
             self.tx,
             "Planner search x (mm)"
@@ -205,9 +200,7 @@ class CarrierPanel:
                 ",".join(f"{v * 1000:.0f}" for v in (*k.min_xy, *k.max_xy)) for k in b.keepouts
             )
             self.loc.value = (b.localization_m * 1000, b.localization_deg)
-            self.facing.value = b.facing or FACING[0]
-            fixed = b.fixed_standoff_m if b.fixed_standoff_m is not None else so.carrier_part_min
-            self.fixed_so.value = fixed * 1000
+            carrier_mobile.load(self, b)
             self.tip.value = b.tip_over
             self.bodies = list(b.bodies)
             self.mount_pose = b.T_mount
@@ -249,11 +242,28 @@ class CarrierPanel:
             localization_m=self.loc.value[0] / 1000,
             localization_deg=self.loc.value[1],
             tip_over=self.tip.value,
-            facing=None if (kind != "mobile" or self.facing.value == FACING[0]) else self.facing.value,
-            fixed_standoff_m=(
-                self.fixed_so.value / 1000 if kind == "mobile" and self.facing.value != FACING[0] else None
-            ),
+            **carrier_mobile.collect(self, kind),
         )
+
+    def realign(self) -> None:
+        """Rail / gantry with *Align track with the part*: put the track along the part's long
+        axis (after Apply and whenever the part moves)."""
+        b = self.s.base
+        if not b.align_to_part or b.mode != "movable" or self.s.part is None:
+            return
+        from core.carrier import aligned_track_pose
+
+        pose = aligned_track_pose(b, footprint(self.s.part_mesh(), self.s.part.T_world_part))
+        if np.allclose(pose_to_matrix(pose), pose_to_matrix(b.pose), atol=1e-9):
+            return
+        self.s.base = b.model_copy(update={"pose": pose})
+        self._busy = True
+        try:
+            self.frame_xyz.value = _mm(pose.xyz)
+            self.frame_yaw.value = float(np.degrees(pose.rpy[2]))
+        finally:
+            self._busy = False
+        self.refresh()
 
     def commit(self, event=None) -> bool:
         try:
@@ -267,6 +277,7 @@ class CarrierPanel:
             notify(event, "Invalid base settings", msg)
             return False
         self.s.base = base
+        self.realign()  # no-op unless the track follows the part
         self.refresh()
         return True
 

@@ -108,7 +108,7 @@ class Session:
             return None
         b = self.base
         obs = self.obstacles()  # stay-out zones: the carrier keeps clear too
-        if b.carrier == "mobile" and b.facing is not None and b.fixed_standoff_m is not None:
+        if b.carrier == "mobile" and b.robot_sides() and b.fixed_standoff_m is not None:
             from opt.contour import ContourSites  # fixed standoff + facing side: 1-D contour
 
             return ContourSites(self.carrier(), self.part_mesh(), self.part.T_world_part, obstacles=obs)
