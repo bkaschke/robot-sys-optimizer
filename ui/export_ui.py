@@ -30,7 +30,8 @@ class ExportPanel:
         self.selected = selected
         self.length_samples = length_samples or (lambda sol: [])
         gui = server.gui
-        with gui.add_folder("Export"):
+        self.folder = gui.add_folder("Export")
+        with self.folder:
             self.screenshot = gui.add_checkbox("Include 3D view snapshot in report", True)
             self.csv = gui.add_button("TCP poses (CSV)")
             self.urdf = gui.add_button("Optimized tool URDF (zip)")

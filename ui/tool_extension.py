@@ -22,9 +22,9 @@ FIELDS = {
     "x": ("x", 1000.0),
     "y": ("y", 1000.0),
     "z": ("z", 1000.0),
-    "rx_deg": ("rx", 1.0),
-    "ry_deg": ("ry", 1.0),
-    "rz_deg": ("rz", 1.0),
+    "rx_deg": ("rx / W", 1.0),
+    "ry_deg": ("ry / P", 1.0),
+    "rz_deg": ("rz / R", 1.0),
 }
 
 
@@ -43,6 +43,11 @@ def build(gui, tab) -> None:
         "_Head pose relative to the flange mount: each value within its range (equal ends fix it). "
         "The connector is a smooth curve from the mount to the head; the optimizer chooses the pose._"
     )
+    tab.legacy_note = gui.add_markdown(
+        "_Legacy tool (L / θ / d / roll). For **x y z / W P R limits** for the tool optimizer, set "
+        "**Type = pose**: the current shape is kept, with every limit fixed at its value; widen the "
+        "ones the optimizer may change._"
+    )
     tab.radius = gui.add_number("Capsule radius (mm)", 40.0, min=1.0, step=1.0)
     tab.kg_per_m = gui.add_number("Mass per m (kg/m)", 0.0, min=0.0, step=0.1)
     tab.nominal_folder = gui.add_folder("Rough placement")
@@ -59,9 +64,13 @@ def keys_for(kind: str) -> tuple[str, ...]:
 def commit(tab, d: dict) -> None:
     """Widgets -> the tool dict (``ToolSetupTab._commit``)."""
     x = d["extension"]
+    old = x["type"]
     kind = x["type"] = tab.ext_type.value
-    for key in keys_for(kind):
-        x[key] = tuple(v / FIELDS[key][1] for v in tab.ext_ranges[key].value)
+    if kind == "pose" and old != "pose":
+        _legacy_to_pose(x)  # keep the tool's shape; every limit fixed at its value
+    else:
+        for key in keys_for(kind):
+            x[key] = tuple(v / FIELDS[key][1] for v in tab.ext_ranges[key].value)
     if kind != "bent":
         x["theta_deg"], x["d"] = (0.0, 0.0), (0.0, 0.0)
     x["radius"] = tab.radius.value / 1000
@@ -70,6 +79,26 @@ def commit(tab, d: dict) -> None:
     for key in keys_for(kind):
         lo, hi = x[key]
         n[key] = float(np.clip(n.get(key, lo), lo, hi))  # keep the placement inside new ranges
+
+
+def _legacy_to_pose(x: dict) -> None:
+    """Legacy L / theta / d / roll -> the same head pose as x y z rx ry rz (nominal), with each
+    range fixed at that value."""
+    from core.transforms import matrix_to_rpy
+
+    n = x["nominal"]
+    c, s = np.cos(np.radians(n["roll_deg"])), np.sin(np.radians(n["roll_deg"]))
+    t = np.radians(n["theta_deg"]) if x.get("theta_deg", (0, 0)) != (0.0, 0.0) else 0.0
+    d = n["d"] if x.get("d", (0, 0)) != (0.0, 0.0) else 0.0
+    Rz = np.array([[c, -s, 0], [s, c, 0], [0, 0, 1.0]])
+    Rx = np.array([[1.0, 0, 0], [0, np.cos(t), -np.sin(t)], [0, np.sin(t), np.cos(t)]])
+    p = Rz @ (np.array([0.0, 0.0, n["L"]]) + Rx @ np.array([0.0, d, 0.0]))
+    R = Rz @ Rx
+    rpy = np.degrees(matrix_to_rpy(R))
+    vals = {"x": p[0], "y": p[1], "z": p[2], "rx_deg": rpy[0], "ry_deg": rpy[1], "rz_deg": rpy[2]}
+    for key, v in vals.items():
+        n[key] = float(v)
+        x[key] = (float(v), float(v))
 
 
 def refresh(tab, x, on_nominal) -> None:
@@ -81,6 +110,7 @@ def refresh(tab, x, on_nominal) -> None:
         w.value = tuple(float(v) * FIELDS[key][1] for v in getattr(x, key))
         w.visible = key in shown
     tab.ext_note.visible = x.type == "pose"
+    tab.legacy_note.visible = x.type != "pose"
     tab.radius.value, tab.kg_per_m.value = x.radius * 1000, x.kg_per_m
     with tab.nominal_folder:
         for key in keys_for(x.type):

@@ -55,6 +55,11 @@ class ToolOptPanel:
                 "_Pose tools: the head pose (x y z rx ry rz within its ranges) with the best overall cost. "
                 "Straight / bent tools: the shortest L, then θ / d / roll. Payload is not considered._"
             )
+            self.legacy_hint = gui.add_markdown(
+                "_This tool is the legacy type: the optimizer only changes L / θ / d / roll. For x y z / "
+                "W P R limits set **Tool → Extension → Type = pose**._",
+                visible=False,
+            )
             self.apply = gui.add_button("Apply to tool", disabled=True)
             self.save_name = gui.add_text("Save as tool", "", hint="library name for the optimized tool")
             self.save_lib = gui.add_button("Save optimized tool to library", disabled=True)
@@ -87,6 +92,11 @@ class ToolOptPanel:
         x = self.s.tool.extension.model_copy(update={"nominal": r.values})
         ee = self.s.tool.model_copy(update={"name": name, "extension": x})
         return save_tool(ee, name)
+
+    def update_hint(self) -> None:
+        """Show the pose-limits hint while the tool is a legacy (L / theta / d) tool."""
+        tool = self.s.tool
+        self.legacy_hint.visible = tool is not None and tool.extension.type != "pose"
 
     def start(self, event=None, block: bool = False) -> None:
         s = self.s
@@ -172,6 +182,7 @@ class ToolOptPanel:
         shape = "" if pose else f"θ {v.theta_deg:.1f}°, d {v.d * 1000:.0f} mm, roll {v.roll_deg:.1f}° · "
         self.info.content = (
             f"**{r.message}**  \n{shape}cost {r.solution.cost:.2f} · {len(r.solution.stations)} station(s)"
+            "  \nNext: **Apply to tool**, then **Results → Paths & simulation → Build paths**."
             f"\n\n{table}"
         )
         self.apply.disabled = self.save_lib.disabled = False

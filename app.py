@@ -89,6 +89,7 @@ def build_app(
         state["results"].refresh()
         restore_work()
         state["workflow"].refresh(force=True)
+        state["tool_opt"].update_hint()
 
     def restore_work() -> None:
         """Bring back where the user left off: selection, then panel settings."""
@@ -177,6 +178,7 @@ def build_app(
             set_base=cell.set_base,
             show_q=cell.show_q,
             set_q=cell.set_q,
+            order=results.export.folder.order - 0.5,  # above Export
         )
     state["results"] = results
     tool_opt.planner_options = stations.options
@@ -188,11 +190,13 @@ def build_app(
     targets.selected_results = selected_results
     optimize.solution_points = lambda: (results.selected(), selected_results())
     optimize.move_to_point = results.go_to_point
+    optimize.go_station = results.go_to_station  # plan check: carrier to the point's stop
 
     def on_selection(_e=None) -> None:
         targets._draw_points()  # zone / configuration colours
         optimize.refresh_inspect()  # the inspector follows the Results selection
         workflow.refresh()  # out-of-date banner of the selected result
+        sim.on_selection()  # paths belong to one plan
 
     results.choice.on_update(on_selection)
     results.tool_opt = tool_opt
@@ -205,6 +209,7 @@ def build_app(
     objects.apply_gizmo()
     if autosave_thread:  # the real app: keep step status, banners and visibility current
         workflow.hooks.append(objects.apply_visibility)
+        workflow.hooks.append(tool_opt.update_hint)  # pose-limits hint follows the tool type
         workflow.start_watch()
     server.gui.add_markdown(UR_NOTICE)
 

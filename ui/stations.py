@@ -168,7 +168,11 @@ class StationsPanel:
                 )
                 best = out[0][0] if out else None
                 self.status.content = (
-                    f"Best: **{best.label}**, cost {best.cost:.2f}" if best else "_No solution found._"
+                    f"Best: **{best.label}**, cost {best.cost:.2f}.  \n"
+                    "Next: **Results → Paths & simulation → Build paths**, or *Inspect result* (above) "
+                    "to step through the points."
+                    if best
+                    else "_No solution found._"
                 )
                 if self._cancel.is_set():
                     self.status.content = "**Cancelled.** " + (

@@ -39,6 +39,11 @@ class ResultsTab:
         self._busy = False
         gui = server.gui
         self.choice = gui.add_dropdown("Solution", ("(none)",))
+        self.nav = gui.add_button_group("Switch plan", ("◀ previous", "next ▶"))
+        self.follow = gui.add_checkbox(
+            "Move robot with the plan", True, hint="switching plans moves the robot to the first stop"
+        )
+        self.compare = gui.add_markdown("")
         self.summary = gui.add_markdown("_No results yet: run the station planner (Optimize tab)._")
         self.breakdown = gui.add_markdown("")
         self.station = gui.add_dropdown("Station", ("-",))
@@ -53,8 +58,10 @@ class ResultsTab:
         self.move_carrier: Callable[[dict], None] | None = None  # set by app.py: carrier DOFs
         self.set_q: Callable[[np.ndarray], None] | None = None  # set by app.py: arm joints
 
-        for w in (self.choice, self.show_lines, self.show_ghosts):
+        for w in (self.show_lines, self.show_ghosts):
             w.on_update(lambda e: None if self._busy else self.draw())
+        self.choice.on_update(lambda e: None if self._busy else self._chosen())
+        self.nav.on_click(lambda e: self.switch(-1 if e.target.value.startswith("◀") else 1))
 
         @self.goto.on_click
         def _(e) -> None:
@@ -66,6 +73,40 @@ class ResultsTab:
         @self.clear.on_click
         def _(e) -> None:
             self._drop()
+
+    def switch(self, delta: int) -> None:
+        """Arrow: the previous / next plan in the list (best cost first)."""
+        labels = list(self.choice.options)
+        if self.choice.value not in labels or labels == ["(none)"]:
+            return
+        i = int(np.clip(labels.index(self.choice.value) + delta, 0, len(labels) - 1))
+        self.choice.value = labels[i]  # fires _chosen
+
+    def _chosen(self) -> None:
+        """The user picked another plan: draw it, optionally move the robot to its first stop."""
+        self.draw()
+        sol = self.selected()
+        if sol is not None and self.follow.value:
+            self.go_to_station(sol, 0)
+
+    def _compare_table(self) -> str:
+        """All plans side by side; the selected one in bold, out-of-date ones flagged."""
+        from ui.staleness import solution_changes
+
+        if not self.s.results:
+            return ""
+        cur = self.selected()
+        rows = []
+        for i, sol in enumerate(self.s.results):
+            n = len(sol.assignment) + len(sol.unreached)
+            mark = "**▶**" if sol is cur else ""
+            old = " ⚠" if solution_changes(self.s, sol) else ""
+            zones = f", {len(sol.zones)} zones" if sol.zones else ""
+            rows.append(
+                f"| {mark}{i + 1} | {len(sol.stations)}{zones} | {len(sol.assignment)}/{n} | "
+                f"{sol.cost:.2f}{old} |"
+            )
+        return "| # | stops | reached | cost |\n|---|---|---|---|\n" + "\n".join(rows)
 
     def go_to_station(self, sol, k: int) -> None:
         """Move the robot to station k of ``sol``: the carrier DOFs (which carry the base) when
@@ -129,6 +170,7 @@ class ResultsTab:
         self._handles, self._ghosts = [], []
 
     def draw(self) -> None:
+        self.compare.content = self._compare_table()
         self._drop()
         sol = self.selected()
         if sol is None:

@@ -30,7 +30,7 @@ SAVED: dict[str, tuple[str, ...]] = {
         "point_size",
     ),
     "targets.tools": ("row", "col", "row_dir", "radius", "max_angle", "max_edge"),
-    "optimize": ("clearance", "joint_margin", "torque"),
+    "optimize": ("clearance", "joint_margin", "torque", "check_from"),
     "placement": ("res", "grid", "half"),
     "stations": ("max_stations", "step", "refine", "zoning", "config_cost"),
     "tool_opt": ("max_stations", "tol", "shape_evals"),

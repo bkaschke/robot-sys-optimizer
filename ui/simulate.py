@@ -35,6 +35,7 @@ class SimPanel:
         set_base: Callable[[np.ndarray], None],
         show_q: Callable[[np.ndarray], None],
         set_q: Callable[[np.ndarray], None] | None = None,
+        order: float | None = None,
     ):
         self.server, self.s = server, session
         self.selected, self.move_carrier, self.set_base, self.show_q = (
@@ -52,7 +53,8 @@ class SimPanel:
         self._playing = threading.Event()
         self._station = None
         gui = server.gui
-        with gui.add_folder("Paths & simulation", expand_by_default=False):
+        self.folder = gui.add_folder("Paths & simulation", order=order)  # open, above Export
+        with self.folder:
             self.step = gui.add_number("Path sample step (mm)", 20.0, min=1.0, step=5.0)
             self.jump = gui.add_number("Max joint step (deg)", 20.0, min=1.0, step=5.0)
             self.build_btn = gui.add_button("Build paths", color="green")
@@ -174,6 +176,19 @@ class SimPanel:
         if n:
             self.frame.value = 0
             self.go_to(0)
+
+    def on_selection(self) -> None:
+        """Results selection changed: paths of another plan are cleared (not misleadingly
+        shown for the new one)."""
+        sol = self.selected()
+        if self.plan is None or sol is None or sol.label == self.label:
+            return
+        self.pause()
+        self.plan, self.label = None, None
+        self.clear()
+        self.frame.disabled = self.play.disabled = self.export.disabled = True
+        self.status.content = ""
+        self.info.content = f"_Paths were for another plan: **Build paths** for {sol.label}._"
 
     # --- drawing -------------------------------------------------------------------------------
 
