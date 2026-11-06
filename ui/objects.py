@@ -59,7 +59,8 @@ class ObjectsPanel:
         if name == "Targets":
             return [tg._handles[k] for k in ("points", "normals") if tg is not None and k in tg._handles]
         if name == "Results":
-            return list(r._handles) + list(r._ghosts) if r is not None else []
+            sim = list(self.sim._handles) if getattr(self, "sim", None) is not None else []
+            return (list(r._handles) + list(r._ghosts) if r is not None else []) + sim
         return []
 
     def apply_visibility(self) -> None:

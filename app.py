@@ -20,6 +20,7 @@ from ui.placement import PlacementPanel
 from ui.project_panel import ProjectPanel
 from ui.results import ResultsTab
 from ui.session import PartState, Session, last_project
+from ui.simulate import SimPanel
 from ui.stations import StationsPanel
 from ui.targets_ui import TargetsTab
 from ui.tool_opt import ToolOptPanel
@@ -168,6 +169,15 @@ def build_app(
     with tab_handles["Results"]:
         workflow.results_header()
         results = ResultsTab(server, session, set_base=cell.set_base)
+        sim = SimPanel(  # paths along the selected solution + playback (v2 phase 5)
+            server,
+            session,
+            results.selected,
+            move_carrier=carrier.set_values,
+            set_base=cell.set_base,
+            show_q=cell.show_q,
+            set_q=cell.set_q,
+        )
     state["results"] = results
     tool_opt.planner_options = stations.options
 
@@ -190,7 +200,7 @@ def build_app(
     results.set_q = cell.set_q
     workflow.cell, workflow.carrier, workflow.results = cell, carrier, results
     objects.cell, objects.carrier, objects.tool = cell, carrier, tool
-    objects.targets, objects.results = targets, results
+    objects.targets, objects.results, objects.sim = targets, results, sim
     workflow.refresh(force=True)
     objects.apply_gizmo()
     if autosave_thread:  # the real app: keep step status, banners and visibility current
@@ -203,6 +213,7 @@ def build_app(
         cell=cell,
         carrier=carrier,
         objects=objects,
+        sim=sim,
         tool=tool,
         targets=targets,
         optimize=optimize,

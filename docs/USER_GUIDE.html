@@ -418,6 +418,14 @@ $PY scripts/make_portable.py          # -&gt; dist/robot-sys-optimizer-portable-
 <p><strong>Move robot to station</strong>: moves the carrier to the station's axis values (the robot base rides on it; static: the base itself) and the arm to the first point that station serves.</p>
 </li>
 <li>
+<p><strong>Paths &amp; simulation</strong> (folder): <strong>Build paths</strong> connects the selected solution's points in its path order (each zone's order with zoning on, otherwise a back-and-forth order per stop). Between two points the TCP follows the part surface (sampled every <em>Path sample step</em>, projected onto the part, standoff kept) and turns smoothly from one planned tool orientation to the next; every sample is solved for the arm in the same joint configuration, closest to the previous sample. The summary lists flagged samples (red dots in the scene):</p>
+<ul>
+<li><strong>unreachable</strong> (no solution within the joint limits), <strong>config flip</strong> (only another shoulder / elbow / wrist configuration reaches it), <strong>jump</strong> (a joint moves more than <em>Max joint step</em> between neighbouring samples), <strong>collision</strong>;</li>
+<li><strong>reconfigure</strong>: the plan itself switches configuration there (the arm must re-pose; plan with <em>Joint configuration</em> = zones to avoid it).</li>
+</ul>
+<p>The paths are drawn as coloured lines (one colour per zone). <strong>▶ Play</strong> / <strong>⏸ Pause</strong> moves the carrier (or base) to each stop and the arm along the samples at <em>Speed (mm/s)</em>; <em>Sample</em> scrubs. <strong>Export path CSV</strong> writes <code>export/paths.csv</code> (stop, zone, from / to point, TCP pose in the world in mm + quaternion, joints in degrees, issue per sample). It is a preview of the TCP paths, not a timed robot program: the moves between stops and the reconfiguration moves are not planned.</p>
+</li>
+<li>
 <p><strong>Export</strong>:</p>
 <ul>
 <li><strong>TCP poses (CSV)</strong></li>

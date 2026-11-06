@@ -193,6 +193,13 @@ class CellTab:
         for sl, v in zip(self.sliders, q, strict=True):
             sl.value = float(np.degrees(v))  # fires the slider callbacks
 
+    def show_q(self, q: np.ndarray) -> None:
+        """Playback: move the arm without touching the joint sliders (fewer GUI messages per
+        frame; ``set_q`` syncs the sliders when playback stops)."""
+        self.s.q = np.asarray(q, float)
+        self.view.set_q(self.s.q)
+        self._update_readout()
+
     def _on_slider(self) -> None:
         if self._busy:
             return

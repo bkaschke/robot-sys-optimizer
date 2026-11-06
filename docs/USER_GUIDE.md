@@ -293,6 +293,11 @@ It also re-runs the tip-over and localization checks for the chosen solutions. I
 - **Solution**: the ranked list (best cost first). It shows a summary (with the zones and configuration changes when zoning is on), the cost breakdown bars and the station list.
 - **Scene**: coloured station markers, **lines to served points**, and **ghost robots** posed at a real solution.
 - **Move robot to station**: moves the carrier to the station's axis values (the robot base rides on it; static: the base itself) and the arm to the first point that station serves.
+- **Paths & simulation** (folder): **Build paths** connects the selected solution's points in its path order (each zone's order with zoning on, otherwise a back-and-forth order per stop). Between two points the TCP follows the part surface (sampled every *Path sample step*, projected onto the part, standoff kept) and turns smoothly from one planned tool orientation to the next; every sample is solved for the arm in the same joint configuration, closest to the previous sample. The summary lists flagged samples (red dots in the scene):
+  - **unreachable** (no solution within the joint limits), **config flip** (only another shoulder / elbow / wrist configuration reaches it), **jump** (a joint moves more than *Max joint step* between neighbouring samples), **collision**;
+  - **reconfigure**: the plan itself switches configuration there (the arm must re-pose; plan with *Joint configuration* = zones to avoid it).
+
+  The paths are drawn as coloured lines (one colour per zone). **▶ Play** / **⏸ Pause** moves the carrier (or base) to each stop and the arm along the samples at *Speed (mm/s)*; *Sample* scrubs. **Export path CSV** writes `export/paths.csv` (stop, zone, from / to point, TCP pose in the world in mm + quaternion, joints in degrees, issue per sample). It is a preview of the TCP paths, not a timed robot program: the moves between stops and the reconfiguration moves are not planned.
 - **Export**:
   - **TCP poses (CSV)**
   - **Optimized tool URDF (zip)**

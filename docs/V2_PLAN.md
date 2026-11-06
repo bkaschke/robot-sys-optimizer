@@ -56,7 +56,7 @@ In movable mode the Cell base fields are always read-only (the robot can never l
 - **Objective (user): best overall cost J** within the limits (stations, unreached, manipulability, clearance, travel, limits, with connector length as one weighted term). CMA-ES over the active components; stations re-planned per candidate as now, from the quick planner.
 - URDF export includes the connector mesh; the envelope sketch shows the spline.
 
-## Phase 5: paths and simulation
+## Phase 5: paths and simulation: **done on branch `v3`** (tests/test_v5_phase5.py). Orientation between points is a slerp of the two planned TCP orientations (so the waypoints are exactly the planned solutions); a planned configuration change is flagged as `reconfigure` and not traced. Not planned: carrier travel between stops and the reconfiguration moves; no timing (speed is a preview speed).
 
 - **Paths connect the planned points (user):** each stop / zone's points in the planner's serpentine order; segments follow the part surface (sampled between points, projected onto the mesh, normals interpolated).
 - Joint trajectory along each path with continuity (IK per sample, same branch, unwrapped), collision checks along the path, and gaps reported (unreachable sample, configuration flip, collision).
