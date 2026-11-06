@@ -45,6 +45,28 @@ def expand_to_limits(sols: np.ndarray, lower: np.ndarray, upper: np.ndarray, tol
     return np.array(out, dtype=float).reshape(-1, n)
 
 
+def best_copies(
+    sols: np.ndarray, lo: np.ndarray, hi: np.ndarray, lower: np.ndarray, upper: np.ndarray, tol: float = 1e-9
+) -> tuple[np.ndarray, np.ndarray]:
+    """Vectorized ``expand_to_limits`` + "largest limit margin" pick, per solution row.
+
+    For each row, the 2*pi copy of every joint inside [lo, hi] that is furthest from the
+    hard limits [lower, upper]. The margin min_j(min(q_j - lower_j, upper_j - q_j)) is a
+    minimum of per-joint terms, so choosing each joint's best copy independently maximizes
+    it. Returns (q (m, n), ok (m,)): ok is False where some joint has no copy in range."""
+    s = wrap_to_pi(np.atleast_2d(np.asarray(sols, float)))
+    mid = (lower + upper) / 2
+    kc = np.round((mid - s) / (2 * np.pi))
+    cand = s[..., None] + 2 * np.pi * (kc[..., None] + np.array([-1.0, 0.0, 1.0]))  # (m, n, 3)
+    inside = (cand >= lo[:, None] - tol) & (cand <= hi[:, None] + tol)
+    margin = np.minimum(cand - lower[:, None], upper[:, None] - cand)
+    margin = np.where(inside, margin, -np.inf)
+    k = np.argmax(margin, axis=-1)
+    q = np.take_along_axis(cand, k[..., None], axis=-1)[..., 0]
+    ok = np.all(np.take_along_axis(inside, k[..., None], axis=-1)[..., 0], axis=-1)
+    return q, ok
+
+
 def make_ik(robot: Robot, kind: str | None = None):
     """Solver for ``robot`` named by its spec (or ``kind`` to override)."""
     kind = kind or robot.spec.ik

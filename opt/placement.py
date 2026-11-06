@@ -240,7 +240,10 @@ def exact_station_score(
     max_manip: float,
 ) -> tuple[float, list[PointResult]]:
     checker.set_base(T_base)
-    res = [checker.check_point(int(t.ids[i]), t.P_part[i], t.N_part[i], t.groups[i], max_poses) for i in idx]
+    res = [  # screening: reachable or not + manipulability; no clearance distance needed
+        checker.check_point(int(t.ids[i]), t.P_part[i], t.N_part[i], t.groups[i], max_poses, clearance=False)
+        for i in idx
+    ]
     ok = [r for r in res if r.status != "unreachable"]
     q = np.mean([r.manipulability for r in ok]) / max_manip if ok else 0.0
     return len(ok) + q, res
@@ -306,7 +309,8 @@ def _robust(checker, t: Targets, i: int, r: PointResult, v: dict, sites) -> tupl
     result = (True, "")
     for vp in perturbed:
         checker.set_base(sites.T(vp))
-        if checker.check_point(int(t.ids[i]), t.P_part[i], t.N_part[i], t.groups[i]).status == "unreachable":
+        r_p = checker.check_point(int(t.ids[i]), t.P_part[i], t.N_part[i], t.groups[i], clearance=False)
+        if r_p.status == "unreachable":
             result = (False, "localization")
             break
     if perturbed:
@@ -381,6 +385,8 @@ def sites_start(sites, T_world_base0: np.ndarray) -> dict | None:
     """Current base as the travel start, expressed in the sites' DOFs (best effort)."""
     if sites.kind == "floor":
         return {"x": float(T_world_base0[0, 3]), "y": float(T_world_base0[1, 3])}
+    if hasattr(sites, "start"):  # e.g. the mobile contour (opt.contour): nearest path point
+        return sites.start(T_world_base0)
     v = sites.c.values_for_base(T_world_base0)
     return {d: v[d] for d in sites.dofs if d in v} or None
 
@@ -420,7 +426,9 @@ def plan_stations(
     Ts = np.array([sites.T(v) for v in cand])
     score = np.zeros((len(cand), len(t.ids)))
     mu = np.zeros_like(score)
-    rots = np.round(Ts[:, :3, :3].reshape(len(cand), -1), 6)
+    # the map is symmetric about the base z axis (opt.reachability): bases whose z axes
+    # agree share one lookup whatever their yaw (a mobile base: one lookup, not one per heading)
+    rots = np.round(Ts[:, :3, 2], 6)
     for key in np.unique(rots, axis=0):
         rows = np.flatnonzero(np.all(rots == key, axis=1))
         sc, m = coverage_matrix(rmap, t.P_world, t.N_world, t.cones, Ts[rows, :3, 3], Ts[rows[0], :3, :3])

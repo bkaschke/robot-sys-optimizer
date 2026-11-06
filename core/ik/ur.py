@@ -152,12 +152,13 @@ def _dh_batch(theta: np.ndarray, d: float, a: float, alpha: float) -> np.ndarray
     return T
 
 
-def solve_batch(ik: URAnalyticIK, T_base_flange: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+def solve_batch(ik: URAnalyticIK, T_base_flange: np.ndarray, return_singular: bool = False):
     """All 8 branches for N poses at once.
 
     Returns ``q`` (N, 8, 6) wrapped to (-pi, pi] and ``valid`` (N, 8). Branch index
     b = 4*i1 + 2*i5 + i3 (shoulder, wrist, elbow choice). Wrist-singular poses (|s5| tiny)
-    are marked invalid here; use ``ik.solve`` for those few.
+    are marked invalid here; use ``ik.solve`` for those few. ``return_singular`` adds a
+    (N,) mask of the poses where a branch was dropped only for being wrist-singular.
     """
     T = ik.T_0_b @ np.asarray(T_base_flange, float) @ ik.T_f_6  # (N,4,4) in DH frames
     n = T.shape[0]
@@ -168,6 +169,7 @@ def solve_batch(ik: URAnalyticIK, T_base_flange: np.ndarray) -> tuple[np.ndarray
     asn = np.arcsin(np.clip(ik.d4 / np.where(ok_r, r, 1.0), -1, 1))
     q = np.zeros((n, 8, 6))
     valid = np.zeros((n, 8), bool)
+    singular = np.zeros(n, bool)
     for i1, q1 in enumerate((psi + asn, psi + np.pi - asn)):
         T16 = _inv_batch(_dh_batch(q1, ik.d1, 0.0, np.pi / 2)) @ T
         R = T16[:, :3, :3]
@@ -192,6 +194,9 @@ def solve_batch(ik: URAnalyticIK, T_base_flange: np.ndarray) -> tuple[np.ndarray
                 b = 4 * i1 + 2 * i5 + i3
                 q[:, b] = wrap_to_pi(np.stack([q1, q2, q3, q4, q5, q6], axis=1))
                 valid[:, b] = ok_r & ok5 & ok3
+            singular |= ok_r & ~ok5
+    if return_singular:
+        return q, valid, singular
     return q, valid
 
 

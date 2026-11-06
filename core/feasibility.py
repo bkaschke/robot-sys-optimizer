@@ -17,13 +17,14 @@ reaches the target when tcp.z = -n, rotated by spin about n and tilted inside th
 
 from __future__ import annotations
 
+import itertools
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
 import numpy as np
 
 from core.collision import CollisionScene
-from core.ik import expand_to_limits
+from core.ik import best_copies
 from core.payload import static_check
 from core.robot import Robot
 from core.schema import TargetGroup
@@ -127,7 +128,11 @@ class CancelledError(Exception):
     """Raised inside a check when the checker's ``cancelled()`` returns True (user Cancel)."""
 
 
+CHUNK = 32  # largest number of candidate poses per vectorized IK call
+
+
 class FeasibilityChecker:
+    batch_ik = True  # vectorized IK for UR arms (False: the scalar path, for comparisons)
     cancelled = None  # optional () -> bool, polled once per candidate pose (Cancel within ~ms)
 
     def __init__(
@@ -158,10 +163,15 @@ class FeasibilityChecker:
         self.robot.set_mount(T_world_base[:3, :3])
         self.scene.set_base(T_world_base)
 
-    def check_point(self, pid: int, p, n, group: TargetGroup, max_poses: int | None = None) -> PointResult:
-        """``max_poses`` caps the candidate TCP poses tried (fast screening in optimizers)."""
+    def check_point(
+        self, pid: int, p, n, group: TargetGroup, max_poses: int | None = None, clearance: bool = True
+    ) -> PointResult:
+        """``max_poses`` caps the candidate TCP poses tried (fast screening in optimizers).
+        ``clearance=False`` skips the part-clearance distance of the accepted solution (the
+        collision check itself always runs): for screening and re-checks that only need
+        "reachable or not"; the result's clearance is then inf."""
         stage = [0]
-        for r in self._feasible(pid, p, n, group, max_poses, stage):
+        for r in self._feasible(pid, p, n, group, max_poses, stage, clearance=clearance):
             return r
         return PointResult(pid, "unreachable", STAGES[stage[0]])
 
@@ -184,55 +194,81 @@ class FeasibilityChecker:
                     break
         return out
 
-    def _feasible(self, pid, p, n, group, max_poses, stage, all_branches: bool = False):
+    def _ik_stream(self, poses):
+        """(pose, joint solutions in (-pi, pi]) per candidate pose, in order. UR arms use the
+        vectorized solver on growing chunks (1, 2, 4, ... CHUNK poses): most points succeed on
+        their first pose, hard ones get big cheap batches. Wrist-singular poses and other arms
+        use the scalar ``ik.solve``."""
+        if not (self.batch_ik and hasattr(self.ik, "a2")):
+            for item in poses:
+                yield item, self.ik.solve(item[-1])
+            return
+        from core.ik.ur import solve_batch
+
+        chunk: list = []
+        size = 1
+        for item in itertools.chain(poses, [None]):
+            if item is not None:
+                chunk.append(item)
+                if len(chunk) < size:
+                    continue
+            size = min(2 * size, CHUNK)
+            if not chunk:
+                break
+            Q, V, sing = solve_batch(self.ik, np.array([c[-1] for c in chunk]), return_singular=True)
+            for j, c in enumerate(chunk):
+                yield c, (self.ik.solve(c[-1]) if sing[j] else Q[j][V[j]])
+            chunk = []
+
+    def _feasible(
+        self, pid, p, n, group, max_poses, stage, all_branches: bool = False, clearance: bool = True
+    ):
         """Yield feasible PointResults: candidate poses in preference order; per pose, the
         branches best first (only the best one unless ``all_branches``). ``stage[0]`` is
         set to the furthest check stage any candidate passed."""
         tcps = group.tcps or list(self.T_flange_tcp)
         R_bp = self.T_base_part[:3, :3]
         force_base = -self.force * (R_bp @ np.asarray(n, float))  # tool pushes into the surface
-        for k, (tcp, spin, tilt, so, T_part_tcp) in enumerate(candidate_poses(p, n, group, tcps)):
-            if max_poses is not None and k >= max_poses:
-                break
+        poses = (
+            (tcp, spin, tilt, so, self.T_base_part @ T_part_tcp @ self._T_tcp_flange[tcp])
+            for tcp, spin, tilt, so, T_part_tcp in candidate_poses(p, n, group, tcps)
+        )
+        if max_poses is not None:
+            poses = itertools.islice(poses, max_poses)
+        for (tcp, spin, tilt, so, _), sols in self._ik_stream(poses):
             if self.cancelled is not None and self.cancelled():
                 raise CancelledError
-            T_base_flange = self.T_base_part @ T_part_tcp @ self._T_tcp_flange[tcp]
-            sols = self.ik.solve(T_base_flange)
             if len(sols) == 0:
                 continue
             stage[0] = max(stage[0], 1)
-            cands = []
-            for s in sols:
-                ok = expand_to_limits(s[None], self.lo, self.hi)
-                if len(ok):
-                    margin = np.minimum(ok - self.robot.lower, self.robot.upper - ok).min(axis=1)
-                    cands.append(ok[np.argmax(margin)])
+            qs, inside = best_copies(sols, self.lo, self.hi, self.robot.lower, self.robot.upper)
+            cands = list(qs[inside])
             if not cands:
                 continue
             stage[0] = max(stage[0], 2)
-            scored = []
-            for q in cands:
+            # rank the branches first (cheap), then torque + collision lazily in that order:
+            # the same branch wins as when every branch was torque-checked first
+            offset = self.T_flange_tcp[tcp][:3, 3]
+            Q = np.array(cands)
+            if hasattr(self.ik, "a2"):  # UR: closed-form |det J| (= Pinocchio's, any TCP offset)
+                from core.ik.ur import ur_manipulability
+
+                mus = ur_manipulability(self.ik, Q)
+            else:
+                mus = np.array([self.robot.manipulability(q, offset) for q in Q])
+            lms = np.min(np.minimum(Q - self.robot.lower, self.robot.upper - Q), axis=1)
+            # ties (mirror branches at equal quality) go to the lower branch index, not float noise
+            for b in sorted(range(len(Q)), key=lambda b: (-round(float(mus[b] + 0.1 * lms[b]), 9), b)):
+                q, mu, lm = Q[b], float(mus[b]), float(lms[b])
                 pr = static_check(
-                    self.robot,
-                    q,
-                    self.mass,
-                    self.com,
-                    force_base,
-                    self.T_flange_tcp[tcp][:3, 3],
-                    self.settings.torque_util,
+                    self.robot, q, self.mass, self.com, force_base, offset, self.settings.torque_util
                 )
                 if not pr.ok:
                     continue
-                mu = self.robot.manipulability(q, self.T_flange_tcp[tcp][:3, 3])
-                lm = float(np.min(np.minimum(q - self.robot.lower, self.robot.upper - q)))
-                scored.append((mu + 0.1 * lm, q, pr, mu, lm))
-            if not scored:
-                continue
-            stage[0] = max(stage[0], 3)
-            for _, q, pr, mu, lm in sorted(scored, key=lambda t: -t[0]):
+                stage[0] = max(stage[0], 3)
                 if self.scene.collides(q, tcp):
                     continue
-                clear = self.scene.part_clearance(q, tcp)
+                clear = self.scene.part_clearance(q, tcp) if clearance else float("inf")
                 marginal = (
                     clear < self.settings.clearance + MARGINAL_CLEARANCE
                     or pr.max_util > 0.9 * self.settings.torque_util

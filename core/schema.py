@@ -221,6 +221,11 @@ class Base(_Model):
     localization_deg: float = Field(default=0.0, ge=0)  # mobile: heading uncertainty
     tip_over: bool = False  # mobile: static tip-over check (needs chassis kg)
     tip_margin_m: float = Field(default=0.05, ge=0)
+    # mobile, v2: the side of the base that faces the part and ONE fixed gap between the base
+    # outline and the part outline (top view). Both set: stops lie on that contour around the
+    # part with the heading given (opt.contour); either None: free x, y, yaw search (v1).
+    facing: Literal["front", "back", "left", "right"] | None = None
+    fixed_standoff_m: float | None = Field(default=None, ge=0)
 
     @model_validator(mode="after")
     def _carrier(self) -> Base:
