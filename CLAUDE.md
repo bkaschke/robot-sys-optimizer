@@ -146,7 +146,9 @@ PY=/c/Users/Ben/miniforge3/envs/rso/python.exe
 RUFF=/c/Users/Ben/miniforge3/envs/rso/Library/bin/ruff.exe
 /c/Users/Ben/miniforge3/Scripts/conda.exe env update -n rso -f environment.yml --prune   # setup / sync
 $PY app.py [--port 8080]                  # serve the GUI → http://localhost:8080
-$PY -m pytest -q                          # tests (~35 s; 10k-sample IK round trip dominates)
+$PY -m pytest -q                          # all tests in one process (~13 min; can run out of memory)
+$PY scripts/test_batches.py               # same tests, 4 files per process (low memory, ~16 min)
+# tests/conftest.py points RSO_WORKSPACE at a temporary folder: tests never write the user's workspace/
 $RUFF check . && $RUFF format --check .   # lint + format
 $PY scripts/make_portable.py              # dist/*-portable-<sha>.zip: last commit + conda-pack'd env (offline PCs; guide 2.5)
 $PY scripts/make_golden_parts.py          # regenerate assets/parts/*.stl

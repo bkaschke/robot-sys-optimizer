@@ -22,6 +22,7 @@ from ui.results import ResultsTab
 from ui.session import PartState, Session, last_project
 from ui.simulate import SimPanel
 from ui.stations import StationsPanel
+from ui.stayout_ui import StayoutPanel
 from ui.targets_ui import TargetsTab
 from ui.tool_opt import ToolOptPanel
 from ui.tool_setup import ToolSetupTab
@@ -85,10 +86,12 @@ def build_app(
         state["tool"].refresh()
         state["targets"].refresh()
         state["carrier"].load(session.base)
+        state["stayouts"].refresh()
         state["carrier"].refresh()
         state["results"].refresh()
         restore_work()
         state["workflow"].refresh(force=True)
+        state["sim"].reset("another project was opened")
         state["tool_opt"].update_hint()
 
     def restore_work() -> None:
@@ -130,6 +133,7 @@ def build_app(
     with tab_handles["Cell"]:
         workflow.header("Cell")
         cell = CellTab(server, session)
+        stayouts = StayoutPanel(server, session)  # arm, tool and carrier keep clear (v3 item 5)
     with tab_handles["External Axis"]:
         workflow.header("External Axis")
         carrier = CarrierPanel(server, session, set_base=cell.set_base)
@@ -220,6 +224,7 @@ def build_app(
         tabs=tab_handles,
         cell=cell,
         carrier=carrier,
+        stayouts=stayouts,
         objects=objects,
         sim=sim,
         tool=tool,

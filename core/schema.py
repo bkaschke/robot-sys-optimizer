@@ -499,8 +499,10 @@ class Solution(_Model):
 class Project(_Model):
     version: int = SCHEMA_VERSION
     units: Literal["m"] = "m"
-    robot: Robot
+    robot: Robot | None = None  # None: an empty study, robot not chosen yet
     base: Base = Field(default_factory=Base)
+    # stay-out zones (world poses; core.stayout): the arm, tool and carrier keep clear of them
+    stayouts: list[Primitive] = Field(default_factory=list, max_length=64)
     end_effector: EndEffector | None = None  # set up in the Tool Setup tab (M3)
     part: Part | None = None
     targets: Targets = Field(default_factory=Targets)

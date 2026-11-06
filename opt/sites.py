@@ -81,8 +81,15 @@ class FloorSites:
 class CarrierSites:
     """Stations of a rail / gantry / mobile carrier, filtered by standoff and keep-outs."""
 
-    def __init__(self, carrier: Carrier, part_mesh: trimesh.Trimesh | None, T_world_part: np.ndarray | None):
+    def __init__(
+        self,
+        carrier: Carrier,
+        part_mesh: trimesh.Trimesh | None,
+        T_world_part: np.ndarray | None,
+        obstacles: list | None = None,
+    ):
         self.c = carrier
+        self.obstacles = list(obstacles or [])  # core.stayout.Obstacle
         self.kind = carrier.kind
         self.part, self.T_part = part_mesh, T_world_part
         fp = footprint(part_mesh, T_world_part) if part_mesh is not None else None
@@ -126,7 +133,22 @@ class CarrierSites:
         ):
             return False, 1.0
         zc = carrier_ok(self.c, self.zones, v, self.part, self.T_part)
+        if zc.ok and not self.clear_of_obstacles(v):
+            return False, 1.0
         return zc.ok, zc.penalty
+
+    def clear_of_obstacles(self, v: dict) -> bool:
+        """The carrier at DOF values v keeps the keep-out clearance from every stay-out zone."""
+        if not self.obstacles:
+            return True
+        from core.stayout import carrier_clear
+
+        v = self.full(v)
+        bodies = self.c.moving_bodies(v) + self.c.static_bodies()
+        ok, _ = carrier_clear(
+            bodies, self.c.footprint(v), self.obstacles, self.c.base.standoff_m.carrier_env_min
+        )
+        return ok
 
     def travel(self, a: dict, b: dict) -> float:
         return self.c.travel(a, b)

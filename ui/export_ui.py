@@ -92,6 +92,8 @@ class ExportPanel:
 
     def rows(self, sol) -> list[dict]:
         s = self.s
+        if s.robot is None:
+            raise ValueError("no robot in this study (tab 1 Robot & cell)")
         return ex.tcp_rows(
             sol,
             s.result_points.get(sol.label, {}),

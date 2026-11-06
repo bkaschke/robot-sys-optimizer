@@ -93,6 +93,7 @@ class _Evaluator:
         self.L_ref = length_ref(ee.extension)
         self.max_manip = 1.0  # set from the reachability map on the first plan
         self.cancelled: Callable[[], bool] | None = None  # polled by every exact check
+        self.obstacles: list = []  # stay-out zones (name, mesh, T_world)
 
     def tool(self, v: ExtensionValues) -> ToolModel:
         self.tm.ee = self.ee.model_copy(
@@ -104,7 +105,14 @@ class _Evaluator:
         tm = self.tool(v)
         bb, wb = self.sites.scene_bodies() if hasattr(self.sites, "scene_bodies") else ([], [])
         scene = CollisionScene(
-            self.robot, tm, self.part, self.T_base0, self.T_part, base_bodies=bb, world_bodies=wb
+            self.robot,
+            tm,
+            self.part,
+            self.T_base0,
+            self.T_part,
+            base_bodies=bb,
+            world_bodies=wb,
+            obstacles=self.obstacles,
         )
         # tool geometry optimization ignores payload (user decision, v2): torque / payload
         # checks off here; the feasibility check and the station planner still apply them
@@ -197,6 +205,7 @@ def optimize_tool(
     progress: Callable[[str, float], None] | None = None,
     cancelled: Callable[[], bool] | None = None,
     sites=None,
+    obstacles: list | None = None,
 ) -> GeometryResult:
     st = st or GeometrySettings()
     say = progress or (lambda m, f: None)
@@ -215,6 +224,7 @@ def optimize_tool(
         sites=sites,
     )
     ev.cancelled = cancelled
+    ev.obstacles = list(obstacles or [])
     x = ee.extension
     if x.type == "pose":  # v2: head pose x y z rx ry rz, best overall cost (opt.tool_pose)
         from opt.tool_pose import optimize_pose

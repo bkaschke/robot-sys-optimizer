@@ -94,6 +94,8 @@ class StationsPanel:
             return notify(event, "Busy", "Planning is already running")
         if s.tool_model is None or s.part is None or not s.targets.points:
             return notify(event, "Cannot plan", "Need a tool, a part and targets")
+        if s.robot is None:
+            return notify(event, "No robot", "Choose a robot first (tab 1 Robot & cell)")
         if s.robot.spec.ik != "ur_analytic":
             return notify(event, "Not supported", "Station planning needs a UR-type arm (v1)")
         sites = s.sites()
@@ -109,6 +111,7 @@ class StationsPanel:
         t = world_targets(s)
         fp = part_footprint(s)
         mesh = s.part_mesh()
+        obstacles = s.obstacle_entries()  # stay-out zones
         T_base0, T_part = s.T_world_base.copy(), s.part.T_world_part.copy()
         weights = self._optimizer().weights.model_copy(update={"config": self.options()["config_cost"]})
         L = s.tool_model.length()
@@ -151,7 +154,14 @@ class StationsPanel:
                 )
                 bb, wb = sites.scene_bodies() if sites is not None else ([], [])
                 scene = CollisionScene(
-                    robot, s.tool_model, mesh, T_base0, T_part, base_bodies=bb, world_bodies=wb
+                    robot,
+                    s.tool_model,
+                    mesh,
+                    T_base0,
+                    T_part,
+                    base_bodies=bb,
+                    world_bodies=wb,
+                    obstacles=obstacles,
                 )
                 checker = FeasibilityChecker(robot, make_ik(robot), s.tool_model, scene, T_base0, T_part)
                 out = plan_stations(

@@ -13,18 +13,19 @@ import json
 
 import numpy as np
 
-COMPONENTS = ("robot", "carrier", "tool", "part", "targets")
+COMPONENTS = ("robot", "carrier", "tool", "part", "targets", "stayout")
 LABELS = {
     "robot": "robot / mount",
     "carrier": "external axis",
     "tool": "tool",
     "part": "part",
     "targets": "targets",
+    "stayout": "stay-out zones",
     "base_pose": "robot base pose",
 }
 # setup steps (tab names in app.TABS) and the components each one defines
 STEP_COMPONENTS = {
-    "Cell": ("robot", "part"),
+    "Cell": ("robot", "part", "stayout"),
     "External Axis": ("carrier",),
     "Tool Setup": ("tool",),
     "Targets": ("targets",),
@@ -59,6 +60,7 @@ def components(s, base_pose: bool = False, tool_nominal: bool = True) -> dict[st
         "tool": "",
         "part": "",
         "targets": _h(s.targets.model_dump_json()),
+        "stayout": _h([p.model_dump(mode="json") for p in getattr(s, "stayouts", [])]),
     }
     if s.tool is not None:
         tool = s.tool.model_dump(mode="json")

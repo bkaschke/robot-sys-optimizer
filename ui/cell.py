@@ -26,6 +26,7 @@ from ui.widgets import safe_name as _safe_name
 
 BASE_NODE = "/cell/base"
 PART_NODE = "/cell/part"
+NO_ROBOT = "(no robot yet)"
 PART_COLOR = (205, 208, 214)
 UPLOADED = "(uploaded URDF)"
 
@@ -51,9 +52,9 @@ class CellTab:
         self._jog_latest = Latest(self._on_slider)  # slider drags: newest value only
 
         with server.gui.add_folder("Robot"):
-            robots = (*list_robots(), UPLOADED)
+            robots = (*list_robots(), UPLOADED, NO_ROBOT)
             self.robot_choice = server.gui.add_dropdown(
-                "Robot", robots, initial_value=session.robot_name or UPLOADED
+                "Robot", robots, initial_value=session.robot_name or (UPLOADED if session.robot else NO_ROBOT)
             )
             self.robot_upload = server.gui.add_upload_button(
                 "Upload URDF (.zip)", mime_type="application/zip", hint="URDF + meshes in one zip"
@@ -94,7 +95,9 @@ class CellTab:
         def _(e) -> None:
             if self._busy:
                 return
-            if self.robot_choice.value != UPLOADED and self.robot_choice.value != self.s.robot_name:
+            if self.robot_choice.value in (UPLOADED, NO_ROBOT):
+                return
+            if self.s.robot is None or self.robot_choice.value != self.s.robot_name:
                 self.s.load_robot_from_registry(self.robot_choice.value)
                 self.refresh()
 
@@ -128,6 +131,8 @@ class CellTab:
         def _(_e) -> None:
             from ui.session import HOME_Q
 
+            if self.s.robot is None:
+                return
             q = HOME_Q.get(self.s.robot_name or "", np.zeros(self.s.robot.nq))
             self.set_q(np.clip(q, self.s.robot.lower, self.s.robot.upper))
 
@@ -220,6 +225,9 @@ class CellTab:
         T = self.s.T_world_flange()
         for fn in self.listeners:
             fn(T)
+        if self.s.robot is None:
+            self.readout.content = "_No robot in this study yet: choose one above (Robot) or upload a URDF._"
+            return
         p = T[:3, 3] * 1000
         r = np.degrees(matrix_to_rpy(T[:3, :3]))
         self.readout.content = (
@@ -229,9 +237,6 @@ class CellTab:
 
     def refresh(self) -> None:
         """Rebuild robot display + sliders from the session (after robot or project change)."""
-        s = self.s
-        if s.robot is None:
-            s.load_robot_from_registry("ur20")
         self._busy = True
         try:
             self._rebuild()
@@ -242,10 +247,18 @@ class CellTab:
         s = self.s
         if self.view is not None:
             self.view.remove()
-        self.view = RobotView(self.server, s.robot, s.robot_urdf_path, BASE_NODE)
+            self.view = None
         for sl in self.sliders:
             sl.remove()
         self.sliders = []
+        if s.robot is None:  # empty study: no arm, no sliders
+            self.robot_choice.value = NO_ROBOT
+            self.mount.value = s.mount
+            self.base.set(s.T_world_base)
+            self._update_readout()
+            self._rebuild_part()
+            return
+        self.view = RobotView(self.server, s.robot, s.robot_urdf_path, BASE_NODE)
         with self.joint_folder:
             for name, lo, hi, v in zip(s.robot.joint_names, s.robot.lower, s.robot.upper, s.q, strict=True):
                 sl = self.server.gui.add_slider(

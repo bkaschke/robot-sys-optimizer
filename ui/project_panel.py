@@ -23,7 +23,7 @@ import viser
 from pydantic import ValidationError
 
 from core import schema
-from ui.session import REPO, Session, load_project, remember_last, save_project
+from ui.session import REPO, WORKSPACE, Session, load_project, remember_last, save_project
 
 MAX_JSON = 20 * 1024 * 1024
 EXAMPLES = REPO / "examples"
@@ -50,7 +50,7 @@ def _example_copy(name: str) -> Path:
     first one that does not exist or is still an unchanged copy (same project.json as the
     template) is used; a copy you changed is never reused or replaced."""
     shipped = (EXAMPLES / name / "project.json").read_bytes()
-    base = REPO / "workspace" / "examples" / name
+    base = WORKSPACE / "examples" / name
     k = 1
     while True:
         d = base if k == 1 else base.with_name(f"{name}_{k}")
@@ -88,6 +88,13 @@ class ProjectPanel:
             )
             self.folder = server.gui.add_text(
                 "Folder", str(Path(rel).as_posix()), hint="relative to the repo, or absolute"
+            )
+            self.new_part = server.gui.add_button(
+                "New part, same cell",
+                hint="keeps robot, tool, carrier, stay-out zones; clears part, targets, plans, paths",
+            )
+            self.new_empty = server.gui.add_button(
+                "New empty study", hint="nothing at all: start from scratch"
             )
             self.save = server.gui.add_button("Save", icon=None)
             self.load = server.gui.add_button("Load")
@@ -140,6 +147,9 @@ class ProjectPanel:
             (d / "project.json").write_bytes(f.content)
             self._load(e, d)
 
+        self.new_part.on_click(lambda e: self.new_study(keep_cell=True, e=e))
+        self.new_empty.on_click(lambda e: self.new_study(keep_cell=False, e=e))
+
         @self.open_example.on_click
         def _(e) -> None:
             self.load_example(self.example.value, e)
@@ -164,7 +174,7 @@ class ProjectPanel:
             return False
         dest = _example_copy(name)
         shutil.copytree(EXAMPLES / name, dest, dirs_exist_ok=True)
-        self.folder.value = dest.relative_to(REPO).as_posix()
+        self.folder.value = self._rel(dest)  # the workspace may live outside the repo (RSO_WORKSPACE)
         return self._load(e, dest)
 
     def save_as_example(self, name: str, overwrite: bool = False) -> Path:
@@ -186,6 +196,38 @@ class ProjectPanel:
         tmp.replace(dest / "project.json")
         self.example.options = (NO_EXAMPLE, *list_examples())
         return dest / "project.json"
+
+    def new_study(self, keep_cell: bool, e=None) -> Path:
+        """Start a new study in a new folder workspace/study_<date-time>; the current one is
+        saved first and stays as it is. ``keep_cell``: keep robot, tool, carrier and stay-out
+        zones and clear the part, its targets, plans, checks and paths (a new part in the same
+        cell). Otherwise everything starts empty, without even a robot."""
+        try:
+            self.save_now()  # keep the current work (not possible inside examples/: a template)
+        except (OSError, ValidationError, ValueError):
+            pass
+        dest = WORKSPACE / f"study_{datetime.now():%Y%m%d_%H%M%S}"
+        s = self.s
+        if keep_cell:
+            s.part, s.selection = None, None
+            s.targets = s.targets.model_copy(update={"points": []})  # keep the tolerance groups
+            s.results, s.result_points, s.feasibility, s.stamps = [], {}, {}, {}
+            s.steps.pop("Targets", None)
+        else:
+            from ui.session import Session
+
+            hooks = s.before_save
+            fresh = Session()  # no robot, tool, part, carrier, targets or results
+            fresh.robot_name = None  # (the dataclass default names the UR20 without loading it)
+            fresh.project_dir = s.project_dir
+            s.__dict__.update(fresh.__dict__)
+            s.before_save = hooks
+        self.on_loaded()
+        path = self.save_now(dest)  # save_project carries project-local assets along
+        what = "new part in the same cell" if keep_cell else "new empty study"
+        self.status.content = f"_Started a {what} in `{self.folder.value}`._"
+        _notify(e, "New study", f"{what}: {path.parent}", ok=True)
+        return dest
 
     # --- saving -------------------------------------------------------------------------------
 

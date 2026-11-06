@@ -103,6 +103,8 @@ class OptimizeTab:
             raise ValueError("load a tool (Tool Setup) and a part (Cell) first")
         if not s.targets.points:
             raise ValueError("no targets: generate points in the Targets tab")
+        if s.robot is None:
+            raise ValueError("choose a robot first (tab 1 Robot & cell)")
         robot = Robot(s.robot.spec)  # private Pinocchio data for this thread
         settings = CheckSettings(self.joint_margin.value, self.torque.value, self.clearance.value / 1000)
         sites = s.sites()  # carrier bodies collide with the arm and tool too
@@ -116,6 +118,7 @@ class OptimizeTab:
             Margins(clearance=settings.clearance),
             base_bodies=bb,
             world_bodies=wb,
+            obstacles=s.obstacle_entries(),  # stay-out zones
         )
         return FeasibilityChecker(
             robot, make_ik(robot), s.tool_model, scene, s.T_world_base, s.part.T_world_part, settings

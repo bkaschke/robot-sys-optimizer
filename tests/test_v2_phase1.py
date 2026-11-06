@@ -143,7 +143,7 @@ def test_inspector_follows_the_selected_plan(planned):
 
 
 def test_examples_are_read_only_templates(app, tmp_path):
-    from ui.project_panel import EXAMPLES, REPO
+    from ui.project_panel import EXAMPLES, WORKSPACE
 
     pp, s = app["project"], app["session"]
     assert pp.load_example("rail_long_part")
@@ -177,7 +177,7 @@ def test_examples_are_read_only_templates(app, tmp_path):
         shutil.rmtree(EXAMPLES / name, ignore_errors=True)
         pp.example.options = tuple(o for o in pp.example.options if o != name)
         for d in (first, second):
-            if d.is_relative_to(REPO / "workspace" / "examples") and d.name != "rail_long_part":
+            if d.is_relative_to(WORKSPACE / "examples") and d.name != "rail_long_part":
                 shutil.rmtree(d, ignore_errors=True)
         if (first / "project.json").exists():  # restore the unchanged copy for later tests
             shutil.copy(EXAMPLES / "rail_long_part" / "project.json", first / "project.json")

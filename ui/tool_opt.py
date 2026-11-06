@@ -105,6 +105,8 @@ class ToolOptPanel:
             return notify(event, "Busy", "Already running")
         if s.tool is None or s.part is None or not s.targets.points:
             return notify(event, "Cannot optimize", "Need a tool, a part and targets")
+        if s.robot is None:
+            return notify(event, "No robot", "Choose a robot first (tab 1 Robot & cell)")
         if s.robot.spec.ik != "ur_analytic":
             return notify(event, "Not supported", "Needs a UR-type arm (v1)")
         opts = self.planner_options() if self.planner_options else {"zoning": False, "config_cost": 1.0}
@@ -128,6 +130,7 @@ class ToolOptPanel:
         st = GeometrySettings(L_tol=self.tol.value / 1000, shape_evals=int(self.shape_evals.value))
         st.planner.zoning = opts["zoning"]
         sites = s.sites()
+        obstacles = s.obstacle_entries()  # stay-out zones
         if sites is None:
             args = (*args[:-1], 1)  # static base: one station
         if self.on_start is not None:
@@ -146,7 +149,12 @@ class ToolOptPanel:
         def work() -> None:
             try:
                 self.result = optimize_tool(
-                    *args, st=st, progress=say, cancelled=self._cancel.is_set, sites=sites
+                    *args,
+                    st=st,
+                    progress=say,
+                    cancelled=self._cancel.is_set,
+                    sites=sites,
+                    obstacles=obstacles,
                 )
                 self._show()
             except CancelledError:  # Cancel while a reachability map was being built

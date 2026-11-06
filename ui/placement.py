@@ -80,6 +80,8 @@ class PlacementPanel:
         s = self.s
         if s.tool_model is None or s.part is None or not s.targets.points:
             return notify(event, "Cannot vote", "Need a tool, a part and targets")
+        if s.robot is None:
+            return notify(event, "No robot", "Choose a robot first (tab 1 Robot & cell)")
         robot = Robot(s.robot.spec)
         T_ft = s.tool_model.T_flange_tcp(self._tcp())
         settings = MapSettings(res=self.res.value / 1000)

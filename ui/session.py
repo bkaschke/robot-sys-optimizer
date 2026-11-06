@@ -7,6 +7,7 @@ exist there are looked up relative to the repo (bundled assets such as golden pa
 
 from __future__ import annotations
 
+import os
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -21,7 +22,10 @@ from core.transforms import matrix_to_pose, pose_to_matrix
 from core.urdf_import import inspect_urdf
 
 REPO = Path(__file__).resolve().parents[1]
-DEFAULT_PROJECT_DIR = REPO / "workspace" / "default"
+# where projects live; RSO_WORKSPACE moves it (the test suite uses a temporary one so it never
+# writes into the user's projects)
+WORKSPACE = Path(os.environ.get("RSO_WORKSPACE") or REPO / "workspace")
+DEFAULT_PROJECT_DIR = WORKSPACE / "default"
 MESH_EXTS = (".stl", ".obj", ".ply")
 UNIT_SCALE = {"m": 1.0, "mm": 1e-3, "in": 0.0254}
 HOME_Q = {"ur20": np.radians([0, -90, 90, -90, -90, 0])}
@@ -55,6 +59,7 @@ class Session:
     extra: dict = field(default_factory=dict)  # untouched project sections (optimizer)
     selection: tuple[str, list[int]] | None = None  # (part mesh path, face ids): saved selection
     ui: dict = field(default_factory=dict)  # saved panel settings ("panel.widget" -> value)
+    stayouts: list = field(default_factory=list)  # schema.Primitive, world poses (core.stayout)
     stamps: dict = field(default_factory=dict)  # result key -> setup fingerprint (ui.staleness)
     steps: dict = field(default_factory=dict)  # confirmed setup step -> fingerprint
     before_save: list = field(default_factory=list)  # GUI hooks that copy their state in here
@@ -91,6 +96,8 @@ class Session:
         self.q = np.clip(np.zeros(self.robot.nq), self.robot.lower, self.robot.upper)
 
     def T_world_flange(self) -> np.ndarray:
+        if self.robot is None:  # empty study: nothing hangs below the base yet
+            return self.T_world_base.copy()
         return self.T_world_base @ self.robot.fk(self.q)
 
     def sites(self):
@@ -100,11 +107,24 @@ class Session:
         if self.base.mode != "movable" or self.part is None:
             return None
         b = self.base
+        obs = self.obstacles()  # stay-out zones: the carrier keeps clear too
         if b.carrier == "mobile" and b.facing is not None and b.fixed_standoff_m is not None:
             from opt.contour import ContourSites  # fixed standoff + facing side: 1-D contour
 
-            return ContourSites(self.carrier(), self.part_mesh(), self.part.T_world_part)
-        return CarrierSites(self.carrier(), self.part_mesh(), self.part.T_world_part)
+            return ContourSites(self.carrier(), self.part_mesh(), self.part.T_world_part, obstacles=obs)
+        return CarrierSites(self.carrier(), self.part_mesh(), self.part.T_world_part, obstacles=obs)
+
+    def obstacles(self):
+        """Stay-out zones as core.stayout.Obstacle (meshes resolved like other assets)."""
+        from core.stayout import obstacles
+
+        return obstacles(self.stayouts, self.resolve)
+
+    def obstacle_entries(self) -> list:
+        """(name, mesh, T_world) of the stay-out zones, for CollisionScene(obstacles=...)."""
+        from core.stayout import scene_entries
+
+        return scene_entries(self.obstacles())
 
     def carrier(self):
         """core.carrier.Carrier for the current base (mesh bodies resolved like other assets)."""
@@ -166,14 +186,18 @@ class Session:
 
     def to_project(self) -> schema.Project:
         r = self.robot
-        robot = schema.Robot(
-            name=self.robot_name,
-            urdf=self.robot_urdf,
-            flange_link=r.spec.flange_link,
-            mount=self.mount,
-            base_pose=matrix_to_pose(self.T_world_base),
-            ik=r.spec.ik,
-            payload_spec=r.spec.payload,
+        robot = (
+            None
+            if r is None
+            else schema.Robot(
+                name=self.robot_name,
+                urdf=self.robot_urdf,
+                flange_link=r.spec.flange_link,
+                mount=self.mount,
+                base_pose=matrix_to_pose(self.T_world_base),
+                ik=r.spec.ik,
+                payload_spec=r.spec.payload,
+            )
         )
         part = None
         if self.part is not None:
@@ -189,6 +213,7 @@ class Session:
             targets=self.targets,
             results=self.results,
             base=self.base,
+            stayouts=list(self.stayouts),
             work=self.work_state(),
             **self.extra,
         )
@@ -196,18 +221,22 @@ class Session:
     def apply_project(self, project: schema.Project, project_dir: Path) -> None:
         self.project_dir = project_dir
         pr = project.robot
-        if pr.name is not None:
+        if pr is None:  # empty study
+            self.robot, self.robot_name, self.robot_urdf, self.q = None, None, None, None
+        elif pr.name is not None:
             self.load_robot_from_registry(pr.name)
         else:
             self.load_robot_from_urdf(self.resolve(pr.urdf), pr.flange_link)
-        self.mount = pr.mount
-        self.T_world_base = pose_to_matrix(pr.base_pose)
+        if pr is not None:
+            self.mount = pr.mount
+            self.T_world_base = pose_to_matrix(pr.base_pose)
         self.part = None
         if project.part is not None:
             self.part = PartState(project.part.mesh, project.part.units, pose_to_matrix(project.part.pose))
             self.part_mesh()  # fail early if the mesh is missing or broken
         self.extra = {"optimizer": project.optimizer}
         self.base = project.base
+        self.stayouts = list(project.stayouts)
         self.results = list(project.results)
         self.targets = project.targets
         self.set_tool(project.end_effector)
@@ -271,7 +300,7 @@ def load_project(session: Session, project_dir: Path) -> None:
     session.before_save = hooks  # GUI hooks belong to the app, not to the loaded project
 
 
-LAST_PROJECT = REPO / "workspace" / "last_project.txt"
+LAST_PROJECT = WORKSPACE / "last_project.txt"
 
 
 def remember_last(project_dir: Path) -> None:

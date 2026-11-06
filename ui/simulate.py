@@ -98,6 +98,7 @@ class SimPanel:
             s.part.T_world_part,
             base_bodies=bb,
             world_bodies=wb,
+            obstacles=s.obstacle_entries(),  # stay-out zones
         )
         return FeasibilityChecker(
             robot, make_ik(robot), s.tool_model, scene, s.T_world_base, s.part.T_world_part
@@ -117,6 +118,8 @@ class SimPanel:
             )
         if self._thread is not None and self._thread.is_alive():
             return notify(event, "Busy", "Already building paths")
+        if s.robot is None:
+            return notify(event, "No robot", "Choose a robot first (tab 1 Robot & cell)")
         self.pause()
         checker = self._checker()
         pts = {p.id: (np.array(p.p, float), np.array(p.n, float)) for p in s.targets.points}

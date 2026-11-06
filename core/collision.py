@@ -62,6 +62,7 @@ class _Pairs:
     robot_self: list[int] = field(default_factory=list)
     floor: list[int] = field(default_factory=list)
     carrier: list[int] = field(default_factory=list)
+    obstacle: list[int] = field(default_factory=list)
 
 
 class CollisionScene:
@@ -77,7 +78,10 @@ class CollisionScene:
         floor: bool = True,
         base_bodies: list | None = None,
         world_bodies: list | None = None,
+        obstacles: list | None = None,
     ):
+        """``obstacles``: stay-out zones, (name, mesh, T_world_body): world-fixed geometry the arm
+        (from the shoulder on) and the tool must keep ``margins.clearance`` from."""
         self.robot = robot
         self.margins = margins or Margins()
         model = robot.model
@@ -150,6 +154,13 @@ class CollisionScene:
             self.carrier_ids.append(gid)
             self.world_body_T[gid] = T_world_body
 
+        self.obstacle_ids: list[int] = []
+        for name, mesh, T_world_body in obstacles or []:
+            go = pin.GeometryObject(f"stayout_{name}", 0, _se3(self.T_univ_world @ T_world_body), _bvh(mesh))
+            gid = self.gm.addGeometryObject(go)
+            self.obstacle_ids.append(gid)
+            self.world_body_T[gid] = T_world_body  # re-placed in set_base like the part
+
         self.pairs = _Pairs()
         P = self.pairs
 
@@ -174,13 +185,16 @@ class CollisionScene:
         if self.floor_id is not None:
             for i in [*self.robot_ids[2:], *self.tool_ids]:
                 add(i, self.floor_id, P.floor)
+        for o in self.obstacle_ids:  # stay-out zones: arm from the shoulder on, and the tool
+            for i in [*self.robot_ids[1:], *self.tool_ids]:
+                add(i, o, P.obstacle)
         for c in self.carrier_ids:  # arm beyond the shoulder and the tool vs the carrier
             for i in [*self.robot_ids[2:], *self.tool_ids]:
                 add(i, c, P.carrier)
 
         self.gd = pin.GeometryData(self.gm)
         margin_of = {}
-        for k in P.robot_part + P.tool_part:
+        for k in P.robot_part + P.tool_part + P.obstacle:
             margin_of[k] = self.margins.clearance
         for k in P.tool_robot + P.carrier:
             margin_of[k] = self.margins.self_clearance

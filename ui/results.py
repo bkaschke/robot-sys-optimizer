@@ -270,6 +270,8 @@ class ResultsTab:
 
     def _ghost(self, k: int, T: np.ndarray, q, color) -> None:
         robot = self.s.robot
+        if robot is None:  # empty study: no arm to show
+            return
         name = f"{ROOT}/ghost{k + 1}"
         self._ghosts.append(
             self.server.scene.add_frame(

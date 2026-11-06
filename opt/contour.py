@@ -27,8 +27,8 @@ SIDES = {"front": (1.0, 0.0), "back": (-1.0, 0.0), "left": (0.0, 1.0), "right": 
 class ContourSites(CarrierSites):
     """CarrierSites for a mobile base on its fixed-standoff contour: DOF ``t`` (m)."""
 
-    def __init__(self, carrier, part_mesh, T_world_part, step: float = 0.02):
-        super().__init__(carrier, part_mesh, T_world_part)
+    def __init__(self, carrier, part_mesh, T_world_part, step: float = 0.02, obstacles=None):
+        super().__init__(carrier, part_mesh, T_world_part, obstacles)
         b = carrier.base
         if self.zones.part is None:
             raise ValueError("contour stops need a part")
@@ -109,7 +109,7 @@ class ContourSites(CarrierSites):
         f = self.full(v)
         fp = self.c.footprint(f)
         zc = self.zones.check(fp)
-        return zc.ok, 0.0
+        return zc.ok and self.clear_of_obstacles(f), 0.0
 
     def travel(self, a: dict, b: dict) -> float:
         return self.c.travel(self.full(a), self.full(b))
