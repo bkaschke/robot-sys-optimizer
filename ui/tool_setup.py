@@ -13,10 +13,11 @@ from pydantic import ValidationError
 
 from core.mesh_select import grow_region
 from core.process import PRESETS, apply_preset
-from core.schema import TCP, EndEffector, Tolerances
+from core.schema import TCP, EndEffector, Extension, Tolerances
 from core.tool import list_tools, save_tool
 from core.transforms import matrix_to_pose, pose_to_matrix
 from core.urdf_import import URDFImportError, import_urdf_zip
+from ui import tool_extension
 from ui.session import REPO, Session
 from ui.tool_view import HEAD, ROOT, ToolView
 from ui.widgets import MAX_UPLOAD, PoseWidgets, notify, safe_name
@@ -52,14 +53,7 @@ class ToolSetupTab:
         with gui.add_folder("Flange mount"):
             self.mount = PoseWidgets(server, f"{ROOT}/mount", np.eye(4), self._on_mount, scale=0.12)
         with gui.add_folder("Extension"):
-            self.ext_type = gui.add_dropdown("Type", ("straight", "bent"))
-            self.r_L = gui.add_vector2("L range (mm)", (0.0, 500.0), step=1.0)
-            self.r_theta = gui.add_vector2("θ range (deg)", (0.0, 0.0), step=1.0)
-            self.r_d = gui.add_vector2("d range (mm)", (0.0, 0.0), step=1.0)
-            self.r_roll = gui.add_vector2("roll range (deg)", (0.0, 0.0), step=1.0)
-            self.radius = gui.add_number("Capsule radius (mm)", 40.0, min=1.0, step=1.0)
-            self.kg_per_m = gui.add_number("Mass per m (kg/m)", 0.0, min=0.0, step=0.1)
-            self.nominal_folder = gui.add_folder("Rough placement")
+            tool_extension.build(gui, self)  # pose (x y z rx ry rz) or legacy straight / bent
         with gui.add_folder("TCPs"):
             self.tcp_choice = gui.add_dropdown("TCP", ("tcp",))
             self.tcp_name = gui.add_text("Rename", "")
@@ -166,20 +160,9 @@ class ToolSetupTab:
                     self._update_info()
 
         def ext(d: dict) -> None:
-            x = d["extension"]
-            x["type"] = self.ext_type.value
-            x["L"] = tuple(v / 1000 for v in self.r_L.value)
-            x["theta_deg"] = tuple(self.r_theta.value) if x["type"] == "bent" else (0.0, 0.0)
-            x["d"] = tuple(v / 1000 for v in self.r_d.value) if x["type"] == "bent" else (0.0, 0.0)
-            x["roll_deg"] = tuple(self.r_roll.value)
-            x["radius"] = self.radius.value / 1000
-            x["kg_per_m"] = self.kg_per_m.value
-            n = x["nominal"]
-            for key in ("L", "theta_deg", "d", "roll_deg"):
-                lo, hi = x[key]
-                n[key] = float(np.clip(n[key], lo, hi))  # keep the placement inside new ranges
+            tool_extension.commit(self, d)
 
-        for w in (self.ext_type, self.r_L, self.r_theta, self.r_d, self.r_roll, self.radius, self.kg_per_m):
+        for w in tool_extension.widgets(self):
 
             @w.on_update
             @g
@@ -308,7 +291,12 @@ class ToolSetupTab:
         dest = self.s.project_dir / "assets" / "tools" / name
         try:
             info = import_urdf_zip(f.content, dest, require_actuated=False)
-            ee = EndEffector(name=name, urdf=self.s.relative(info.path), tcps=[TCP(name="tcp")])
+            ee = EndEffector(  # new tools use the v2 pose extension (head pose with ranges)
+                name=name,
+                urdf=self.s.relative(info.path),
+                tcps=[TCP(name="tcp")],
+                extension=Extension(type="pose"),
+            )
             self.s.set_tool(ee)
         except (URDFImportError, ValueError, OSError) as err:
             return notify(e, "Tool import failed", str(err))
@@ -378,29 +366,7 @@ class ToolSetupTab:
             sp if sp == "free" else (",".join(map(str, sp)) if isinstance(sp, tuple) else str(sp))
         )
         self.mount.set(pose_to_matrix(ee.T_flange_mount))
-        x = ee.extension
-        self.ext_type.value = x.type
-        self.r_L.value = tuple(v * 1000 for v in x.L)
-        self.r_theta.value, self.r_roll.value = x.theta_deg, x.roll_deg
-        self.r_theta.visible = self.r_d.visible = x.type == "bent"  # bend settings: bent tools only
-        self.r_d.value = tuple(v * 1000 for v in x.d)
-        self.radius.value, self.kg_per_m.value = x.radius * 1000, x.kg_per_m
-        with self.nominal_folder:
-            for key, label, scale, rng in (
-                ("L", "L (mm)", 1e-3, x.L),
-                ("theta_deg", "θ (deg)", 1.0, x.theta_deg),
-                ("d", "d (mm)", 1e-3, x.d),
-                ("roll_deg", "roll (deg)", 1.0, x.roll_deg),
-            ):
-                lo, hi = rng[0] / scale, rng[1] / scale
-                if hi - lo < 1e-9:
-                    continue  # fixed value: nothing to slide
-                sl = self.server.gui.add_slider(
-                    label, lo, hi, (hi - lo) / 1000, getattr(x.nominal, key) / scale
-                )
-                sl.on_update(self._on_nominal(key, scale))
-                self._nominal[key] = sl
-                self._dyn.append(sl)
+        tool_extension.refresh(self, ee.extension, self._on_nominal)
         names = [t.name for t in ee.tcps]
         cur = self.tcp_choice_value
         self.tcp_choice.options = tuple(names)

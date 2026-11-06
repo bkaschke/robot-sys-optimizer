@@ -48,7 +48,7 @@ In movable mode the Cell base fields are always read-only (the robot can never l
 - Quick plan first (map + verify, no refinement) in seconds, refinement streamed after; refinement and verify spread over processes (Pinocchio data is not thread-safe).
 - Target: the mobile example under 10 s; record timings in a benchmark test.
 
-## Phase 4: tool geometry model
+## Phase 4: tool geometry model: **done on branch `v3`** (tests/test_v4_phase4.py). Implemented as a third extension type `pose` (new tools default to it) instead of converting old tools: legacy straight / bent tools keep working unchanged (their L / θ / d ranges do not map onto an x / y / z box). The flange map for any TCP offset (moved here from phase 3) is `PoseOffsetMap`.
 
 - The head pose relative to the flange is **x, y, z, rx, ry, rz**, each with min/max (min = max fixes it). It replaces L / θ / d / roll. Old tools convert (their T_flange_head becomes the nominal, ranges from the old ranges).
 - **Payload is not used in tool optimization (user feedback).** The torque check stays in feasibility.

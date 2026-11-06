@@ -252,46 +252,76 @@ class Base(_Model):
 
 
 class ExtensionValues(_Model):
-    """One concrete extension geometry (the rough placement, or an optimizer result)."""
+    """One concrete extension geometry (the rough placement, or an optimizer result).
+
+    Legacy straight / bent tools use L, theta, d, roll. Pose tools (v2) use the head pose
+    relative to the mount: x, y, z (m) and rx, ry, rz (deg, roll-pitch-yaw)."""
 
     L: float = Field(default=0.1, ge=0)
     theta_deg: float = 0.0
     d: float = 0.0
     roll_deg: float = 0.0
+    x: float = 0.0
+    y: float = 0.0
+    z: float = 0.1
+    rx_deg: float = 0.0
+    ry_deg: float = 0.0
+    rz_deg: float = 0.0
+
+
+POSE_KEYS = ("x", "y", "z", "rx_deg", "ry_deg", "rz_deg")
+LEGACY_KEYS = ("L", "theta_deg", "d", "roll_deg")
 
 
 class Extension(_Model):
     """Parametric arm between the mount adapter and the tool head.
 
-    Geometry (see core/tool.py): T_mount_head = Rz(roll) Tz(L) Rx(theta) Ty(d).
-    Ranges bound the optimizer; ``nominal`` is the user's rough placement.
-    A straight extension forces theta = d = 0.
+    Geometry (see core/tool.py). ``pose`` (v2): T_mount_head = translation (x, y, z) and
+    roll-pitch-yaw (rx, ry, rz), each within its range; the connector is a smooth spline
+    from the mount to the head. Legacy ``straight`` / ``bent``: T_mount_head = Rz(roll) Tz(L)
+    Rx(theta) Ty(d) (a straight extension forces theta = d = 0).
+    Ranges bound the optimizer (min = max fixes a value); ``nominal`` is the rough placement.
     """
 
-    type: Literal["straight", "bent"] = "straight"
+    type: Literal["straight", "bent", "pose"] = "straight"
     L: Range = (0.0, 0.5)
     theta_deg: Range = (0.0, 0.0)
     d: Range = (0.0, 0.0)
     roll_deg: Range = (0.0, 0.0)
+    x: Range = (0.0, 0.0)
+    y: Range = (0.0, 0.0)
+    z: Range = (0.05, 0.5)
+    rx_deg: Range = (0.0, 0.0)
+    ry_deg: Range = (0.0, 0.0)
+    rz_deg: Range = (0.0, 0.0)
     radius: float = Field(default=0.04, gt=0)
     kg_per_m: float = Field(default=0.0, ge=0)
     nominal: ExtensionValues = Field(default_factory=ExtensionValues)
 
     @model_validator(mode="after")
     def _ranges(self) -> Extension:
-        for name in ("L", "theta_deg", "d", "roll_deg"):
+        for name in (*LEGACY_KEYS, *POSE_KEYS):
             _check_range(getattr(self, name), name)
         if self.L[0] < 0:
             raise ValueError("extension length must be >= 0")
         if self.type == "straight" and (self.theta_deg != (0.0, 0.0) or self.d != (0.0, 0.0)):
             raise ValueError("a straight extension has theta and d fixed at 0")
         n = self.nominal
-        for name in ("L", "theta_deg", "d", "roll_deg"):
+        for name in POSE_KEYS if self.type == "pose" else LEGACY_KEYS:
             lo, hi = getattr(self, name)
             v = getattr(n, name)
             if not lo - 1e-9 <= v <= hi + 1e-9:
                 raise ValueError(f"nominal {name}={v} outside its range [{lo}, {hi}]")
         return self
+
+
+def length_ref(x: Extension) -> float:
+    """Reference length for the cost's tool-length term: the longest extension the ranges
+    allow (legacy: L max; pose: the farthest head position)."""
+    if x.type != "pose":
+        return max(x.L[1], 1e-6)
+    corners = [(a, b, c) for a in x.x for b in x.y for c in x.z]
+    return max(float(max((a * a + b * b + c * c) ** 0.5 for a, b, c in corners)), 1e-6)
 
 
 class TCP(_Model):

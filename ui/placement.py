@@ -14,7 +14,7 @@ import viser
 from core import targets as tg
 from core.robot import Robot
 from core.transforms import matrix_to_wxyz
-from opt.reachability import MapSettings, ReachMap, VoteGrid, vote_bases
+from opt.reachability import MapSettings, ReachMap, VoteGrid, map_for_tool, vote_bases
 from ui.session import Session
 from ui.widgets import notify
 
@@ -85,7 +85,10 @@ class PlacementPanel:
         settings = MapSettings(res=self.res.value / 1000)
         self.show.disabled, self.progress.visible = True, True
         try:
-            self.rmap = ReachMap.load_or_build(robot, T_ft, settings, progress=self._progress)
+            if s.tool.extension.type == "pose":  # any TCP offset: the shared flange map, no build
+                self.rmap = map_for_tool(robot, T_ft, settings, progress=self._progress, any_offset=True)
+            else:
+                self.rmap = ReachMap.load_or_build(robot, T_ft, settings, progress=self._progress)
         except NotImplementedError as err:
             return notify(event, "No map for this robot", str(err))
         finally:

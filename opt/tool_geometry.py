@@ -23,10 +23,10 @@ import numpy as np
 import trimesh
 
 from core.collision import CollisionScene
-from core.feasibility import CancelledError, FeasibilityChecker, PointResult
+from core.feasibility import CancelledError, CheckSettings, FeasibilityChecker, PointResult
 from core.ik import make_ik
 from core.robot import Robot
-from core.schema import EndEffector, ExtensionValues, Solution, Weights
+from core.schema import EndEffector, ExtensionValues, Solution, Weights, length_ref
 from core.tool import ToolModel
 from opt.cost import cost_breakdown
 from opt.placement import PlannerSettings, Targets, plan_stations, verify
@@ -90,7 +90,7 @@ class _Evaluator:
         self.tm = ToolModel(ee, urdf)
         self.ik = make_ik(robot)
         self.tcp = ee.tcps[0].name
-        self.L_ref = max(ee.extension.L[1], 1e-6)
+        self.L_ref = length_ref(ee.extension)
         self.max_manip = 1.0  # set from the reachability map on the first plan
         self.cancelled: Callable[[], bool] | None = None  # polled by every exact check
 
@@ -106,15 +106,21 @@ class _Evaluator:
         scene = CollisionScene(
             self.robot, tm, self.part, self.T_base0, self.T_part, base_bodies=bb, world_bodies=wb
         )
-        checker = FeasibilityChecker(self.robot, self.ik, tm, scene, self.T_base0, self.T_part)
+        # tool geometry optimization ignores payload (user decision, v2): torque / payload
+        # checks off here; the feasibility check and the station planner still apply them
+        checker = FeasibilityChecker(
+            self.robot, self.ik, tm, scene, self.T_base0, self.T_part, CheckSettings(payload=False)
+        )
         checker.cancelled = self.cancelled
         return checker
 
-    def plan(self, v: ExtensionValues, cancelled=None):
+    def plan(self, v: ExtensionValues, cancelled=None, refine: bool | None = None):
         checker = self.checker(v)
-        rmap = map_for_tool(self.robot, self.tm.T_flange_tcp(self.tcp), cancelled=cancelled)
+        pose = self.ee.extension.type == "pose"  # any TCP offset: shared flange map, no build
+        rmap = map_for_tool(self.robot, self.tm.T_flange_tcp(self.tcp), cancelled=cancelled, any_offset=pose)
         self.max_manip = rmap.max_manip
-        ps = PlannerSettings(**{**self.st.planner.__dict__, "max_stations": self.max_stations})
+        extra = {} if refine is None else {"refine": refine}
+        ps = PlannerSettings(**{**self.st.planner.__dict__, "max_stations": self.max_stations, **extra})
         out = plan_stations(
             rmap,
             checker,
@@ -210,6 +216,13 @@ def optimize_tool(
     )
     ev.cancelled = cancelled
     x = ee.extension
+    if x.type == "pose":  # v2: head pose x y z rx ry rz, best overall cost (opt.tool_pose)
+        from opt.tool_pose import optimize_pose
+
+        samples: list[LSample] = []
+        ok, v, sol, res, msg = optimize_pose(ev, st, samples, say, cancelled)
+        say("done", 1.0)
+        return GeometryResult(ok, v, sol, res, samples, msg)
     base_v = ExtensionValues(
         L=x.nominal.L,
         theta_deg=float(np.clip(0.0, *x.theta_deg)),

@@ -298,7 +298,14 @@ def envelope_svg(tool: ToolModel, values: ExtensionValues | None = None, width: 
     from scipy.spatial import ConvexHull
 
     v = tool.values(values)
-    T_plane = tool.T_flange_mount @ make_T(rpy_to_matrix((0, 0, np.radians(v.roll_deg))))
+    pose = tool.ee.extension.type == "pose"
+    if pose:  # the plane that holds the head's sideways offset (else: its tilt direction)
+        T_mh = tool.T_mount_head(v)
+        side = T_mh[:2, 3] if np.linalg.norm(T_mh[:2, 3]) > 1e-6 else T_mh[:2, 2]
+        phi = float(np.arctan2(-side[0], side[1])) if np.linalg.norm(side) > 1e-9 else 0.0
+    else:
+        phi = float(np.radians(v.roll_deg))
+    T_plane = tool.T_flange_mount @ make_T(rpy_to_matrix((0, 0, phi)))
     T_pf = np.linalg.inv(T_plane)
 
     def proj(P: np.ndarray) -> np.ndarray:  # flange-frame points -> (horizontal = y, down = z) in mm
@@ -357,13 +364,21 @@ def envelope_svg(tool: ToolModel, values: ExtensionValues | None = None, width: 
         cx, cy = xy(p)
         el.append(f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="4" fill="#e03c3c"/>')
         el.append(f'<text x="{cx + 6:.1f}" y="{cy + 4:.1f}" fill="#e03c3c">TCP {name}</text>')
-    lines = [
-        f"L = {v.L * 1000:.1f} mm",
-        f"θ = {v.theta_deg:.1f}°",
-        f"d = {v.d * 1000:.1f} mm",
-        f"roll = {v.roll_deg:.1f}°",
-        f"capsule r = {r_mm:.0f} mm",
-    ]
+    if pose:
+        lines = [
+            f"head x y z = {v.x * 1000:.0f}, {v.y * 1000:.0f}, {v.z * 1000:.0f} mm",
+            f"head rx ry rz = {v.rx_deg:.1f}, {v.ry_deg:.1f}, {v.rz_deg:.1f}°",
+            f"connector {tool.length(v) * 1000:.0f} mm (spline)",
+            f"capsule r = {r_mm:.0f} mm",
+        ]
+    else:
+        lines = [
+            f"L = {v.L * 1000:.1f} mm",
+            f"θ = {v.theta_deg:.1f}°",
+            f"d = {v.d * 1000:.1f} mm",
+            f"roll = {v.roll_deg:.1f}°",
+            f"capsule r = {r_mm:.0f} mm",
+        ]
     for name, _ in tcps:
         off = tool.T_flange_tcp(name, v)[:3, 3] * 1000
         lines.append(f"TCP {name}: ({off[0]:.0f}, {off[1]:.0f}, {off[2]:.0f}) mm")

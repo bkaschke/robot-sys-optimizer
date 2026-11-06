@@ -236,6 +236,45 @@ class OffsetMap:
         return self.base.lookup(np.asarray(p_base, float) - self.offset * a, a, cone_deg)
 
 
+class PoseOffsetMap:
+    """The flange map reused for ANY TCP offset (v2 pose tools: head shifted and turned).
+
+    For a TCP position p and tool axis a, the flange pose depends on the spin about a when
+    the TCP is off the flange axis. ``spins`` spins are sampled; each is moved back to its
+    flange pose and looked up in the flange map (which already allows any rotation about
+    the flange axis); the best spin counts. |det J| does not depend on the TCP offset, so
+    the manipulability carries over. Approximate in the same way as a dedicated map (finite
+    spins and directions), and the exact checker has the last word; it avoids building a
+    map (about a minute) for every tool geometry the optimizer tries.
+    """
+
+    def __init__(self, flange_map: ReachMap, T_flange_tcp: np.ndarray, spins: int = 12):
+        self.base = flange_map
+        self.max_manip = flange_map.max_manip
+        T_tf = np.linalg.inv(np.asarray(T_flange_tcp, float))
+        self.t_tf, self.z_tf = T_tf[:3, 3], T_tf[:3, 2]  # flange origin and z in the TCP frame
+        self.spins = np.arange(spins) * 2 * np.pi / spins
+
+    def lookup(self, p_base: np.ndarray, axis_base: np.ndarray, cone_deg: float = 0.0):
+        p = np.asarray(p_base, float)
+        a = np.asarray(axis_base, float)
+        a = a / np.linalg.norm(a, axis=1, keepdims=True)
+        ref = np.where(np.abs(a[:, :1]) < 0.9, [[1.0, 0, 0]], [[0, 1.0, 0]])
+        x = ref - (ref * a).sum(1, keepdims=True) * a
+        x /= np.linalg.norm(x, axis=1, keepdims=True)
+        y = np.cross(a, x)
+        score = np.zeros(len(p))
+        mu = np.zeros(len(p))
+        for s in self.spins:
+            xs, ys = np.cos(s) * x + np.sin(s) * y, -np.sin(s) * x + np.cos(s) * y  # TCP x, y
+            R = np.stack([xs, ys, a], axis=2)  # (M, 3, 3) TCP frame, columns x y z
+            pf = p + R @ self.t_tf
+            af = R @ self.z_tf
+            sc, m = self.base.lookup(pf, af, cone_deg)
+            score, mu = np.maximum(score, sc), np.maximum(mu, m)
+        return score, mu
+
+
 def is_straight(T_flange_tcp: np.ndarray, tol: float = 1e-6) -> bool:
     """TCP on the flange z axis with the flange's orientation (straight tool, no bend)."""
     return bool(
@@ -251,13 +290,16 @@ def map_for_tool(
     progress: Callable[[float], None] | None = None,
     cache_dir: Path = CACHE_DIR,
     cancelled: Callable[[], bool] | None = None,
+    any_offset: bool = False,
 ):
-    """Shared flange map for straight tools; a dedicated (cached) map otherwise."""
-    if is_straight(T_flange_tcp):
-        return OffsetMap(
-            ReachMap.load_or_build(robot, np.eye(4), settings, progress, cache_dir, cancelled),
-            T_flange_tcp[2, 3],
-        )
+    """Shared flange map for straight tools (exact). Other tools: the shared flange map with
+    spin sampling when ``any_offset`` (pose tools: no per-geometry build), else a dedicated
+    cached map for this exact TCP offset (legacy bent tools)."""
+    if is_straight(T_flange_tcp) or any_offset:
+        flange = ReachMap.load_or_build(robot, np.eye(4), settings, progress, cache_dir, cancelled)
+        if is_straight(T_flange_tcp):
+            return OffsetMap(flange, T_flange_tcp[2, 3])
+        return PoseOffsetMap(flange, T_flange_tcp)
     return ReachMap.load_or_build(robot, T_flange_tcp, settings, progress, cache_dir, cancelled)
 
 

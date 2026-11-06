@@ -14,7 +14,7 @@ from core.collision import CollisionScene
 from core.feasibility import CancelledError, FeasibilityChecker
 from core.ik import make_ik
 from core.robot import Robot
-from core.schema import Optimizer, TargetGroup
+from core.schema import Optimizer, TargetGroup, length_ref
 from opt.placement import PlannerSettings, Targets, plan_stations
 from opt.reachability import map_for_tool
 from ui.session import Session
@@ -111,7 +111,7 @@ class StationsPanel:
         T_base0, T_part = s.T_world_base.copy(), s.part.T_world_part.copy()
         weights = self._optimizer().weights.model_copy(update={"config": self.options()["config_cost"]})
         L = s.tool_model.length()
-        L_ref = max(s.tool.extension.L[1], 1e-6)
+        L_ref = length_ref(s.tool.extension)
         self._cancel.clear()
         self.run.visible, self.stop.visible, self.progress.visible = False, True, True
         s.results, s.result_points = [], {}
@@ -140,7 +140,12 @@ class StationsPanel:
         def work() -> None:
             try:
                 say("loading reachability map (first time per tool length: ~1 min)", 0.0)
-                rmap = map_for_tool(robot, s.tool_model.T_flange_tcp(tcp), cancelled=self._cancel.is_set)
+                rmap = map_for_tool(
+                    robot,
+                    s.tool_model.T_flange_tcp(tcp),
+                    cancelled=self._cancel.is_set,
+                    any_offset=s.tool.extension.type == "pose",  # pose tools: shared flange map
+                )
                 bb, wb = sites.scene_bodies() if sites is not None else ([], [])
                 scene = CollisionScene(
                     robot, s.tool_model, mesh, T_base0, T_part, base_bodies=bb, world_bodies=wb

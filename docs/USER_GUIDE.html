@@ -66,7 +66,7 @@ main{margin-left:0;padding:16px}}
 <li><strong>Optimize tab</strong> → <strong>Check all targets</strong>. The points turn green, amber or red (reachable, marginal, unreachable).</li>
 <li><strong>Optimize tab</strong> → <em>Base placement</em> → <strong>Show base heatmap</strong> (the first run builds a reachability map, about 1 min) → <strong>Move base to best</strong>.</li>
 <li><strong>Optimize tab</strong> → <em>Station planner</em> → <strong>Plan stations</strong>. The result appears in the <strong>Results</strong> tab.</li>
-<li><strong>Optimize tab</strong> → <em>Tool geometry</em> → <strong>Find shortest tool</strong> → <strong>Apply to tool</strong>.</li>
+<li><strong>Optimize tab</strong> → <em>Tool geometry</em> → <strong>Optimize tool</strong> → <strong>Apply to tool</strong>.</li>
 <li><strong>Results tab</strong> → <em>Export</em> → <strong>TCP poses (CSV)</strong>, <strong>Optimized tool URDF (zip)</strong>, <strong>HTML report</strong>. Files are downloaded and also saved to <code>workspace/default/export/</code>.</li>
 <li><strong>Project</strong> (top of the panel) → <strong>Save</strong> stores everything in <code>workspace/default/project.json</code>. Autosave also does this every 2 minutes, and the next start reopens the project where you left off.</li>
 </ol>
@@ -317,7 +317,7 @@ $PY scripts/make_portable.py          # -&gt; dist/robot-sys-optimizer-portable-
 </tr>
 <tr>
 <td><strong>Extension</strong></td>
-<td>Straight or bent (the θ and d ranges show for bent tools only), with ranges for L, θ, d and roll, the capsule radius and mass per metre. <strong>Rough placement</strong> sliders set the current values.</td>
+<td><em>Type</em> <strong>pose</strong> (default for new tools): where the head sits relative to the flange mount, as <strong>x, y, z</strong> (mm) and <strong>rx, ry, rz</strong> (deg, roll-pitch-yaw), each with a <em>range</em> the optimizer may use (equal ends fix a value). The connector between mount and head is drawn and collision-checked as a <strong>smooth curve</strong> (it leaves the mount along its axis and arrives along the head's axis), not a straight cylinder; its <em>capsule radius</em> and <em>mass per metre</em> apply along the curve. Legacy <em>straight</em> / <em>bent</em> tools keep the old L, θ, d, roll ranges (θ and d for bent only). <strong>Rough placement</strong> sliders set the current values of the free ones.</td>
 </tr>
 <tr>
 <td><strong>TCPs</strong></td>
@@ -329,7 +329,7 @@ $PY scripts/make_portable.py          # -&gt; dist/robot-sys-optimizer-portable-
 </tr>
 </tbody>
 </table>
-<p>Sample tools: <strong>orbital_sander</strong> (bent extension range, pad as the contact link) and <strong>scanner</strong> (contact-free). Both are simple stand-in geometry.</p>
+<p>Sample tools: <strong>orbital_sander</strong> (bent extension range, pad as the contact link) and <strong>scanner</strong> (contact-free). Both are simple stand-in geometry. Switch a tool to <em>Type</em> <strong>pose</strong> to let the optimizer move and tilt its head.</p>
 <h3 id="4-targets-tab">4 Targets tab</h3>
 <table>
 <thead>
@@ -393,7 +393,7 @@ $PY scripts/make_portable.py          # -&gt; dist/robot-sys-optimizer-portable-
 </tr>
 <tr>
 <td><strong>Tool geometry</strong></td>
-<td><strong>Find shortest tool</strong> first finds the shortest L that still reaches everything within the station limit, then tunes θ / d / roll. It shows a coverage-vs-length table. <em>Length tolerance</em> (mm) is up to you (no upper limit). <strong>Cancel</strong> stops within about a second and keeps the best result so far. <strong>Apply to tool</strong> writes the values into the Tool tab. <strong>Save optimized tool to library</strong> stores the tool with the optimized values under <em>Save as tool</em> (default <code>&lt;tool&gt;_opt</code>) without changing the tool in use.</td>
+<td><strong>Optimize tool</strong>. <strong>Pose tools:</strong> tries head poses within the ranges (CMA-ES, <em>Shape / pose evaluations</em> candidates), plans stations for each (quick plan) and keeps the pose with the <strong>best overall cost</strong> (reach, stops, travel, manipulability, clearance, joint limits, and connector length as one term); the winner is planned once more with refinement. The table lists every candidate (connector length, full coverage, reached, stops, cost). <strong>Legacy straight / bent tools:</strong> the shortest L that still reaches everything within the station limit, then θ / d / roll (coverage-vs-length table). <strong>Payload is not considered</strong> here (no torque / payload limits, no torque cost); the feasibility check and the station planner still apply them. <em>Length tolerance</em> (mm) is up to you (no upper limit). <strong>Cancel</strong> stops within about a second and keeps the best result so far. <strong>Apply to tool</strong> writes the values into the Tool tab. <strong>Save optimized tool to library</strong> stores the tool with the optimized values under <em>Save as tool</em> (default <code>&lt;tool&gt;_opt</code>) without changing the tool in use.</td>
 </tr>
 </tbody>
 </table>
@@ -435,7 +435,7 @@ $PY scripts/make_portable.py          # -&gt; dist/robot-sys-optimizer-portable-
 <li>Targets → click the plate top → <em>Spacing</em> <code>100</code> → <strong>Generate on selection</strong>.</li>
 <li>Optimize → <strong>Check all targets</strong>. Everything should be reachable from the origin.</li>
 <li>Optimize → <strong>Plan stations</strong> → Results: &quot;1 floor station: N/N reached&quot;.</li>
-<li>Optimize → <strong>Find shortest tool</strong>. On this plate the shortest straight tool is the bottom of the range (50 mm), and the bend stage may lower the cost further.</li>
+<li>Optimize → <strong>Optimize tool</strong>. On this plate the shortest straight tool is the bottom of the range (50 mm), and the bend stage may lower the cost further.</li>
 <li>Results → <strong>HTML report</strong>.</li>
 </ol>
 <p>The same job without the GUI is in <code>examples/headless_plan.py</code> (section 7).</p>
@@ -469,7 +469,7 @@ $PY scripts/make_portable.py          # -&gt; dist/robot-sys-optimizer-portable-
 <li>Cell → <em>Part</em> <code>deep_hole</code>, xyz <code>800, 0, 0</code> (100 mm hole, 300 mm deep).</li>
 <li>Tool Setup → upload or define a slim straight tool. The test suite uses a probe with capsule radius 20 mm and no head; see <code>tests/test_tool_geometry.py::_probe</code>.</li>
 <li>Targets → <em>Click on part</em> <code>add single point</code> → click the hole bottom; group standoff <code>50</code> mm, tilt <code>0</code>.</li>
-<li>Optimize → <strong>Find shortest tool</strong>: L ≈ <strong>260 mm</strong> = depth − standoff + clearance (the wrist cannot enter the hole).</li>
+<li>Optimize → <strong>Optimize tool</strong>: L ≈ <strong>260 mm</strong> = depth − standoff + clearance (the wrist cannot enter the hole).</li>
 </ol>
 <h3 id="example-d-your-own-robot-cell">Example D: your own robot cell</h3>
 <ol>

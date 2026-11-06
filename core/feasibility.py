@@ -25,7 +25,7 @@ import numpy as np
 
 from core.collision import CollisionScene
 from core.ik import best_copies
-from core.payload import static_check
+from core.payload import PayloadResult, static_check
 from core.robot import Robot
 from core.schema import TargetGroup
 from core.tool import ToolModel
@@ -42,6 +42,7 @@ class CheckSettings:
     joint_margin_deg: float = 5.0
     torque_util: float = 0.8
     clearance: float = 0.01
+    payload: bool = True  # False: skip torque / payload checks (tool geometry optimization, v2)
 
 
 @dataclass
@@ -260,8 +261,12 @@ class FeasibilityChecker:
             # ties (mirror branches at equal quality) go to the lower branch index, not float noise
             for b in sorted(range(len(Q)), key=lambda b: (-round(float(mus[b] + 0.1 * lms[b]), 9), b)):
                 q, mu, lm = Q[b], float(mus[b]), float(lms[b])
-                pr = static_check(
-                    self.robot, q, self.mass, self.com, force_base, offset, self.settings.torque_util
+                pr = (
+                    static_check(
+                        self.robot, q, self.mass, self.com, force_base, offset, self.settings.torque_util
+                    )
+                    if self.settings.payload
+                    else PayloadResult(np.zeros(0), 0.0, True, [])  # payload check off
                 )
                 if not pr.ok:
                     continue

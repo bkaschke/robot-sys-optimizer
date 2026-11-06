@@ -48,7 +48,7 @@ Then try a full job on the test plate:
 3. **Optimize tab** → **Check all targets**. The points turn green, amber or red (reachable, marginal, unreachable).
 4. **Optimize tab** → *Base placement* → **Show base heatmap** (the first run builds a reachability map, about 1 min) → **Move base to best**.
 5. **Optimize tab** → *Station planner* → **Plan stations**. The result appears in the **Results** tab.
-6. **Optimize tab** → *Tool geometry* → **Find shortest tool** → **Apply to tool**.
+6. **Optimize tab** → *Tool geometry* → **Optimize tool** → **Apply to tool**.
 7. **Results tab** → *Export* → **TCP poses (CSV)**, **Optimized tool URDF (zip)**, **HTML report**. Files are downloaded and also saved to `workspace/default/export/`.
 8. **Project** (top of the panel) → **Save** stores everything in `workspace/default/project.json`. Autosave also does this every 2 minutes, and the next start reopens the project where you left off.
 
@@ -248,11 +248,11 @@ Every body collides with the arm and tool (from the upper arm on), and counts fo
 | **Library** | *Tool* picks a saved tool (`tools/*.yaml`). **Upload tool URDF (.zip)** imports a URDF plus meshes; `package://` paths are resolved. **Save to library** stores the tool and copies its geometry into `assets/tools/<name>/`. |
 | **Process** | *Type* applies a preset: scanning, sanding, grinding, gripping, spraying or custom. You can then edit the force, tilt cone, standoff and spin. Contact-free processes (scanning, spraying) clear all contact areas. |
 | **Flange mount** | Places the tool on the flange with a gizmo or typed values. |
-| **Extension** | Straight or bent (the θ and d ranges show for bent tools only), with ranges for L, θ, d and roll, the capsule radius and mass per metre. **Rough placement** sliders set the current values. |
+| **Extension** | *Type* **pose** (default for new tools): where the head sits relative to the flange mount, as **x, y, z** (mm) and **rx, ry, rz** (deg, roll-pitch-yaw), each with a *range* the optimizer may use (equal ends fix a value). The connector between mount and head is drawn and collision-checked as a **smooth curve** (it leaves the mount along its axis and arrives along the head's axis), not a straight cylinder; its *capsule radius* and *mass per metre* apply along the curve. Legacy *straight* / *bent* tools keep the old L, θ, d, roll ranges (θ and d for bent only). **Rough placement** sliders set the current values of the free ones. |
 | **TCPs** | Add, rename or remove TCPs and place each with a gizmo. **Pick contact faces (click tool)**: tick it, then click the tool; one click selects the whole smooth face (*Region angle* sets how far it spreads), and clicking again removes it. **Whole-link contact** marks entire links. |
 | **Mass** | Shows the total mass and COG relative to the flange. It can override the head mass and COG when the URDF has no inertials. |
 
-Sample tools: **orbital_sander** (bent extension range, pad as the contact link) and **scanner** (contact-free). Both are simple stand-in geometry.
+Sample tools: **orbital_sander** (bent extension range, pad as the contact link) and **scanner** (contact-free). Both are simple stand-in geometry. Switch a tool to *Type* **pose** to let the optimizer move and tilt its head.
 
 ### 4 Targets tab
 
@@ -275,7 +275,7 @@ Points are stored **in the part frame**, so moving the part moves them with it.
 | **Feasibility check** | **Check all targets** from the current base, with clearance, joint margin and torque limit as settings. The summary gives counts and reasons. *Inspect result* shows either the feasibility check or, by default, the **plan selected in the Results tab** (*Show*); it switches to each new plan or tool result automatically. **Move robot to this solution** moves the carrier (or base) to the point's station and the arm to its solution. |
 | **Base placement (reachability)** | **Show base heatmap** draws where the base could stand on the floor (bright = all points reachable with the best worst-case manipulability) and marks the best spot. **Move base to best** moves it there. Ignores collisions: confirm with the feasibility check. |
 | **Station planner** | **Plan stations** finds the fewest stations that reach every point, within *Max stations* (static mode = 1). Each solution goes to the Results tab as soon as it finishes. *Candidate grid* sets the search resolution; *Refine* turns the exact fine-tuning on or off. Plans appear quickly: every station count is first verified at its first-guess stops (a few seconds each), then the most promising one or two are refined and replace their quick version when better. **Cancel** stops within about a second and keeps the plans already finished. *Joint configuration* = **zones (minimize changes)** groups each stop's points into zones that keep one arm configuration and puts each zone in path order (see *Joint-configuration zones* below); *Cost per config change* sets how much a change costs (a stop costs 5). |
-| **Tool geometry** | **Find shortest tool** first finds the shortest L that still reaches everything within the station limit, then tunes θ / d / roll. It shows a coverage-vs-length table. *Length tolerance* (mm) is up to you (no upper limit). **Cancel** stops within about a second and keeps the best result so far. **Apply to tool** writes the values into the Tool tab. **Save optimized tool to library** stores the tool with the optimized values under *Save as tool* (default `<tool>_opt`) without changing the tool in use. |
+| **Tool geometry** | **Optimize tool**. **Pose tools:** tries head poses within the ranges (CMA-ES, *Shape / pose evaluations* candidates), plans stations for each (quick plan) and keeps the pose with the **best overall cost** (reach, stops, travel, manipulability, clearance, joint limits, and connector length as one term); the winner is planned once more with refinement. The table lists every candidate (connector length, full coverage, reached, stops, cost). **Legacy straight / bent tools:** the shortest L that still reaches everything within the station limit, then θ / d / roll (coverage-vs-length table). **Payload is not considered** here (no torque / payload limits, no torque cost); the feasibility check and the station planner still apply them. *Length tolerance* (mm) is up to you (no upper limit). **Cancel** stops within about a second and keeps the best result so far. **Apply to tool** writes the values into the Tool tab. **Save optimized tool to library** stores the tool with the optimized values under *Save as tool* (default `<tool>_opt`) without changing the tool in use. |
 
 ### Joint-configuration zones
 
@@ -310,7 +310,7 @@ It also re-runs the tip-over and localization checks for the chosen solutions. I
 2. Targets → click the plate top → *Spacing* `100` → **Generate on selection**.
 3. Optimize → **Check all targets**. Everything should be reachable from the origin.
 4. Optimize → **Plan stations** → Results: "1 floor station: N/N reached".
-5. Optimize → **Find shortest tool**. On this plate the shortest straight tool is the bottom of the range (50 mm), and the bend stage may lower the cost further.
+5. Optimize → **Optimize tool**. On this plate the shortest straight tool is the bottom of the range (50 mm), and the bend stage may lower the cost further.
 6. Results → **HTML report**.
 
 The same job without the GUI is in `examples/headless_plan.py` (section 7).
@@ -347,7 +347,7 @@ Shortcut: **Project** → *Examples* `mobile_amr` → **Open example** (four whe
 1. Cell → *Part* `deep_hole`, xyz `800, 0, 0` (100 mm hole, 300 mm deep).
 2. Tool Setup → upload or define a slim straight tool. The test suite uses a probe with capsule radius 20 mm and no head; see `tests/test_tool_geometry.py::_probe`.
 3. Targets → *Click on part* `add single point` → click the hole bottom; group standoff `50` mm, tilt `0`.
-4. Optimize → **Find shortest tool**: L ≈ **260 mm** = depth − standoff + clearance (the wrist cannot enter the hole).
+4. Optimize → **Optimize tool**: L ≈ **260 mm** = depth − standoff + clearance (the wrist cannot enter the hole).
 
 ### Example D: your own robot cell
 

@@ -40,12 +40,20 @@ class ToolOptPanel:
             self.tol = gui.add_number(
                 "Length tolerance (mm)", 1.0, min=0.01, step=0.5
             )  # user-defined, no upper limit
-            self.shape_evals = gui.add_number("Bend/offset/roll evaluations", 30, min=0, max=300, step=5)
-            self.run = gui.add_button("Find shortest tool", color="green")
+            self.shape_evals = gui.add_number(
+                "Shape / pose evaluations",
+                30,
+                min=0,
+                max=500,
+                step=5,
+                hint="candidate tool geometries to try",
+            )
+            self.run = gui.add_button("Optimize tool", color="green")
             self.stop = gui.add_button("Cancel", visible=False)
             self.progress = gui.add_progress_bar(0.0, visible=False)
             self.info = gui.add_markdown(
-                "_Bisection on L within the extension's range (Tool Setup), then CMA-ES on θ / d / roll._"
+                "_Pose tools: the head pose (x y z rx ry rz within its ranges) with the best overall cost. "
+                "Straight / bent tools: the shortest L, then θ / d / roll. Payload is not considered._"
             )
             self.apply = gui.add_button("Apply to tool", disabled=True)
             self.save_name = gui.add_text("Save as tool", "", hint="library name for the optimized tool")
@@ -57,7 +65,7 @@ class ToolOptPanel:
         def _(e) -> None:
             if self.result is not None and self.result.feasible:
                 self.apply_values(self.result.values)
-                notify(e, "Applied", f"tool nominal set to L = {self.result.values.L * 1000:.1f} mm", ok=True)
+                notify(e, "Applied", "the optimized geometry is now the tool's rough placement", ok=True)
 
         @self.save_lib.on_click
         def _(e) -> None:
@@ -116,6 +124,7 @@ class ToolOptPanel:
         self.apply.disabled = True
         self.save_lib.disabled = True
         self._stamp = stamp_for(s, "tool")  # the setup this search ran on
+        self._pose = s.tool.extension.type == "pose"
 
         def say(msg: str, f: float) -> None:
             self.info.content = f"_{msg}_"
@@ -142,18 +151,28 @@ class ToolOptPanel:
 
     def _show(self) -> None:
         r = self.result
+        pose = self._pose
         rows = "\n".join(
-            f"| {x.L * 1000:.1f} | {'✔' if x.feasible else '✘'} | {x.reached}/{x.total} | {x.stations} |"
-            for x in r.samples
+            f"| {i + 1} | {x.L * 1000:.0f} | {'✔' if x.feasible else '✘'} | {x.reached}/{x.total} | "
+            f"{x.stations} | {x.cost:.2f} |"
+            if pose
+            else f"| {x.L * 1000:.1f} | {'✔' if x.feasible else '✘'} | {x.reached}/{x.total} | {x.stations} |"
+            for i, x in enumerate(r.samples)
         )
-        table = "| L (mm) | full | reached | stations |\n|---|---|---|---|\n" + rows
+        head = (
+            "| # | connector (mm) | full | reached | stations | cost |\n|---|---|---|---|---|---|\n"
+            if pose
+            else "| L (mm) | full | reached | stations |\n|---|---|---|---|\n"
+        )
+        table = head + rows
         if not r.feasible:
             self.info.content = f"⚠ {r.message}\n\n{table}"
             return
         v = r.values
+        shape = "" if pose else f"θ {v.theta_deg:.1f}°, d {v.d * 1000:.0f} mm, roll {v.roll_deg:.1f}° · "
         self.info.content = (
-            f"**{r.message}**  \nθ {v.theta_deg:.1f}°, d {v.d * 1000:.0f} mm, roll {v.roll_deg:.1f}° · "
-            f"cost {r.solution.cost:.2f} · {len(r.solution.stations)} station(s)\n\n{table}"
+            f"**{r.message}**  \n{shape}cost {r.solution.cost:.2f} · {len(r.solution.stations)} station(s)"
+            f"\n\n{table}"
         )
         self.apply.disabled = self.save_lib.disabled = False
         self.s.stamps[r.solution.label] = self._stamp

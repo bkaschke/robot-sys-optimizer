@@ -1,14 +1,19 @@
-"""Parametric end effector: mount adapter + extension (L, theta, d, roll) + head + TCPs.
+"""Parametric end effector: mount adapter + extension + head + TCPs.
 
 Frames and geometry (all poses 4x4, SI units):
 
-    T_flange_head = T_flange_mount @ Rz(roll) @ Tz(L) @ Rx(theta) @ Ty(d)
+    pose tools (v2):    T_mount_head = Trans(x, y, z) @ RPY(rx, ry, rz)
+    legacy tools:       T_mount_head = Rz(roll) @ Tz(L) @ Rx(theta) @ Ty(d)
+    T_flange_head = T_flange_mount @ T_mount_head
     T_flange_tcp  = T_flange_head @ T_head_tcp
 
-The extension is drawn and collision-checked as capsules of ``extension.radius``:
-segment 1 runs from the mount origin along mount z for L; segment 2 (only when d != 0)
-is the lateral leg from the bend to the head origin. The head is the EE URDF's root link
-frame; its links are rigid (any movable joints are held at zero).
+The extension is drawn and collision-checked as capsules of ``extension.radius``. Pose
+tools: the connector is a cubic Hermite spline from the mount origin (leaving along mount
+z) to the head origin (arriving along head z), tangent lengths = the chord, sampled into
+``SPLINE_SEGMENTS`` capsules; a head straight above the mount gives a straight connector.
+Legacy tools: segment 1 runs from the mount along mount z for L; segment 2 (only when
+d != 0) is the lateral leg from the bend to the head origin. The head is the EE URDF's root
+link frame; its links are rigid (any movable joints are held at zero).
 """
 
 from __future__ import annotations
@@ -22,7 +27,9 @@ import trimesh
 import yourdfpy
 
 from core.schema import EndEffector, ExtensionValues
-from core.transforms import make_T, pose_to_matrix
+from core.transforms import make_T, pose_to_matrix, rpy_to_matrix
+
+SPLINE_SEGMENTS = 8  # capsules along a pose tool's connector
 
 
 def _rz(a: float) -> np.ndarray:
@@ -121,6 +128,9 @@ class ToolModel:
 
     def T_mount_head(self, v: ExtensionValues | None = None) -> np.ndarray:
         v = self.values(v)
+        if self.ee.extension.type == "pose":
+            R = rpy_to_matrix(np.radians([v.rx_deg, v.ry_deg, v.rz_deg]))
+            return make_T(R, (v.x, v.y, v.z))
         return _rz(np.radians(v.roll_deg)) @ _tr(z=v.L) @ _rx(np.radians(v.theta_deg)) @ _tr(y=v.d)
 
     def T_flange_head(self, v: ExtensionValues | None = None) -> np.ndarray:
@@ -132,9 +142,23 @@ class ToolModel:
                 return self.T_flange_head(v) @ pose_to_matrix(t.T_head_tcp)
         raise KeyError(f"no TCP named '{tcp}'")
 
+    def connector_points(self, v: ExtensionValues | None = None, n: int = SPLINE_SEGMENTS) -> np.ndarray:
+        """Pose tools: n + 1 points (flange frame) along the Hermite spline mount -> head."""
+        T_fm = self.T_flange_mount
+        T_fh = T_fm @ self.T_mount_head(v)
+        p0, p1, t0, t1 = T_fm[:3, 3], T_fh[:3, 3], T_fm[:3, 2], T_fh[:3, 2]
+        c = float(np.linalg.norm(p1 - p0))
+        s = np.linspace(0.0, 1.0, n + 1)[:, None]
+        h00, h10 = 2 * s**3 - 3 * s**2 + 1, s**3 - 2 * s**2 + s
+        h01, h11 = -2 * s**3 + 3 * s**2, s**3 - s**2
+        return h00 * p0 + h10 * c * t0 + h01 * p1 + h11 * c * t1
+
     def extension_segments(self, v: ExtensionValues | None = None) -> list[tuple[np.ndarray, np.ndarray]]:
         """Capsule axis segments (p0, p1) in the flange frame; zero-length legs are dropped."""
         v = self.values(v)
+        if self.ee.extension.type == "pose":
+            P = self.connector_points(v)
+            return [(a, b) for a, b in zip(P[:-1], P[1:], strict=True) if np.linalg.norm(b - a) > 1e-9]
         T_fm = self.T_flange_mount @ _rz(np.radians(v.roll_deg))
         bend = T_fm @ _tr(z=v.L)
         pts = [T_fm[:3, 3], bend[:3, 3], (bend @ _rx(np.radians(v.theta_deg)) @ _tr(y=v.d))[:3, 3]]
