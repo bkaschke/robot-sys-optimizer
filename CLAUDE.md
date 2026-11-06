@@ -8,7 +8,7 @@ Full spec: `docs/PROJECT_PLAN.md`. It is the source of truth for scope and miles
 
 ## Status
 
-- **Current milestone:** none. v1 (M0–M10) is complete; see "Current state".
+- **Current milestone:** none. v1 (M0–M10) is complete; see "Current state". **Next: v2 from user feedback, `docs/V2_PLAN.md` (phases 1–5, user decisions recorded there).**
 - **IK speed:** use `core.ik.ur.solve_batch` (about 7 µs per pose, all 8 branches) for anything bulk. `URAnalyticIK.solve` (about 0.8 ms) is for one-off calls.
 - **Branch policy:** one branch per milestone (`m0-skeleton`, `m1-kinematics`, …); merge to `main` when its "done when" check passes.
 - **Last updated:** 2026-11-05 (post-v1: External Axis tab, examples, brush/single points/tessellation, HTML user guide, work state + autosave + reopen, joint-configuration zoning)
