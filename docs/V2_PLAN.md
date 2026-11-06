@@ -29,7 +29,9 @@ Extra, found while measuring: the planner's candidate filter rebuilt the carrier
 7. Jog lag: carrier bodies added once and only re-posed (`wxyz`/`position`) on jog; part footprint cached per (mesh, pose); slider events coalesced (latest value wins, a worker thread applies them) for joints, carrier and gizmos.
 8. Examples are read-only templates: opening one creates an untitled copy that autosave does not write until **Save as**; saving into `examples/` is refused except via **Save as example** (name prompt, explicit).
 
-## Phase 2: guided setup, robot + carrier assembly
+## Phase 2: guided setup, robot + carrier assembly: **done 2026-11-05 on `v2`** (tests/test_v2_phase2.py; 228 tests pass)
+
+In movable mode the Cell base fields are always read-only (the robot can never leave the carrier); Confirm setup additionally hides carrier editing. Mobile travel fields became *Planner search x / y* (jogging is unlimited). Also fixed: the UR notice in the GUI was double-encoded (`Â©`) since an earlier session.
 
 - Tabs become steps **1 Robot & cell → 2 External axis → 3 Tool → 4 Part & targets → 5 Optimize → 6 Results**, each with a status (to do / confirmed) and **Confirm / Next**. **Free navigation (user):** any tab can be opened; Optimize warns when an earlier step is not confirmed.
 - Mode-specific settings are hidden unless the mode is selected (static vs rail vs gantry vs mobile; zoning cost only when zoning is on; bent-tool fields only for bent tools until Phase 4 replaces them).

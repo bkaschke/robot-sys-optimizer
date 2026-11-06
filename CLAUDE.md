@@ -186,7 +186,7 @@ $PY scripts/import_ur_description.py <clone> ur20   # re-import a UR model (see 
 
 ## Targets (M4)
 
-- **The GUI has 6 tabs:** Tool Setup, Cell, External Axis (added post-v1), **Targets**, Optimize, Results. Targets got its own tab instead of living in Tool Setup as the plan suggested.
+- **The GUI has 6 tabs** (v2 order, shown numbered as steps): 1 Robot & cell (`Cell`), 2 External axis, 3 Tool (`Tool Setup`), 4 Targets, 5 Optimize, 6 Results. `app.TABS` keeps the internal names; `TAB_TITLES` the shown ones. Targets got its own tab instead of living in Tool Setup as the plan suggested.
 - **Session state:** `session.targets` (schema.Targets) holds points in the **part frame** (m) with outward unit normals. Groups carry tolerances; a new group copies the current tool's process tolerances. The scene draws points, normals and the selection under `/cell/part`, so they follow the part gizmo.
 - **Selection:** an array of face indices on `Session.part_mesh()` (scaled to m), cached per (path, units) and cleared when the mesh changes. Click selects a dihedral region; shift-click adds; ctrl/meta-click removes. You can also select by normal direction, or by box: `on_rect_select` projects face centres through `client.camera`, assuming an OpenCV camera frame. Box select ignores occlusion and has not been checked in a real browser yet.
 - **Normals:** the default is barycentric interpolation of area-weighted vertex normals computed **from the selected faces only**, so normals never blend across the selection border. On the curved panel this gives < 0.05° interior error and ≤ ½ facet angle at the border. `normals="face"` gives flat normals.
@@ -301,6 +301,15 @@ $PY scripts/import_ur_description.py <clone> ur20   # re-import a UR model (see 
 - **Inspector:** Optimize → *Inspect result* → *Show* = feasibility check or the selected plan (`OptimizeTab.solution_points`, `move_to_point`; `refresh_inspect` on new results and Results selection).
 - **Examples are templates:** `load_example` copies to `workspace/examples/<name>[_k]`, reusing a copy only while its project.json equals the shipped one; `save_now` refuses folders under `examples/`; `save_as_example(name, overwrite)` is the only writer there. `save_project` to another folder copies `assets/` along. `Optimizer.max_stations` defaults to 4; `restore_work` puts the project's value into both panels before saved panel settings.
 - **Line endings:** the working tree is CRLF (autocrlf). PowerShell `.Replace("...`n...")` silently misses multi-line text; use the Edit tool or Python (`read_text` normalizes).
+
+## v2 phase 2 (branch `v2`)
+
+- **`ui/staleness.py`:** per-component setup hashes (robot+mount [+ static base z/R], carrier = Base json, tool [nominal excluded for tool results], part path/units/pose, targets; feasibility adds the full base pose). `Session.stamps[label | "feasibility"]` is set when a run STARTS (stations streamed, tool_opt `_show`, optimize check) and saved in `WorkState.stamps`; `solution_changes` / `feasibility_changes` name what changed (no stamp = not flagged). Confirmed steps live in `Session.steps` / `WorkState.steps` (`STEP_COMPONENTS`).
+- **`ui/workflow.py`:** `header(step)` (status + Confirm; External Axis also Edit setup) created inside each tab before its panel; `refresh()` updates headers, `carrier.set_locked`, `cell.set_mounted` (base fields/gizmo/mount disabled whenever mode is movable), the Optimize warning and the Results out-of-date banner, only when its state key changed. The real app runs `start_watch()` (1 s) plus `hooks` (object visibility). Exports of out-of-date results open a modal (`ExportPanel._ask`).
+- **Carrier panel:** `update_visibility()` shows only the mode / axis-type fields and hides editing when locked; `current(c)` = clipped DOFs except mobile x / y (no limits); `jog_dof` (rail/gantry clamped, mobile sliders grow, yaw wraps).
+- **`ui/objects.py`:** Objects folder: visibility per object (re-applied by the watcher because panels re-create nodes), *Drag gizmo on* (one object's handles), Jog arrows (`jog(axis, sign)`).
+- **Tool panel:** **Save optimized tool to library** (`ToolOptPanel.save_to_library`). Stations: *Cost per config change* only shown with zoning on. Tool: θ / d ranges only for bent tools.
+- The UR notice in app.py was double-encoded (`Â©`) since an earlier session; fixed and tested (`test_tabs_are_steps_in_setup_order`).
 
 ## Joint-configuration zoning (post-v1)
 

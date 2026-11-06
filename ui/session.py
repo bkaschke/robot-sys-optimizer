@@ -55,6 +55,8 @@ class Session:
     extra: dict = field(default_factory=dict)  # untouched project sections (optimizer)
     selection: tuple[str, list[int]] | None = None  # (part mesh path, face ids): saved selection
     ui: dict = field(default_factory=dict)  # saved panel settings ("panel.widget" -> value)
+    stamps: dict = field(default_factory=dict)  # result key -> setup fingerprint (ui.staleness)
+    steps: dict = field(default_factory=dict)  # confirmed setup step -> fingerprint
     before_save: list = field(default_factory=list)  # GUI hooks that copy their state in here
 
     # --- assets ---------------------------------------------------------------
@@ -149,6 +151,12 @@ class Session:
                 if label in {sol.label for sol in self.results}
             },
             ui=dict(self.ui),
+            stamps={
+                k: dict(v)
+                for k, v in self.stamps.items()
+                if k == "feasibility" or k in {sol.label for sol in self.results}
+            },
+            steps={k: dict(v) for k, v in self.steps.items()},
         )
 
     def to_project(self) -> schema.Project:
@@ -215,6 +223,8 @@ class Session:
         }
         self.selection = (w.selection_mesh, list(w.selection)) if w.selection_mesh else None
         self.ui = dict(w.ui)
+        self.stamps = {k: dict(v) for k, v in w.stamps.items() if k == "feasibility" or k in labels}
+        self.steps = {k: dict(v) for k, v in w.steps.items()}
 
 
 def load_mesh(path: Path, units: str = "m") -> trimesh.Trimesh:

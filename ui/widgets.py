@@ -102,6 +102,13 @@ class PoseWidgets:
         self.gizmo.disable_sliders = not shown
         self.gizmo.disable_rotations = not shown
 
+    def set_enabled(self, enabled: bool) -> None:
+        """Read-only display (fields disabled, no drag handles), e.g. the robot base while it
+        rides on a carrier: its pose then comes from the carrier."""
+        for w in (self.xyz, self.rpy, self.show):
+            w.disabled = not enabled
+        self.set_handles(enabled and self.show.value)
+
     def _from_fields(self) -> np.ndarray:
         return make_T(rpy_to_matrix(np.radians(self.rpy.value)), np.array(self.xyz.value) / 1000)
 

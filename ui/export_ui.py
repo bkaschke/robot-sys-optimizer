@@ -46,10 +46,16 @@ class ExportPanel:
     def out_dir(self) -> Path:
         return self.s.project_dir / "export"
 
-    def _run(self, event, fn) -> None:
+    def _run(self, event, fn, confirmed: bool = False) -> None:
         sol = self.selected()
         if sol is None:
             return notify(event, "Nothing to export", "Plan stations first and select a solution")
+        from ui.staleness import solution_changes
+
+        changes = solution_changes(self.s, sol)
+        client = getattr(event, "client", None)
+        if changes and not confirmed and client is not None:
+            return self._ask(event, fn, changes)
         try:
             path, data = fn(sol, getattr(event, "client", None))
         except (OSError, ValueError, KeyError) as err:
@@ -59,6 +65,23 @@ class ExportPanel:
         if client is not None:
             client.send_file_download(path.name, data)
         notify(event, "Exported", str(path), ok=True)
+
+    def _ask(self, event, fn, changes: list[str]) -> None:
+        """Out-of-date result: ask before exporting (modal for the clicking browser)."""
+        with event.client.gui.add_modal("Result is out of date") as modal:
+            event.client.gui.add_markdown(
+                f"The setup changed since this result was computed (**{', '.join(changes)}**). "
+                "The export would describe the old setup. Re-run the optimizer, or export anyway."
+            )
+            go = event.client.gui.add_button("Export anyway", color="red")
+            stop = event.client.gui.add_button("Cancel")
+
+        @go.on_click
+        def _(e) -> None:
+            modal.close()
+            self._run(e, fn, confirmed=True)
+
+        stop.on_click(lambda e: modal.close())
 
     def _tool(self, sol):
         tm = self.s.tool_model

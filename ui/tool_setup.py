@@ -382,6 +382,7 @@ class ToolSetupTab:
         self.ext_type.value = x.type
         self.r_L.value = tuple(v * 1000 for v in x.L)
         self.r_theta.value, self.r_roll.value = x.theta_deg, x.roll_deg
+        self.r_theta.visible = self.r_d.visible = x.type == "bent"  # bend settings: bent tools only
         self.r_d.value = tuple(v * 1000 for v in x.d)
         self.radius.value, self.kg_per_m.value = x.radius * 1000, x.kg_per_m
         with self.nominal_folder:

@@ -17,6 +17,7 @@ from core.feasibility import CheckSettings, FeasibilityChecker
 from core.ik import make_ik
 from core.robot import Robot
 from ui.session import Session
+from ui.staleness import stamp_for
 from ui.widgets import notify
 
 INSPECT_SOURCES = ("feasibility check", "selected plan (Results)")
@@ -100,6 +101,7 @@ class OptimizeTab:
             return notify(event, "Cannot run", str(err))
         self._cancel.clear()
         targets = self.s.targets
+        stamp = stamp_for(self.s, "feasibility")
         self.run.visible, self.stop.visible, self.progress.visible = False, True, True
         self.progress.value = 0.0
 
@@ -111,6 +113,7 @@ class OptimizeTab:
                     cancelled=self._cancel.is_set,
                 )
                 self.s.feasibility = {r.id: r for r in res}
+                self.s.stamps["feasibility"] = stamp
                 self._finish(len(res), len(targets.points))
             finally:
                 self.run.visible, self.stop.visible, self.progress.visible = True, False, False

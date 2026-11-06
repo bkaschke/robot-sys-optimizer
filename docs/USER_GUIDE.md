@@ -201,38 +201,34 @@ The cost J weighs tool length, unreached points, extra stations, travel, manipul
 
 ## 4. Tools and features, tab by tab
 
+### Guided steps
+
+The tabs are numbered in setup order: **1 Robot & cell → 2 External axis → 3 Tool → 4 Targets → 5 Optimize → 6 Results**. Each setup tab starts with its status (*not confirmed yet*, *confirmed*, or *changed since you confirmed it*) and a **Confirm step** button (**Confirm setup** on the External axis tab, which also locks the carrier). You can open any tab at any time; the Optimize tab lists the steps that are not confirmed.
+
+**Out-of-date results.** Every check, plan and tool result remembers the setup it was computed for. When you then change the robot or mount, the external axis, the tool, the part (mesh or position) or the targets, the Results tab shows **Out of date: … changed** for that result, the Optimize tab flags an out-of-date feasibility check, and exports ask before writing (**Export anyway** / **Cancel**). Re-run to clear it. (Moving the robot or carrier between stops does not make a plan out of date; the feasibility check, which runs from the current base, does go out of date.) Results saved before v2 carry no record and are not flagged.
+
 ### Top of the panel
 
 - **Dark mode**: switches the GUI and the floor grid. The `--dark` flag starts in dark mode.
 - **User guide**: **📖 Open user guide** opens this guide in a new browser tab. It is served by the app on its port + 1 (`--guide-port N` to change it) and also works from another PC on the network. **Download user guide (HTML)** saves the same page as a file.
+- **Objects**: show or hide the robot, carrier, tool, part, targets and result overlays; *Drag gizmo on* chooses which object has drag handles (robot base, part, tool mount, carrier body; the others are hidden). **Jog**: *Move* the robot / carrier or the part with the arrow buttons (−X/+X, −Y/+Y, −Z/+Z, −Rz/+Rz) by *Step (mm)* / *Turn step (deg)*. With a carrier the arrows drive its axes: a rail stops at the end of its travel, a gantry within its x / y range, a mobile base moves and turns without limits (Z = the lift axis, if any).
 - **Project**: *Folder* (relative to the repo, or absolute), **Save** / **Load** (`<folder>/project.json`), **Download project.json**, **Open project.json** (upload). Loading never half-applies: a broken project leaves the current session untouched.
   - **Autosave** (on by default) saves to the current project folder every *Autosave every (min)* minutes (default 2) when something changed. The line under it shows the last save time.
   - **Reopen where you left off**: the app remembers the last project you saved, loaded or autosaved, and opens it at the next start. Start with `--fresh` (e.g. `scripts\run_app.bat --fresh`) for the default cell instead.
   - A project brings back the whole cell **and** where you were: the arm's joint pose, the surface selection, feasibility colours, every plan's joint solutions (ghost robots, CSV export without re-planning), the selected solution, and the panel settings (spacing, brush, check and planner settings, display options, dark mode). *Examples* + **Open example** opens a working copy of a shipped example (see Quickstart). To add or update an example, type a *New example name* and click **Save as example** (tick *Overwrite existing example* to replace one); this is the only way the app writes into `examples/`. Saving a project to another folder takes its uploaded meshes (`assets/`) along.
 
-### Tool Setup tab
+### 1 Robot & cell tab
 
 | Section | What it does |
 | --- | --- |
-| **Library** | *Tool* picks a saved tool (`tools/*.yaml`). **Upload tool URDF (.zip)** imports a URDF plus meshes; `package://` paths are resolved. **Save to library** stores the tool and copies its geometry into `assets/tools/<name>/`. |
-| **Process** | *Type* applies a preset: scanning, sanding, grinding, gripping, spraying or custom. You can then edit the force, tilt cone, standoff and spin. Contact-free processes (scanning, spraying) clear all contact areas. |
-| **Flange mount** | Places the tool on the flange with a gizmo or typed values. |
-| **Extension** | Straight or bent, with ranges for L, θ, d and roll, the capsule radius and mass per metre. **Rough placement** sliders set the current values. |
-| **TCPs** | Add, rename or remove TCPs and place each with a gizmo. **Pick contact faces (click tool)**: tick it, then click the tool; one click selects the whole smooth face (*Region angle* sets how far it spreads), and clicking again removes it. **Whole-link contact** marks entire links. |
-| **Mass** | Shows the total mass and COG relative to the flange. It can override the head mass and COG when the URDF has no inertials. |
-
-Sample tools: **orbital_sander** (bent extension range, pad as the contact link) and **scanner** (contact-free). Both are simple stand-in geometry.
-
-### Cell tab
-
-| Section | What it does |
-| --- | --- |
-| **Robot** | Choose the UR20 from the registry, or **Upload URDF (.zip)** for another robot (numeric IK; planning features need a UR-type arm). The mount presets are floor, wall and ceiling. Move the base with the gizmo or the xyz/rpy fields. *Joints (deg)* sliders jog the arm; the readout shows the flange pose computed by Pinocchio. |
+| **Robot** | Choose the UR20 from the registry, or **Upload URDF (.zip)** for another robot (numeric IK; planning features need a UR-type arm). The mount presets are floor, wall and ceiling. Move the base with the gizmo or the xyz/rpy fields (static base only: with a carrier the base rides on it and these fields are read-only, so the robot can never be dragged off the carrier). *Joints (deg)* sliders jog the arm; the readout shows the flange pose computed by Pinocchio. |
 | **Part** | A test part (flat plate, curved panel, open box, long rail, deep hole) or **Upload mesh (.stl/.obj/.ply)** with *Units* (m / mm / in). Place it with the gizmo or the fields. |
 
-### External Axis tab
+### 2 External axis tab
 
-Build the carrier (external axis) the robot rides on, mount the robot on it, and set where it may go.
+Build the carrier (external axis) the robot rides on, mount the robot on it, and set where it may go. Only the settings of the chosen *Mode* and *Carrier* are shown (for example *Yaw range* and *Localization* only for a mobile base; for a mobile base *Travel* x / y only bounds the planner's search, jogging has no limits).
+
+**Confirm setup** locks the assembly: the editing sections are hidden, the robot rides on the carrier, and the two move together (carrier position sliders or the jog arrows under **Objects**). **Edit setup** unlocks it to change bodies, mount or settings.
 
 | Section | What it does |
 | --- | --- |
@@ -245,7 +241,20 @@ Build the carrier (external axis) the robot rides on, mount the robot on it, and
 
 Every body collides with the arm and tool (from the upper arm on), and counts for standoff and keep-outs. Bodies touching the floor form the **support polygon** for the tip-over check (e.g. the four wheels), and every body's mass counts. Drawing: red line = minimum standoff, amber = preferred, red boxes = keep-outs.
 
-### Targets tab
+### 3 Tool tab
+
+| Section | What it does |
+| --- | --- |
+| **Library** | *Tool* picks a saved tool (`tools/*.yaml`). **Upload tool URDF (.zip)** imports a URDF plus meshes; `package://` paths are resolved. **Save to library** stores the tool and copies its geometry into `assets/tools/<name>/`. |
+| **Process** | *Type* applies a preset: scanning, sanding, grinding, gripping, spraying or custom. You can then edit the force, tilt cone, standoff and spin. Contact-free processes (scanning, spraying) clear all contact areas. |
+| **Flange mount** | Places the tool on the flange with a gizmo or typed values. |
+| **Extension** | Straight or bent (the θ and d ranges show for bent tools only), with ranges for L, θ, d and roll, the capsule radius and mass per metre. **Rough placement** sliders set the current values. |
+| **TCPs** | Add, rename or remove TCPs and place each with a gizmo. **Pick contact faces (click tool)**: tick it, then click the tool; one click selects the whole smooth face (*Region angle* sets how far it spreads), and clicking again removes it. **Whole-link contact** marks entire links. |
+| **Mass** | Shows the total mass and COG relative to the flange. It can override the head mass and COG when the URDF has no inertials. |
+
+Sample tools: **orbital_sander** (bent extension range, pad as the contact link) and **scanner** (contact-free). Both are simple stand-in geometry.
+
+### 4 Targets tab
 
 | Section | What it does |
 | --- | --- |
@@ -259,14 +268,14 @@ Every body collides with the arm and tool (from the upper arm on), and counts fo
 
 Points are stored **in the part frame**, so moving the part moves them with it.
 
-### Optimize tab
+### 5 Optimize tab
 
 | Section | What it does |
 | --- | --- |
 | **Feasibility check** | **Check all targets** from the current base, with clearance, joint margin and torque limit as settings. The summary gives counts and reasons. *Inspect result* shows either the feasibility check or, by default, the **plan selected in the Results tab** (*Show*); it switches to each new plan or tool result automatically. **Move robot to this solution** moves the carrier (or base) to the point's station and the arm to its solution. |
 | **Base placement (reachability)** | **Show base heatmap** draws where the base could stand on the floor (bright = all points reachable with the best worst-case manipulability) and marks the best spot. **Move base to best** moves it there. Ignores collisions: confirm with the feasibility check. |
 | **Station planner** | **Plan stations** finds the fewest stations that reach every point, within *Max stations* (static mode = 1). Each solution goes to the Results tab as soon as it finishes. *Candidate grid* sets the search resolution; *Refine* turns the exact fine-tuning on or off. **Cancel** stops within about a second and keeps the plans already finished. *Joint configuration* = **zones (minimize changes)** groups each stop's points into zones that keep one arm configuration and puts each zone in path order (see *Joint-configuration zones* below); *Cost per config change* sets how much a change costs (a stop costs 5). |
-| **Tool geometry** | **Find shortest tool** first finds the shortest L that still reaches everything within the station limit, then tunes θ / d / roll. It shows a coverage-vs-length table. *Length tolerance* (mm) is up to you (no upper limit). **Cancel** stops within about a second and keeps the best result so far. **Apply to tool** writes the values into Tool Setup. |
+| **Tool geometry** | **Find shortest tool** first finds the shortest L that still reaches everything within the station limit, then tunes θ / d / roll. It shows a coverage-vs-length table. *Length tolerance* (mm) is up to you (no upper limit). **Cancel** stops within about a second and keeps the best result so far. **Apply to tool** writes the values into the Tool tab. **Save optimized tool to library** stores the tool with the optimized values under *Save as tool* (default `<tool>_opt`) without changing the tool in use. |
 
 ### Joint-configuration zones
 
@@ -279,7 +288,7 @@ A UR arm can reach most poses in up to 8 ways: **shoulder** (S), **elbow** (E) a
 
 It also re-runs the tip-over and localization checks for the chosen solutions. It is about 3× slower than *best per point*. The Results tab lists the zones (`S1·Z1 S-E+W- 6 pts`), draws each zone's path as a thick coloured line, and **Targets → Display → Color points by** `zone` or `configuration` colours the points of the selected solution. The CSV and the HTML report list zone, path position and configuration per point. The Tool geometry optimizer uses the same setting.
 
-### Results tab
+### 6 Results tab
 
 - **Solution**: the ranked list (best cost first). It shows a summary (with the zones and configuration changes when zoning is on), the cost breakdown bars and the station list.
 - **Scene**: coloured station markers, **lines to served points**, and **ghost robots** posed at a real solution.

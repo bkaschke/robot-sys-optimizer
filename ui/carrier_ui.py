@@ -62,6 +62,15 @@ DEFAULTS = {
 BODY_COLOR, FIXED_COLOR, PICKED_COLOR = (120, 130, 150), (150, 140, 120), (90, 140, 220)
 
 
+def _label(handle, text: str) -> None:
+    """Relabel a GUI input (no-op on Viser versions without settable labels)."""
+    try:
+        if handle.label != text:
+            handle.label = text
+    except AttributeError:
+        pass
+
+
 def _mm(v) -> tuple:
     return tuple(float(x) * 1000 for x in v)
 
@@ -81,7 +90,9 @@ class CarrierPanel:
         self.bodies: list[Primitive] = []
         self.mount_pose = Pose()
         gui = server.gui
-        with gui.add_folder("Axis type"):
+        self.locked_note = gui.add_markdown("", visible=False)
+        self.axis_folder = gui.add_folder("Axis type")
+        with self.axis_folder:
             self.mode = gui.add_dropdown("Mode", ("static", "movable"))
             self.kind = gui.add_dropdown("Carrier", ("mobile", "rail", "gantry"))
             self.defaults = gui.add_button("Load carrier defaults")
@@ -92,7 +103,8 @@ class CarrierPanel:
             self.tyaw = gui.add_vector2("Yaw range (deg)", (-180.0, 180.0), step=5.0)
             self.lift = gui.add_vector2("Lift range (mm, 0 0 = none)", (0.0, 0.0), step=10.0)
         self.editor = BodyEditor(server, self)
-        with gui.add_folder("Standoff and safety", expand_by_default=False):
+        self.safety_folder = gui.add_folder("Standoff and safety", expand_by_default=False)
+        with self.safety_folder:
             self.so = gui.add_vector2("Part standoff min / preferred (mm)", (300.0, 400.0), step=10.0)
             self.env = gui.add_number("Keep-out clearance (mm)", 100.0, min=0.0, step=10.0)
             self.keepouts = gui.add_text("Keep-outs (mm)", "", hint="x0,y0,x1,y1; x0,y0,x1,y1 (floor boxes)")
@@ -111,8 +123,52 @@ class CarrierPanel:
             self.load(DEFAULTS[self.kind.value].model_copy(update={"mode": "movable"}))
             self.commit(e)
 
+        self.locked = False
+        for w in (self.mode, self.kind):
+            w.on_update(lambda e: self.update_visibility())
         self.load(session.base)
         self.refresh()
+
+    # --- what is shown --------------------------------------------------------------------------
+
+    def update_visibility(self) -> None:
+        """Show only the settings of the selected mode / axis type, and nothing editable while
+        the setup is confirmed (locked): the robot then rides on the carrier as one assembly."""
+        movable = self.mode.value == "movable"
+        kind = self.kind.value
+        edit = not self.locked
+        self.axis_folder.visible = edit
+        for w in (self.kind, self.defaults, self.tx, self.lift):
+            w.visible = movable
+        self.frame_xyz.visible = self.frame_yaw.visible = movable and kind in ("rail", "gantry")
+        self.ty.visible = movable and kind in ("mobile", "gantry")
+        self.tyaw.visible = movable and kind == "mobile"
+        self.loc.visible = self.tip.visible = movable and kind == "mobile"
+        _label(
+            self.tx,
+            "Planner search x (mm)"
+            if kind == "mobile"
+            else ("Travel s (mm)" if kind == "rail" else "Travel x (mm)"),
+        )
+        _label(self.ty, "Planner search y (mm)" if kind == "mobile" else "Travel y (mm)")
+        self.editor.bodies_folder.visible = self.editor.mount_folder.visible = movable and edit
+        self.safety_folder.visible = movable and edit
+        self.apply.visible = edit
+        self.dof_folder.visible = movable
+        if not edit:  # no editing gizmos on a confirmed setup
+            self.editor.drag.value = self.editor.drag_mount.value = False
+        self.locked_note.visible = not edit
+        self.locked_note.content = (
+            "**Setup confirmed:** the robot rides on the carrier. Move them together with the "
+            "carrier position sliders or the jog arrows (Objects). **Edit setup** to change it."
+            if movable
+            else "**Setup confirmed** (static base). **Edit setup** to change it."
+        )
+
+    def set_locked(self, locked: bool) -> None:
+        if locked != self.locked:
+            self.locked = locked
+            self.update_visibility()
 
     # --- widgets <-> schema ------------------------------------------------------------------
 
@@ -147,6 +203,7 @@ class CarrierPanel:
         finally:
             self._busy = False
         self.editor.sync()
+        self.update_visibility()
 
     def collect(self) -> Base:
         kind = self.kind.value
@@ -241,6 +298,33 @@ class CarrierPanel:
         else:
             self.draw()
 
+    def current(self, c) -> dict:
+        """DOF values to show: within the travel, except a mobile base's x / y, which has no
+        limits (the travel fields of a mobile base only bound the planner's search)."""
+        raw = self.values()
+        v = c.clip(raw)
+        if c.kind == "mobile":
+            v.update({k: raw[k] for k in ("x", "y") if k in raw})
+        return v
+
+    def jog_dof(self, dof: str, delta: float) -> bool:
+        """Arrow jog: move one carrier DOF by ``delta`` (m or rad). Rail / gantry travel is
+        clamped to its range; a mobile base moves freely (its sliders grow as needed) and
+        its yaw wraps. Returns False if the carrier has no such DOF."""
+        sl = self._dof.get(dof)
+        if sl is None or self.s.base.mode != "movable":
+            return False
+        mobile = self.s.base.carrier == "mobile"
+        x = sl.value + (np.degrees(delta) if dof == "yaw" else delta * 1000)
+        if dof == "yaw" and mobile:
+            x = (x + 180.0) % 360.0 - 180.0
+        elif mobile and dof in ("x", "y"):
+            sl.min, sl.max = min(sl.min, x), max(sl.max, x)
+        else:
+            x = float(np.clip(x, sl.min, sl.max))
+        sl.value = float(x)  # fires the jog
+        return True
+
     def values(self) -> dict:
         return {n: (np.radians(sl.value) if n == "yaw" else sl.value / 1000) for n, sl in self._dof.items()}
 
@@ -252,7 +336,7 @@ class CarrierPanel:
             return np.eye(4)
         if attach == "fixed":
             return c.T_frame
-        v = c.clip(self.values())
+        v = self.current(c)
         T = c.T_world_carriage(v)
         return T @ make_T(p=(0, 0, v.get("lift", 0.0))) if attach == "mount" else T
 
@@ -260,7 +344,7 @@ class CarrierPanel:
         if self._busy or self.s.base.mode != "movable":
             return
         c = self._carrier()
-        v = c.clip(self.values())
+        v = self.current(c)
         self.set_base(c.T_world_base(v))
         self._move_bodies(c, v)
 
@@ -274,6 +358,8 @@ class CarrierPanel:
             for n, sl in self._dof.items():
                 if n in values:
                     x = float(np.degrees(values[n]) if n == "yaw" else values[n] * 1000)
+                    if self.s.base.carrier == "mobile" and n in ("x", "y"):
+                        sl.min, sl.max = min(sl.min, x), max(sl.max, x)  # no limits
                     sl.value = float(np.clip(x, sl.min, sl.max))
         finally:
             self._busy = False
@@ -313,7 +399,7 @@ class CarrierPanel:
         self._zones = zones
         if b.mode == "movable":
             c = self._carrier()
-            v = c.clip(self.values())
+            v = self.current(c)
             picked = self.editor.pick.value
             moving = c.moving_bodies(v)
             self._moving_names = [body.name for body in moving]

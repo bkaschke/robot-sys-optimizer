@@ -58,6 +58,11 @@ class CellTab:
                 "Upload URDF (.zip)", mime_type="application/zip", hint="URDF + meshes in one zip"
             )
             self.mount = server.gui.add_dropdown("Mount", tuple(MOUNT_RPY) + ("custom",))
+            self.mounted_note = server.gui.add_markdown(
+                "_The robot rides on the carrier (External Axis): its base moves with the carrier "
+                "position. Change the mount on the External Axis tab._",
+                visible=False,
+            )
             self.base = PoseWidgets(server, BASE_NODE, session.T_world_base, self._on_base)
             self.joint_folder = server.gui.add_folder("Joints (deg)")
             self.home = server.gui.add_button("Home")
@@ -163,6 +168,13 @@ class CellTab:
                 self.mount.value = "custom"
                 self.s.mount = "custom"
         self._update_readout()
+
+    def set_mounted(self, mounted: bool) -> None:
+        """Robot on a carrier: base pose and mount preset are not editable here (they follow
+        the carrier), so the robot can never be dragged off it."""
+        self.mounted_note.visible = mounted
+        self.mount.disabled = mounted
+        self.base.set_enabled(not mounted)
 
     def set_base(self, T: np.ndarray) -> None:
         """Programmatic base move (placement optimizer): same path as a user edit."""

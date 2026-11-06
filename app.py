@@ -14,6 +14,7 @@ from ui import settings as ui_settings
 from ui.carrier_ui import CarrierPanel
 from ui.cell import CellTab
 from ui.guide import GuideServer, add_guide_panel
+from ui.objects import ObjectsPanel
 from ui.optimize import INSPECT_SOURCES, OptimizeTab
 from ui.placement import PlacementPanel
 from ui.project_panel import ProjectPanel
@@ -24,10 +25,13 @@ from ui.targets_ui import TargetsTab
 from ui.tool_opt import ToolOptPanel
 from ui.tool_setup import ToolSetupTab
 from ui.widgets import Latest
+from ui.workflow import Workflow
 
-TABS = ("Tool Setup", "Cell", "External Axis", "Targets", "Optimize", "Results")
+# tabs in setup order (guided steps, ui.workflow); shown as "1 Robot & cell", ...
+TABS = ("Cell", "External Axis", "Tool Setup", "Targets", "Optimize", "Results")
+TAB_TITLES = ("Robot & cell", "External axis", "Tool", "Targets", "Optimize", "Results")
 UR_NOTICE = (
-    "_UR robot models Â© 2023 Universal Robots A/S. Use hereof is subject to Universal Robots A/S' "
+    "_UR robot models © 2023 Universal Robots A/S. Use hereof is subject to Universal Robots A/S' "
     "Terms and Conditions for Use of Graphical Documentation._"
 )
 
@@ -83,6 +87,7 @@ def build_app(
         state["carrier"].refresh()
         state["results"].refresh()
         restore_work()
+        state["workflow"].refresh(force=True)
 
     def restore_work() -> None:
         """Bring back where the user left off: selection, then panel settings."""
@@ -115,16 +120,23 @@ def build_app(
     project = ProjectPanel(
         server, session, on_loaded=on_loaded, remember=remember, autosave_thread=autosave_thread
     )
+    objects = ObjectsPanel(server, session)
+    workflow = Workflow(server, session)
+    state["workflow"] = workflow
     tabs = server.gui.add_tab_group()
-    tab_handles = {name: tabs.add_tab(name) for name in TABS}
+    tab_handles = {name: tabs.add_tab(f"{i + 1} {TAB_TITLES[i]}") for i, name in enumerate(TABS)}
     with tab_handles["Cell"]:
+        workflow.header("Cell")
         cell = CellTab(server, session)
     with tab_handles["External Axis"]:
+        workflow.header("External Axis")
         carrier = CarrierPanel(server, session, set_base=cell.set_base)
     with tab_handles["Tool Setup"]:
+        workflow.header("Tool Setup")
         tool = ToolSetupTab(server, session)
     cell.listeners.append(tool.on_robot_moved)
     with tab_handles["Targets"]:
+        workflow.header("Targets")
         targets = TargetsTab(server, session)
     cell.on_part_click = targets.on_part_click
     targets.tools.on_mesh_replaced = cell.refresh_part
@@ -137,6 +149,7 @@ def build_app(
         targets.refresh()
 
     with tab_handles["Optimize"]:
+        workflow.optimize_header()
         optimize = OptimizeTab(server, session, on_results, show_q=cell.set_q)
         placement = PlacementPanel(server, session, set_base=cell.set_base)
 
@@ -153,6 +166,7 @@ def build_app(
 
         tool_opt = ToolOptPanel(server, session, apply_values, on_solution=new_results)
     with tab_handles["Results"]:
+        workflow.results_header()
         results = ResultsTab(server, session, set_base=cell.set_base)
     state["results"] = results
     tool_opt.planner_options = stations.options
@@ -168,17 +182,27 @@ def build_app(
     def on_selection(_e=None) -> None:
         targets._draw_points()  # zone / configuration colours
         optimize.refresh_inspect()  # the inspector follows the Results selection
+        workflow.refresh()  # out-of-date banner of the selected result
 
     results.choice.on_update(on_selection)
     results.tool_opt = tool_opt
     results.move_carrier = carrier.set_values
     results.set_q = cell.set_q
+    workflow.cell, workflow.carrier, workflow.results = cell, carrier, results
+    objects.cell, objects.carrier, objects.tool = cell, carrier, tool
+    objects.targets, objects.results = targets, results
+    workflow.refresh(force=True)
+    objects.apply_gizmo()
+    if autosave_thread:  # the real app: keep step status, banners and visibility current
+        workflow.hooks.append(objects.apply_visibility)
+        workflow.start_watch()
     server.gui.add_markdown(UR_NOTICE)
 
     state.update(
         tabs=tab_handles,
         cell=cell,
         carrier=carrier,
+        objects=objects,
         tool=tool,
         targets=targets,
         optimize=optimize,

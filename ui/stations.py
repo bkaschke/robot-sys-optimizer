@@ -18,6 +18,7 @@ from core.schema import Optimizer, TargetGroup
 from opt.placement import PlannerSettings, Targets, plan_stations
 from opt.reachability import map_for_tool
 from ui.session import Session
+from ui.staleness import stamp_for
 from ui.widgets import notify
 
 
@@ -61,11 +62,17 @@ class StationsPanel:
             self.refine = gui.add_checkbox("Refine with exact check (CMA-ES)", True)
             self.zoning = gui.add_dropdown("Joint configuration", ZONING)
             self.config_cost = gui.add_number("Cost per config change", 1.0, min=0.0, step=0.5)
-            gui.add_markdown(
+            self.zoning_note = gui.add_markdown(
                 "_**zones**: each stop's points are grouped by joint configuration (shoulder/elbow/"
                 "wrist) into ordered paths; changes (zone boundaries and wrist jumps > 180°) cost "
                 "the value above (a stop costs 5). About 3× slower._"
             )
+
+            def zoning_fields(_e=None) -> None:  # zoning settings only when zoning is on
+                self.config_cost.visible = self.zoning_note.visible = self.zoning.value == ZONING[1]
+
+            self.zoning.on_update(zoning_fields)
+            zoning_fields()
             self.run = gui.add_button("Plan stations", color="green")
             self.stop = gui.add_button("Cancel", visible=False)
             self.progress = gui.add_progress_bar(0.0, visible=False)
@@ -109,8 +116,10 @@ class StationsPanel:
         self.run.visible, self.stop.visible, self.progress.visible = False, True, True
         s.results, s.result_points = [], {}
         self.on_solution()
+        stamp = stamp_for(s, "plan")  # the setup this run plans for (out-of-date tracking)
 
         def streamed(sol, res) -> None:
+            s.stamps[sol.label] = stamp
             s.result_points[sol.label] = res
             s.results = sorted([*s.results, sol], key=lambda x: x.cost)
             self.on_solution()

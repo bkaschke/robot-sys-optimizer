@@ -51,7 +51,8 @@ class BodyEditor:
         self.gizmo = None
         self.mount_gizmo = None
         gui = server.gui
-        with gui.add_folder("Bodies", expand_by_default=True):
+        self.bodies_folder = gui.add_folder("Bodies", expand_by_default=True)
+        with self.bodies_folder:
             self.pick = gui.add_dropdown("Body", (NONE,))
             self.add_box = gui.add_button("Add box")
             self.add_cyl = gui.add_button("Add cylinder")
@@ -68,7 +69,8 @@ class BodyEditor:
             self.rpy = gui.add_vector3("Rotation rpy (deg)", (0.0, 0.0, 0.0), step=5.0)
             self.kg = gui.add_number("Mass (kg, 0 = unknown)", 0.0, min=0.0, step=5.0)
             self.drag = gui.add_checkbox("Drag body with gizmo", False)
-        with gui.add_folder("Robot mount", expand_by_default=True):
+        self.mount_folder = gui.add_folder("Robot mount", expand_by_default=True)
+        with self.mount_folder:
             self.mount_on = gui.add_dropdown("Mount on body", (NONE,))
             self.snap = gui.add_button("Snap robot to top of body")
             self.mount_xyz = gui.add_vector3("Mount xyz (mm)", (0.0, 0.0, 0.0), step=10.0)

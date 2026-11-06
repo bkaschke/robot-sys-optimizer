@@ -12,6 +12,7 @@ from core.robot import Robot
 from core.schema import ExtensionValues, Optimizer
 from opt.tool_geometry import GeometryResult, GeometrySettings, optimize_tool
 from ui.session import Session
+from ui.staleness import stamp_for
 from ui.stations import part_footprint, world_targets
 from ui.widgets import notify
 
@@ -46,6 +47,8 @@ class ToolOptPanel:
                 "_Bisection on L within the extension's range (Tool Setup), then CMA-ES on θ / d / roll._"
             )
             self.apply = gui.add_button("Apply to tool", disabled=True)
+            self.save_name = gui.add_text("Save as tool", "", hint="library name for the optimized tool")
+            self.save_lib = gui.add_button("Save optimized tool to library", disabled=True)
         self.run.on_click(lambda e: self.start(e))
         self.stop.on_click(lambda e: self._cancel.set())
 
@@ -54,6 +57,27 @@ class ToolOptPanel:
             if self.result is not None and self.result.feasible:
                 self.apply_values(self.result.values)
                 notify(e, "Applied", f"tool nominal set to L = {self.result.values.L * 1000:.1f} mm", ok=True)
+
+        @self.save_lib.on_click
+        def _(e) -> None:
+            try:
+                path = self.save_to_library(self.save_name.value)
+            except (OSError, ValueError) as err:
+                return notify(e, "Save failed", str(err))
+            notify(e, "Saved", str(path), ok=True)
+
+    def save_to_library(self, name: str):
+        """The current tool with the optimized values as its nominal, saved as a new
+        library entry (tools/<name>.yaml); the tool in use is not changed."""
+        from core.tool import save_tool
+
+        r = self.result
+        if r is None or not r.feasible or self.s.tool is None:
+            raise ValueError("run Find shortest tool first")
+        name = name.strip() or f"{self.s.tool.name}_opt"
+        x = self.s.tool.extension.model_copy(update={"nominal": r.values})
+        ee = self.s.tool.model_copy(update={"name": name, "extension": x})
+        return save_tool(ee, name)
 
     def start(self, event=None, block: bool = False) -> None:
         s = self.s
@@ -89,6 +113,8 @@ class ToolOptPanel:
         self._cancel.clear()
         self.run.visible, self.stop.visible, self.progress.visible = False, True, True
         self.apply.disabled = True
+        self.save_lib.disabled = True
+        self._stamp = stamp_for(s, "tool")  # the setup this search ran on
 
         def say(msg: str, f: float) -> None:
             self.info.content = f"_{msg}_"
@@ -126,7 +152,8 @@ class ToolOptPanel:
             f"**{r.message}**  \nθ {v.theta_deg:.1f}°, d {v.d * 1000:.0f} mm, roll {v.roll_deg:.1f}° · "
             f"cost {r.solution.cost:.2f} · {len(r.solution.stations)} station(s)\n\n{table}"
         )
-        self.apply.disabled = False
+        self.apply.disabled = self.save_lib.disabled = False
+        self.s.stamps[r.solution.label] = self._stamp
         self.s.result_points[r.solution.label] = r.point_results
         self.s.results = sorted([*self.s.results, r.solution], key=lambda x: x.cost)
         self.on_solution()

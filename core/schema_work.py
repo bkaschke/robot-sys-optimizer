@@ -53,3 +53,7 @@ class WorkState(_Model):
     feasibility: list[PointResultData] = Field(default_factory=list)
     result_points: dict[str, list[PointResultData]] = Field(default_factory=dict)  # solution label -> points
     ui: dict[str, Any] = Field(default_factory=dict)  # panel settings: "panel.widget" -> value
+    # setup fingerprints (ui.staleness): result key ("feasibility" or a solution label) and
+    # confirmed setup step -> {component: hash}
+    stamps: dict[str, dict[str, str]] = Field(default_factory=dict)
+    steps: dict[str, dict[str, str]] = Field(default_factory=dict)
