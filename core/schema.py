@@ -113,6 +113,8 @@ class Robot(_Model):
     base_pose: Pose = Field(default_factory=Pose)
     ik: Literal["ur_analytic", "opw", "numeric"] = "numeric"
     payload_spec: PayloadSpec = Field(default_factory=PayloadSpec)
+    # home pose saved with the project (deg, one per joint); None = the robot's spec.yaml home
+    home_deg: list[float] | None = None
 
     @model_validator(mode="after")
     def _source(self) -> Robot:

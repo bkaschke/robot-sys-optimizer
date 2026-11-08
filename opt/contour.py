@@ -152,15 +152,15 @@ class ContourSites(CarrierSites):
         if "t" in A and "t" in B and self.table[self._row(A["t"]), 5] == self.table[self._row(B["t"]), 5]:
             n = max(1, int(np.ceil(abs(B["t"] - A["t"]) / step)))
             ts = A["t"] + (B["t"] - A["t"]) * np.arange(1, n + 1) / n
-            return [(f, self.transit_ok(f)) for f in (self.full({"t": float(t)}) for t in ts)]
+            moves = [(f, self.transit_ok(f, (A, B))) for f in (self.full({"t": float(t)}) for t in ts)]
+            return self._or_route(A, B, moves, step)  # a zone on the contour: drive around it
         A = {k: v for k, v in A.items() if k != "t"}
         B = {k: v for k, v in B.items() if k != "t"}
         return super().transit(A, B, step)
 
-    def transit_ok(self, v: dict) -> bool:
+    def _move_ok(self, f: dict, clearance: float) -> bool:
         """Keep-outs, part standoff and stay-out zones (any part side may be passed)."""
-        f = self.full(v)
-        return self.zones.check(self.c.footprint(f)).ok and self.clear_of_obstacles(f)
+        return self.zones.check(self.c.footprint(f)).ok and self.clear_of_obstacles(f, clearance)
 
     def perturbations(self, v: dict) -> list[dict]:
         return super().perturbations(self.full(v))

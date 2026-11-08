@@ -185,7 +185,7 @@ class SimPanel:
         poses = [station_pose(s.base, st, s.T_world_base) for st in sol.stations]
         mesh = s.part_mesh()
         targets_key = s.targets.model_dump_json()  # paths belong to these targets
-        home = checker.robot.home_q() if self.home.value else None
+        home = s.home_q() if self.home.value else None  # the project's home (Robot & cell)
         carrier_path = (
             self._carrier_path(sol, max(self.step.value / 1000, 0.05)) if home is not None else None
         )

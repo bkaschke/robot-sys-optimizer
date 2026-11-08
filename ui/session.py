@@ -48,6 +48,7 @@ class Session:
     mount: str = "floor"
     T_world_base: np.ndarray = field(default_factory=lambda: np.eye(4))
     q: np.ndarray | None = None
+    home_deg: list | None = None  # project home pose (deg); None = the robot's spec home
     part: PartState | None = None
     tool: schema.EndEffector | None = None
     tool_model: ToolModel | None = None
@@ -88,12 +89,24 @@ class Session:
         self.robot = Robot.from_registry(name)
         self.robot_name, self.robot_urdf = name, None
         self.q = HOME_Q.get(name, np.zeros(self.robot.nq)).copy()
+        self.home_deg = None
 
     def load_robot_from_urdf(self, urdf: Path, flange_link: str | None = None) -> None:
         info = inspect_urdf(urdf)
         self.robot = Robot.from_urdf(urdf, info.root_link, flange_link or info.leaf_link, info.name)
         self.robot_name, self.robot_urdf = None, self.relative(urdf)
         self.q = np.clip(np.zeros(self.robot.nq), self.robot.lower, self.robot.upper)
+        self.home_deg = None
+
+    def home_q(self) -> np.ndarray | None:
+        """Home joints (rad): the project's saved home, else the robot's spec.yaml home."""
+        r = self.robot
+        if r is None:
+            return None
+        h = self.home_deg
+        if h is not None and len(h) == r.nq:
+            return np.clip(np.radians(np.asarray(h, float)), r.lower, r.upper)
+        return r.home_q()
 
     def T_world_flange(self) -> np.ndarray:
         if self.robot is None:  # empty study: nothing hangs below the base yet
@@ -197,6 +210,7 @@ class Session:
                 base_pose=matrix_to_pose(self.T_world_base),
                 ik=r.spec.ik,
                 payload_spec=r.spec.payload,
+                home_deg=None if self.home_deg is None else [float(v) for v in self.home_deg],
             )
         )
         part = None
@@ -230,6 +244,8 @@ class Session:
         if pr is not None:
             self.mount = pr.mount
             self.T_world_base = pose_to_matrix(pr.base_pose)
+            ok = pr.home_deg is not None and self.robot is not None and len(pr.home_deg) == self.robot.nq
+            self.home_deg = list(pr.home_deg) if ok else None
         self.part = None
         if project.part is not None:
             self.part = PartState(project.part.mesh, project.part.units, pose_to_matrix(project.part.pose))

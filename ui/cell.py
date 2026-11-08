@@ -67,8 +67,11 @@ class CellTab:
             )
             self.base = PoseWidgets(server, BASE_NODE, session.T_world_base, self._on_base)
             self.joint_folder = server.gui.add_folder("Joints (deg)")
-            self.home = server.gui.add_button("Home")
+            self.home = server.gui.add_button("Go to home", hint="the home pose below")
             self.readout = server.gui.add_markdown("")
+            from ui.robot_home import HomePanel
+
+            self.home_panel = HomePanel(server, self)
         with server.gui.add_folder("Part"):
             self.part_choice = server.gui.add_dropdown(
                 "Part", (*GOLDEN_PARTS, "(uploaded mesh)", "(none)"), initial_value="(none)"
@@ -129,12 +132,7 @@ class CellTab:
 
         @self.home.on_click
         def _(_e) -> None:
-            from ui.session import HOME_Q
-
-            if self.s.robot is None:
-                return
-            q = HOME_Q.get(self.s.robot_name or "", np.zeros(self.s.robot.nq))
-            self.set_q(np.clip(q, self.s.robot.lower, self.s.robot.upper))
+            self.go_home()
 
         @self.part_choice.on_update
         def _(_e) -> None:
@@ -202,6 +200,11 @@ class CellTab:
 
     # --- scene refresh ------------------------------------------------------------
 
+    def go_home(self) -> None:
+        """Jog the arm to the home pose (Home position folder)."""
+        if self.s.robot is not None:
+            self.set_q(self.s.home_q())
+
     def set_q(self, q: np.ndarray) -> None:
         """Programmatic jog (also used by tests): updates sliders, scene and readout."""
         for sl, v in zip(self.sliders, q, strict=True):
@@ -257,6 +260,7 @@ class CellTab:
             self.base.set(s.T_world_base)
             self._update_readout()
             self._rebuild_part()
+            self.home_panel.refresh()
             return
         self.view = RobotView(self.server, s.robot, s.robot_urdf_path, BASE_NODE)
         with self.joint_folder:
@@ -272,6 +276,7 @@ class CellTab:
         self.view.set_q(s.q)
         self._update_readout()
         self._rebuild_part()
+        self.home_panel.refresh()
 
     def refresh_part(self) -> None:
         self._busy = True

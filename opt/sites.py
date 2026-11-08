@@ -137,25 +137,38 @@ class CarrierSites:
             return False, 1.0
         return zc.ok, zc.penalty
 
-    def clear_of_obstacles(self, v: dict) -> bool:
-        """The carrier at DOF values v keeps the keep-out clearance from every stay-out zone."""
+    def clear_of_obstacles(self, v: dict, clearance: float | None = None) -> bool:
+        """The carrier at DOF values v keeps ``clearance`` (default: the keep-out clearance)
+        from every stay-out zone."""
         if not self.obstacles:
             return True
         from core.stayout import carrier_clear
 
         v = self.full(v)
         bodies = self.c.moving_bodies(v) + self.c.static_bodies()
-        ok, _ = carrier_clear(
-            bodies, self.c.footprint(v), self.obstacles, self.c.base.standoff_m.carrier_env_min
-        )
+        if clearance is None:
+            clearance = self.c.base.standoff_m.carrier_env_min
+        ok, _ = carrier_clear(bodies, self.c.footprint(v), self.obstacles, clearance)
         return ok
+
+    @property
+    def nav_clearance(self) -> float:
+        """Clearance kept from stay-out zones while a mobile base drives between stops: its
+        part standoff (the fixed contour standoff, else the minimum), at least the keep-out
+        clearance. Rails and gantries keep the keep-out clearance."""
+        so = self.c.base.standoff_m
+        if self.kind != "mobile":
+            return so.carrier_env_min
+        d = getattr(self, "d", None)
+        return max(so.carrier_env_min, float(d if d is not None else so.carrier_part_min))
 
     def travel(self, a: dict, b: dict) -> float:
         return self.c.travel(a, b)
 
     def transit(self, a: dict, b: dict, step: float) -> list[tuple[dict, bool]]:
         """Carrier poses moving from stop a to stop b (b included, a not), every ``step`` of
-        travel, each with whether it is clear (v4 plan item 4: the arm waits at home)."""
+        travel, each with whether it is clear (v4 plan item 4: the arm waits at home). A
+        mobile base whose straight move is blocked drives around the zones (``route``)."""
         A, B = self.full(a), self.full(b)
         keys = [d for d in self.c.dofs if d in A and d in B]
         n = max(1, int(np.ceil(self.travel(A, B) / step)))
@@ -167,11 +180,74 @@ class CarrierSites:
                 if d == "yaw":
                     dv = (dv + np.pi) % (2 * np.pi) - np.pi
                 v[d] = float(A[d] + s * dv)
-            out.append((v, self.transit_ok(v)))
-        return out
+            out.append((v, self.transit_ok(v, (A, B))))
+        return self._or_route(A, B, out, step)
 
-    def transit_ok(self, v: dict) -> bool:
-        return self.accept(v)[0]
+    def _or_route(self, A: dict, B: dict, moves: list, step: float) -> list[tuple[dict, bool]]:
+        if self.kind != "mobile" or all(ok for _, ok in moves):
+            return moves
+        r = self.route(A, B, step)
+        return r if r is not None else moves  # no route: the blocked direct move is reported
+
+    def transit_ok(self, v: dict, ends: tuple = ()) -> bool:
+        """A carrier pose on the way between stops is clear: keep-outs, part standoff and the
+        stay-out zones at ``nav_clearance``; within that distance of a stop (``ends``) the
+        keep-out clearance the stop itself was planned with is enough."""
+        f = self.full(v)
+        return self._move_ok(f, self._clearance_at(f, ends))
+
+    def _clearance_at(self, f: dict, ends: tuple) -> float:
+        nav, env = self.nav_clearance, self.c.base.standoff_m.carrier_env_min
+        if nav > env and "x" in f:
+            for e in ends:
+                if "x" in e and np.hypot(f["x"] - e["x"], f["y"] - e["y"]) < nav:
+                    return env
+        return nav
+
+    def _move_ok(self, f: dict, clearance: float) -> bool:
+        if any(
+            not lo - 1e-9 <= f[d] <= hi + 1e-9 for d, (lo, hi) in zip(self.c.dofs, self.c.bounds, strict=True)
+        ):
+            return False
+        if not carrier_ok(self.c, self.zones, f, self.part, self.T_part).ok:
+            return False
+        return self.clear_of_obstacles(f, clearance)
+
+    def footprint_radius(self) -> float:
+        fp = self.c.footprint(self.full({"x": 0.0, "y": 0.0, "yaw": 0.0}))
+        if fp is None:
+            return 0.0
+        geoms = getattr(fp, "geoms", [fp])
+        return float(max(np.max(np.linalg.norm(np.asarray(g.exterior.coords), axis=1)) for g in geoms))
+
+    def route(self, A: dict, B: dict, step: float) -> list[tuple[dict, bool]] | None:
+        """Mobile base: poses every ``step`` along a route from A to B around the stay-out
+        zones, keep-outs and the part (``opt.navigate``), or None when there is none."""
+        from opt.navigate import resample, route
+
+        ends = (A, B)
+        lift = {k: v for k, v in A.items() if k == "lift"}
+
+        def pose(x: float, y: float, yaw: float) -> dict:
+            return {"x": float(x), "y": float(y), "yaw": float(yaw), **lift}
+
+        def ok(x: float, y: float, yaw: float) -> bool:
+            return self.transit_ok(pose(x, y, yaw), ends)
+
+        rad = self.footprint_radius()
+        boxes = [(A["x"], A["y"], A["x"], A["y"]), (B["x"], B["y"], B["x"], B["y"])]
+        boxes += [o.footprint.bounds for o in self.obstacles]
+        boxes += [k.bounds for k in self.zones.keepouts]
+        if self.zones.part is not None:
+            boxes.append(self.zones.part.bounds)
+        Bx = np.array(boxes)
+        pad = rad + self.nav_clearance + 0.5
+        region = (Bx[:, 0].min() - pad, Bx[:, 1].min() - pad, Bx[:, 2].max() + pad, Bx[:, 3].max() + pad)
+        path = route(ok, (A["x"], A["y"], A["yaw"]), (B["x"], B["y"], B["yaw"]), region, rad)
+        if path is None:
+            return None
+        out = [pose(*p) for p in resample(path, step, rad)]
+        return [(v, self.transit_ok(v, ends)) for v in out]
 
     def point_ok(self, v: dict, r, checker, n_world: np.ndarray) -> tuple[bool, str]:
         if self.kind != "mobile" or not self.c.base.tip_over or r.q is None:
