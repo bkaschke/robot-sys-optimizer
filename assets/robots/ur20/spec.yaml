@@ -6,6 +6,7 @@ base_link: base_link
 flange_link: tool0                   # z out of the flange (ROS-I convention)
 ik: ur_analytic
 reach_m: 1.75                        # UR20 datasheet
+frame_convention: ur                 # userframe export: x y z + rotation vector (UR pose)
 
 # Standard DH parameters (m). Source: ur_description config/ur20/default_kinematics.yaml
 # (UR's published DH table for the UR20).

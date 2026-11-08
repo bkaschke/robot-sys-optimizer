@@ -34,10 +34,14 @@ class ExportPanel:
         with self.folder:
             self.screenshot = gui.add_checkbox("Include 3D view snapshot in report", True)
             self.csv = gui.add_button("TCP poses (CSV)")
+            self.uframes = gui.add_button(
+                "Userframes (CSV)", hint="robot base -> part frame for every stop, in this robot's format"
+            )
             self.urdf = gui.add_button("Optimized tool URDF (zip)")
             self.report = gui.add_button("HTML report")
             self.info = gui.add_markdown("_Files are saved to the project folder's export/ directory._")
         self.csv.on_click(lambda e: self._run(e, self.export_csv))
+        self.uframes.on_click(lambda e: self._run(e, self.export_userframes))
         self.urdf.on_click(lambda e: self._run(e, self.export_urdf))
         self.report.on_click(lambda e: self._run(e, self.export_report))
 
@@ -110,6 +114,21 @@ class ExportPanel:
         data = ex.rows_to_csv(self.rows(sol)).encode("utf-8")
         self.out_dir.mkdir(parents=True, exist_ok=True)
         path = self.out_dir / "tcp_poses.csv"
+        path.write_bytes(data)
+        return path, data
+
+    def export_userframes(self, sol, client=None) -> tuple[Path, bytes]:
+        """Robot base -> part frame per stop, in the loaded robot's frame convention."""
+        from core.userframe import userframe_csv, userframe_rows
+
+        s = self.s
+        if s.robot is None or s.part is None:
+            raise ValueError("needs a robot and a part")
+        conv = s.robot.spec.frame_convention
+        rows = userframe_rows(sol, s.base, s.T_world_base, s.part.T_world_part, conv)
+        data = userframe_csv(rows, conv).encode("utf-8")
+        self.out_dir.mkdir(parents=True, exist_ok=True)
+        path = self.out_dir / "userframes.csv"
         path.write_bytes(data)
         return path, data
 

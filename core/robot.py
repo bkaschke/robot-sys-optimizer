@@ -45,6 +45,9 @@ class RobotSpec(BaseModel):
     flange_link: str
     ik: Literal["ur_analytic", "opw", "numeric"]
     reach_m: float | None = Field(default=None, gt=0)
+    # how the controller writes a frame (userframe export): "ur" = x y z + rotation vector,
+    # "fanuc" = X Y Z W P R, "matrix" = the 4 x 4 transform only (always added as well)
+    frame_convention: Literal["ur", "fanuc", "matrix"] = "matrix"
     dh: DHParams | None = None
     payload: PayloadSpec = Field(default_factory=PayloadSpec)
     folder: Path | None = None  # filled in by load_spec
