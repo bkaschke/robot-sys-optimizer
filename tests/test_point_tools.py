@@ -105,14 +105,14 @@ def app(tmp_path):
 def test_single_point_remove_and_undo(app):
     tab, s = app["targets"], app["session"]
     tools = tab.tools
-    tab.click_mode.value = "add single point"
+    tab.click_mode.value = "Single point"
     tab.on_part_click(click_top(0.1, 0.05))
     tab.on_part_click(click_top(-0.2, 0.0))
     assert len(s.targets.points) == 2
     assert np.allclose(s.targets.points[0].p, (0.1, 0.05, PLATE_TOP), atol=1e-9)
     tab.on_part_click(click_top(0.1, 0.05))  # same spot again: skipped as a duplicate
     assert len(s.targets.points) == 2
-    tab.click_mode.value = "remove point"
+    tab.click_mode.value = "Remove point"
     tab.on_part_click(click_top(0.11, 0.05))
     assert len(s.targets.points) == 1 and np.allclose(s.targets.points[0].p[0], -0.2)
     assert tools.undo_last() == 1  # undoes the second add
@@ -123,7 +123,7 @@ def test_brush_dabs_and_fill_selection(app):
     tab, s = app["targets"], app["session"]
     tools = tab.tools
     tools.row.value, tools.col.value, tools.radius.value = 20.0, 30.0, 70.0
-    tab.click_mode.value = "brush points"
+    tab.click_mode.value = "Point brush"
     tab.on_part_click(click_top(0.0, 0.0))
     n1 = len(s.targets.points)
     assert n1 > 5 and tools._ring is not None
@@ -141,7 +141,7 @@ def test_brush_dabs_and_fill_selection(app):
     assert len(s.targets.points) == n1
 
     # fill the whole top face with rows 50 mm / columns 100 mm
-    tab.click_mode.value = "select surface"
+    tab.click_mode.value = "Fill +"
     tab.on_part_click(click_top(0.0, 0.0))
     assert len(tab.selection) > 0
     s.targets = s.targets.model_copy(update={"points": []})
@@ -155,10 +155,10 @@ def test_brush_dabs_and_fill_selection(app):
 
 def test_refine_part_mesh_keeps_selection_and_points(app, tmp_path):
     tab, s, cell = app["targets"], app["session"], app["cell"]
-    tab.click_mode.value = "select surface"
+    tab.click_mode.value = "Fill +"
     tab.on_part_click(click_top(0.0, 0.0))
     area = tab.mesh().area_faces[tab.selection].sum()
-    tab.click_mode.value = "add single point"
+    tab.click_mode.value = "Single point"
     tab.on_part_click(click_top(0.2, 0.1))
     n_faces = len(tab.mesh().faces)
     tab.tools.max_edge.value = 25.0
@@ -172,6 +172,6 @@ def test_refine_part_mesh_keeps_selection_and_points(app, tmp_path):
     assert len(s.part_mesh().faces) == len(m.faces)  # collision / scene use the refined mesh
     assert np.allclose(s.part.T_world_part, T_PART)
     # finer mesh: a brush dab now follows the refined faces and still works
-    tab.click_mode.value = "brush points"
+    tab.click_mode.value = "Point brush"
     tab.on_part_click(click_top(-0.2, -0.1))
     assert len(s.targets.points) > 1

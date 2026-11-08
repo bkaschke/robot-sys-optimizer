@@ -61,8 +61,8 @@ main{margin-left:0;padding:16px}}
 <p>This guide is built into the tool: <strong>User guide</strong> (top of the panel) → <strong>📖 Open user guide</strong> opens it in a new tab (served at http://localhost:8081, the app's port + 1).</p>
 <p>Then try a full job on the test plate:</p>
 <ol>
-<li><strong>Targets tab</strong> → <em>Click on part</em> = <code>select surface</code> → click the top of the plate (it turns green).</li>
-<li>Set <em>Spacing / step (mm)</em> to <code>100</code> → <strong>Generate on selection</strong>. Points with normals appear.</li>
+<li><strong>Targets tab</strong> → <em>Tool</em> = <code>Fill +</code> → click the top of the plate (it turns green).</li>
+<li><em>Generate points</em>: set <em>Row spacing</em> and <em>Column spacing</em> to <code>100</code> → <strong>Generate on selection</strong>. Points with normals appear.</li>
 <li><strong>Optimize tab</strong> → <strong>Check all targets</strong>. The points turn green, amber or red (reachable, marginal, unreachable).</li>
 <li><strong>Optimize tab</strong> → <em>Base placement</em> → <strong>Show base heatmap</strong> (the first run builds a reachability map, about 1 min) → <strong>Move base to best</strong>.</li>
 <li><strong>Optimize tab</strong> → <em>Station planner</em> → <strong>Plan stations</strong>. The result appears in the <strong>Results</strong> tab.</li>
@@ -342,16 +342,12 @@ $PY scripts/make_portable.py          # -&gt; dist/robot-sys-optimizer-portable-
 </thead>
 <tbody>
 <tr>
-<td><strong>Select surface</strong></td>
-<td><em>Click on part</em> = <code>select surface</code>: click selects a smooth region; <strong>shift-click</strong> adds, <strong>ctrl-click</strong> removes. <strong>Select by normal</strong> picks every face within an angle of a direction. <strong>Box select (drag in view)</strong> selects the faces inside a rectangle you drag. The point modes (<code>add single point</code>, <code>remove point</code>, <code>brush points</code>) are described under <em>Brush &amp; single points</em>.</td>
+<td><strong>Select surface &amp; points</strong></td>
+<td>Pick a <strong>Tool</strong>; only its settings are shown. <strong>Fill +</strong> / <strong>Fill −</strong>: click a face to add / remove its smooth region (neighbouring faces may turn by at most the <em>Fill angle limit</em>). <strong>Brush +</strong> / <strong>Brush −</strong>: an orange-ringed <strong>handle</strong> appears on the part; drag it and every face within the <em>Brush radius</em> of its path is added / removed (it follows the surface even if you drag above it, and skips faces turned more than <em>Brush max surface angle</em> from the surface under it, so it stays off the back of thin parts). A click paints one dab and moves the handle there. <strong>Box +</strong> / <strong>Box −</strong>: drag a rectangle in the 3D view (the camera does not orbit while a Box tool is chosen). <strong>By normal</strong>: every face within an angle of a direction. <strong>Full surface</strong>: click a body of the part to add all of its faces. <strong>Single point</strong>: one target exactly where you click (normal from the surface). <strong>Remove point</strong>: deletes the target nearest the click, within the brush radius. <strong>Point brush</strong>: each click adds a dab of the <em>Part-anchored lattice</em> inside the brush radius. <strong>Ctrl-click</strong> turns + into − (and back) for the click tools. <strong>Select all</strong>, <strong>Clear</strong> and <strong>Invert</strong> act on the whole part; the selected face count and area are shown below.</td>
 </tr>
 <tr>
 <td><strong>Generate points</strong></td>
-<td>Methods run on the selection: <strong>Projected grid</strong> (spacing in mm, rays against the mean normal or a direction you give), <strong>Poisson (even)</strong> (even spacing on curved surfaces), <strong>Raster lines</strong> (step-over plus step along the line, alternating direction), <strong>Selection edges</strong> (along the borders, for deburring). Normals are <em>interpolated</em> by default (smooth), or <em>face</em>.</td>
-</tr>
-<tr>
-<td><strong>Brush &amp; single points</strong></td>
-<td>Set <em>Click on part</em> to: <strong>add single point</strong> (one target exactly where you click, normal from the surface); <strong>remove point</strong> (deletes the target nearest the click, within the brush radius); <strong>brush points</strong> (each click adds a &quot;dab&quot;: a grid of <em>Row spacing</em> × <em>Column spacing</em> inside the <em>Brush radius</em>; rows run along <em>Row direction</em>; the dab does not spill over edges sharper than <em>Brush max surface angle</em>). All dabs share one grid anchored at the part origin, and points that already exist are skipped, so overlapping dabs never double up. <strong>Fill selection with rows/columns</strong> applies the same grid to the whole selection. <strong>Undo last add</strong> removes the last click/dab/fill.</td>
+<td>Pick a <strong>Generator</strong> (only its settings are shown); it runs on the selection. <strong>Surface grid (rows/columns)</strong> (as in the sand-optimizer): the grid lies across the selection's mean facing direction, rows run along the part X axis turned by <em>Row direction (deg)</em>, points along a row are <em>Column spacing</em> apart and rows <em>Row spacing</em> apart, centred on the selection; points closer than <em>Edge inset</em> to the selection's edge are left out. A strongly curved selection gets a warning (select one side at a time). <strong>Part-anchored lattice</strong>: rows / columns anchored at the part origin (the Point brush grid), rows along <em>Row direction (part frame)</em>. <strong>Projected grid</strong>, <strong>Poisson (even)</strong>, <strong>Raster lines</strong> and <strong>Selection edges</strong> as before (spacing in mm). Normals are <em>interpolated</em> (smooth) or <em>face</em>. Points that already exist are skipped, and <strong>Undo last add</strong> removes the last generate, click or dab.</td>
 </tr>
 <tr>
 <td><strong>Refine part mesh</strong></td>
@@ -431,6 +427,7 @@ $PY scripts/make_portable.py          # -&gt; dist/robot-sys-optimizer-portable-
 <p><strong>Export</strong>:</p>
 <ul>
 <li><strong>TCP poses (CSV)</strong></li>
+<li><strong>Userframes (CSV)</strong>: one row per stop: its carrier values and the <strong>user frame</strong>, the pose of the part frame in the robot's base frame at that stop (teach the points in it and they stay valid). The columns follow the robot model: UR arms <code>x_mm, y_mm, z_mm</code> + rotation vector <code>rx_rad, ry_rad, rz_rad</code> (as in a UR pose <code>p[...]</code>, with x y z converted to m); FANUC-style arms <code>X Y Z</code> (mm) + <code>W P R</code> (deg); every robot also gets the rotation matrix <code>r11 … r33</code>. The format comes from <code>frame_convention</code> in the robot's <code>spec.yaml</code> (<code>ur</code>, <code>fanuc</code> or <code>matrix</code>).</li>
 <li><strong>Optimized tool URDF (zip)</strong></li>
 <li><strong>HTML report</strong>: self-contained, printable to PDF, with an optional 3D snapshot.</li>
 </ul>
@@ -442,7 +439,7 @@ $PY scripts/make_portable.py          # -&gt; dist/robot-sys-optimizer-portable-
 <h3 id="example-a-sand-a-flat-plate-from-one-base-static">Example A: sand a flat plate from one base (static)</h3>
 <ol>
 <li>Cell → <em>Part</em> <code>flat_plate</code>, xyz <code>900, 0, 300</code> mm.</li>
-<li>Targets → click the plate top → <em>Spacing</em> <code>100</code> → <strong>Generate on selection</strong>.</li>
+<li>Targets → <em>Tool</em> <code>Fill +</code> → click the plate top → <em>Row</em> / <em>Column spacing</em> <code>100</code> → <strong>Generate on selection</strong>.</li>
 <li>Optimize → <strong>Check all targets</strong>. Everything should be reachable from the origin.</li>
 <li>Optimize → <strong>Plan stations</strong> → Results: &quot;1 floor station: N/N reached&quot;.</li>
 <li>Optimize → <strong>Optimize tool</strong>. On this plate the shortest straight tool is the bottom of the range (50 mm), and the bend stage may lower the cost further.</li>
@@ -478,7 +475,7 @@ $PY scripts/make_portable.py          # -&gt; dist/robot-sys-optimizer-portable-
 <ol>
 <li>Cell → <em>Part</em> <code>deep_hole</code>, xyz <code>800, 0, 0</code> (100 mm hole, 300 mm deep).</li>
 <li>Tool Setup → upload or define a slim straight tool. The test suite uses a probe with capsule radius 20 mm and no head; see <code>tests/test_tool_geometry.py::_probe</code>.</li>
-<li>Targets → <em>Click on part</em> <code>add single point</code> → click the hole bottom; group standoff <code>50</code> mm, tilt <code>0</code>.</li>
+<li>Targets → <em>Tool</em> <code>Single point</code> → click the hole bottom; group standoff <code>50</code> mm, tilt <code>0</code>.</li>
 <li>Optimize → <strong>Optimize tool</strong>: L ≈ <strong>260 mm</strong> = depth − standoff + clearance (the wrist cannot enter the hole).</li>
 </ol>
 <h3 id="example-d-your-own-robot-cell">Example D: your own robot cell</h3>

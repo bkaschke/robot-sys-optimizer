@@ -51,7 +51,7 @@ def test_part_pose_applied(app):
 
 def test_click_selects_outer_surface_and_grid_normals(app):
     tab, s = app["targets"], app["session"]
-    tab.click_mode.value = "select surface"
+    tab.click_mode.value = "Fill +"
     tab.on_part_click(_click_world((0.05, 0.03, gp.PANEL_TOP_Z), (0, 0, -1)))
     m = tab.mesh()
     assert len(tab.selection) == 2 * 60 * 80  # the whole outer surface, nothing else
@@ -98,12 +98,12 @@ def test_flip_and_delete_on_selection(app):
 
 def test_place_point_mode(app):
     tab, s = app["targets"], app["session"]
-    tab.click_mode.value = "add single point"
+    tab.click_mode.value = "Single point"
     tab.on_part_click(_click_world((0.1, 0.0, gp.PANEL_TOP_Z), (0, 0, -1)))
     p = s.targets.points[-1]
     assert np.allclose(p.p, (0.1, 0.0, gp.PANEL_TOP_Z), atol=1e-6)
     assert np.allclose(p.n, (0, 0, 1), atol=1e-3)
-    tab.click_mode.value = "select surface"
+    tab.click_mode.value = "Fill +"
 
 
 def test_preview_pose_points_tool_into_surface(app):

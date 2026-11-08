@@ -16,6 +16,8 @@ from viser import GuiCheckboxHandle, GuiDropdownHandle, GuiNumberHandle, GuiSlid
 SAVED: dict[str, tuple[str, ...]] = {
     "targets": (
         "click_mode",
+        "inset",
+        "row_angle",
         "angle",
         "normal_dir",
         "normal_angle",

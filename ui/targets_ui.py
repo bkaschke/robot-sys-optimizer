@@ -12,21 +12,45 @@ import trimesh
 import viser
 from pydantic import ValidationError
 
+from core import target_tools as tt
 from core import targets as tg
 from core.schema import TargetGroup, Tolerances
-from core.transforms import make_T, matrix_to_wxyz, wxyz_to_matrix
+from core.surface_grid import surface_grid
+from core.transforms import make_T, wxyz_to_matrix
 from ui.session import Session
+from ui.surface_select_ui import SurfaceTools
+from ui.target_preview import draw_preview, target_tcp_pose  # noqa: F401 (re-export)
 from ui.target_tools_ui import PointTools
 from ui.widgets import MAX_UPLOAD, notify
 
 PART = "/cell/part"
-PREVIEW = "/cell/preview"
 SEL_COLOR = (60, 200, 120)
 PALETTE = [(230, 60, 60), (40, 120, 230), (240, 170, 20), (150, 70, 200), (20, 170, 170), (120, 120, 120)]
 STATUS_COLORS = {"reachable": (40, 180, 70), "marginal": (240, 170, 20), "unreachable": (220, 40, 40)}
 UNCHECKED = (150, 150, 150)
-METHODS = ("Projected grid", "Poisson (even)", "Raster lines", "Selection edges")
-CLICK_MODES = ("off", "select surface", "add single point", "remove point", "brush points")
+GRID = "Surface grid (rows/columns)"
+LATTICE = "Part-anchored lattice"
+METHODS = (GRID, LATTICE, "Projected grid", "Poisson (even)", "Raster lines", "Selection edges")
+GEN_FIELDS = (
+    "row",
+    "col",
+    "inset",
+    "row_angle",
+    "row_dir",
+    "spacing",
+    "stepover",
+    "direction",
+    "normals_mode",
+)
+# settings shown per generator (the rest are hidden)
+METHOD_FIELDS = {
+    GRID: ("row", "col", "inset", "row_angle", "normals_mode"),
+    LATTICE: ("row", "col", "row_dir", "direction", "normals_mode"),
+    "Projected grid": ("spacing", "direction", "normals_mode"),
+    "Poisson (even)": ("spacing", "normals_mode"),
+    "Raster lines": ("spacing", "stepover", "direction", "normals_mode"),
+    "Selection edges": ("spacing",),
+}
 
 
 class TargetsTab:
@@ -41,21 +65,26 @@ class TargetsTab:
         self.selected_results = None  # set by the app: point results of the selected solution
         gui = server.gui
 
-        with gui.add_folder("Select surface"):
-            self.click_mode = gui.add_dropdown("Click on part", CLICK_MODES, initial_value="select surface")
-            self.angle = gui.add_slider("Region angle (deg)", 1.0, 45.0, 1.0, 15.0)
-            gui.add_markdown(
-                "_Select surface: click = new selection, shift-click = add, ctrl-click = remove. "
-                "Point modes: see **Brush & single points**._"
-            )
-            self.normal_dir = gui.add_vector3("Normal direction", (0.0, 0.0, 1.0), step=0.1)
-            self.normal_angle = gui.add_number("within (deg)", 30.0, min=0.0, max=180.0)
-            self.by_normal = gui.add_button("Select by normal")
-            self.box = gui.add_button("Box select (drag in view)")
-            self.clear = gui.add_button("Clear selection")
-            self.sel_info = gui.add_markdown("")
+        with gui.add_folder("Select surface & points"):
+            self.surf = SurfaceTools(server, self)
+        s_ = self.surf  # the tab's names for the selection widgets (tests, saved settings)
+        self.click_mode, self.angle, self.sel_info = s_.tool, s_.angle, s_.sel_info
+        self.normal_dir, self.normal_angle, self.by_normal = s_.normal_dir, s_.normal_angle, s_.by_normal
         with gui.add_folder("Generate points"):
-            self.method = gui.add_dropdown("Method", METHODS)
+            self.method = gui.add_dropdown("Generator", METHODS)
+            self.row = gui.add_number("Row spacing (mm)", 25.0, min=0.5, step=1.0)
+            self.col = gui.add_number("Column spacing (mm)", 25.0, min=0.5, step=1.0)
+            self.inset = gui.add_number(
+                "Edge inset (mm)",
+                0.0,
+                min=0.0,
+                step=1.0,
+                hint="points closer to the selection edge are left out",
+            )
+            self.row_angle = gui.add_number(
+                "Row direction (deg)", 0.0, min=-180.0, max=180.0, step=5.0, hint="from the part X axis"
+            )
+            self.row_dir = gui.add_vector3("Row direction (part frame)", (1.0, 0.0, 0.0), step=0.1)
             self.spacing = gui.add_number("Spacing / step (mm)", 10.0, min=0.5, step=1.0)
             self.stepover = gui.add_number("Raster step-over (mm)", 25.0, min=0.5, step=1.0)
             self.direction = gui.add_vector3(
@@ -67,7 +96,9 @@ class TargetsTab:
             self.normals_mode = gui.add_dropdown("Normals", ("interpolated", "face"))
             self.gen_group = gui.add_dropdown("Into group", ("default",))
             self.generate = gui.add_button("Generate on selection")
-        self.tools = PointTools(server, self)
+            self.gen_info = gui.add_markdown("")
+            self.tools = PointTools(server, self)  # undo + last-add info
+        self.tools.build_refine()
         with gui.add_folder("Groups & tolerances"):
             self.group = gui.add_dropdown("Group", ("default",))
             self.new_group = gui.add_text("New group", "")
@@ -118,28 +149,24 @@ class TargetsTab:
         d = T[:3, :3] @ np.asarray(event.ray_direction)
         return o, d
 
-    def _set_selection(self, faces: np.ndarray, modifier) -> None:
+    def select(self, faces: np.ndarray, how: str = "add") -> None:
+        """Change the face selection: ``how`` = add, remove or set."""
         faces = np.asarray(faces, dtype=int)
-        mod = (modifier or "").lower()
-        if "shift" in mod:
+        if how == "add":
             faces = np.union1d(self.selection, faces)
-        elif "ctrl" in mod or "control" in mod or "meta" in mod:
+        elif how == "remove":
             faces = np.setdiff1d(self.selection, faces)
         self.selection = np.unique(faces)
         self._draw_selection()
 
     def on_part_click(self, event) -> None:
-        mode, m = self.click_mode.value, self.mesh()
-        if mode == "off" or m is None:
+        m = self.mesh()
+        if self.click_mode.value == "Off" or m is None:
             return
         o, d = self._to_part(event)
         face = tg.pick_face(m, o, d)
-        if face is None:
-            return
-        if mode == "select surface":
-            self._set_selection(tg.grow_region(m, face, self.angle.value), getattr(event, "modifier", None))
-            return
-        self.tools.on_click(mode, m, o, d, event)
+        if face is not None:
+            self.surf.on_click(m, face, o, d, event)
 
     def on_rect(self, event) -> None:
         m = self.mesh()
@@ -151,8 +178,7 @@ class TargetsTab:
         faces = tg.select_in_screen_rect(
             m, T_cam_part, cam.fov, cam.aspect, event.screen_min, event.screen_max
         )
-        self._set_selection(faces, event.modifier)
-        self.server.scene.remove_rect_select_callback(self.on_rect)
+        self.select(faces, self.surf._sign(event.modifier))
 
     # --- target-set edits ---------------------------------------------------------------------
 
@@ -184,25 +210,9 @@ class TargetsTab:
     # --- callbacks ------------------------------------------------------------------------------
 
     def _wire(self) -> None:
-        @self.by_normal.on_click
-        def _(e) -> None:
-            m = self.mesh()
-            if m is not None and np.linalg.norm(self.normal_dir.value) > 0:
-                self._set_selection(
-                    tg.select_by_normal(m, self.normal_dir.value, self.normal_angle.value), None
-                )
-
-        @self.box.on_click
-        def _(e) -> None:
-            self.server.scene.on_rect_select(self.on_rect)
-            notify(e, "Box select", "Drag a rectangle in the 3D view (shift = add)", ok=True)
-
-        @self.clear.on_click
-        def _(e) -> None:
-            self.selection = np.zeros(0, dtype=int)
-            self._draw_selection()
-
         self.generate.on_click(lambda e: self.run_generate(e))
+        self.method.on_update(lambda e: self.show_method_fields())
+        self.show_method_fields()
 
         @self.add_group.on_click
         def _(e) -> None:
@@ -292,16 +302,46 @@ class TargetsTab:
         for w in (self.preview_on, self.preview_idx):
             w.on_update(lambda e: self._draw_preview())
 
-    def run_generate(self, e=None) -> None:
+    def show_method_fields(self) -> None:
+        shown = METHOD_FIELDS.get(self.method.value, ())
+        for name in GEN_FIELDS:
+            getattr(self, name).visible = name in shown
+
+    def run_generate(self, e=None) -> int:
+        """Generate points on the selection with the chosen generator; returns how many."""
         m = self.mesh()
         if m is None or len(self.selection) == 0:
-            return notify(e, "No selection", "Select a surface on the part first")
+            notify(e, "No selection", "Select a surface on the part first")
+            return 0
         step = self.spacing.value / 1000
         d = np.asarray(self.direction.value, float)
         d = d if np.linalg.norm(d) > 0 else None
         method = self.method.value
+        row, col = self.row.value / 1000, self.col.value / 1000
+        tol = 0.4 * (min(row, col) if method in (GRID, LATTICE) else step)
+        if method == "Raster lines":
+            tol = 0.4 * min(step, self.stepover.value / 1000)
+        note = ""
         try:
-            if method == "Projected grid":
+            if method == GRID:
+                P, N, info = surface_grid(
+                    m,
+                    self.selection,
+                    row,
+                    col,
+                    self.inset.value / 1000,
+                    self.row_angle.value,
+                    self.normals_mode.value,
+                )
+                note = f"{info.rows} rows on {info.area_m2 * 1e4:.0f} cm²"
+                if info.dropped_at_edge:
+                    note += f"; {info.dropped_at_edge} within the edge inset left out"
+                note += "".join(f"  \n⚠ {w}" for w in info.warnings)
+            elif method == LATTICE:
+                P, N = tt.lattice_grid(
+                    m, self.selection, row, col, d, self.tools._row_dir(), normals=self.normals_mode.value
+                )
+            elif method == "Projected grid":
                 P, N = tg.projected_grid(
                     m, self.selection, step, direction=d, normals=self.normals_mode.value
                 )
@@ -314,9 +354,14 @@ class TargetsTab:
             else:
                 P, N = tg.edge_paths(m, self.selection, step)
         except (ValueError, IndexError) as err:
-            return notify(e, "Generation failed", str(err))
-        self._add(P, N, e)
-        notify(e, "Generated", f"{len(P)} points into '{self.gen_group.value}'", ok=True)
+            self.gen_info.content = f"_{err}_"
+            notify(e, "Generation failed", str(err))
+            return 0
+        n = self.tools.add(P, N, e, "points", tol=tol)
+        self.gen_info.content = f"Generated **{n}** points" + (f" ({note})" if note else "") + "."
+        if n:
+            notify(e, "Generated", f"{n} points into '{self.gen_group.value}'", ok=True)
+        return n
 
     # --- drawing --------------------------------------------------------------------------------
 
@@ -411,63 +456,4 @@ class TargetsTab:
             )
 
     def _draw_preview(self) -> None:
-        for k in [k for k in self._handles if k.startswith("pv")]:
-            self._drop(k)
-        ids, P, N, G = tg.as_arrays(self.s.targets)
-        tm = self.s.tool_model
-        if not self.preview_on.value or tm is None or len(P) == 0 or self.s.part is None:
-            return
-        i = int(np.clip(self.preview_idx.value, 0, len(P) - 1))
-        T_world_tcp = self.s.part.T_world_part @ target_tcp_pose(P[i], N[i], self._standoff(G[i]))
-        tcp = tm.ee.tcps[0].name
-        group = next((g for g in self.s.targets.groups if g.name == G[i]), None)
-        if group and group.tcps:
-            tcp = group.tcps[0]
-        T_world_flange = T_world_tcp @ np.linalg.inv(tm.T_flange_tcp(tcp))
-        root = self.server.scene.add_frame(
-            PREVIEW,
-            show_axes=False,
-            wxyz=matrix_to_wxyz(T_world_flange[:3, :3]),
-            position=T_world_flange[:3, 3],
-        )
-        self._handles["pv_root"] = root
-        ext = tm.extension_mesh()
-        if ext is not None:
-            self._handles["pv_ext"] = self.server.scene.add_mesh_simple(
-                f"{PREVIEW}/ext", ext.vertices, ext.faces, color=(90, 140, 220), opacity=0.5
-            )
-        T_fh = tm.T_flange_head()
-        for hl in tm.links:
-            T = T_fh @ hl.T_head_link
-            self._handles[f"pv_{hl.name}"] = self.server.scene.add_mesh_simple(
-                f"{PREVIEW}/{hl.name}",
-                hl.mesh.vertices,
-                hl.mesh.faces,
-                color=(200, 200, 210),
-                opacity=0.5,
-                wxyz=matrix_to_wxyz(T[:3, :3]),
-                position=T[:3, 3],
-            )
-        self._handles["pv_tcp"] = self.server.scene.add_frame(
-            f"{PREVIEW}/tcp",
-            axes_length=0.05,
-            axes_radius=0.002,
-            wxyz=matrix_to_wxyz(tm.T_flange_tcp(tcp)[:3, :3]),
-            position=tm.T_flange_tcp(tcp)[:3, 3],
-        )
-
-    def _standoff(self, group: str) -> float:
-        g = next((x for x in self.s.targets.groups if x.name == group), None)
-        if g is None:
-            return 0.0
-        return float(np.mean(g.standoff_m)) if isinstance(g.standoff_m, tuple) else float(g.standoff_m)
-
-
-def target_tcp_pose(p: np.ndarray, n: np.ndarray, standoff: float = 0.0) -> np.ndarray:
-    """TCP pose (part frame) that reaches target (p, n): origin at p + standoff*n and
-    z = -n (tool points into the surface). Spin about the normal is chosen arbitrarily."""
-    z = -np.asarray(n, float) / np.linalg.norm(n)
-    a = np.array([1.0, 0, 0]) if abs(z[0]) < 0.9 else np.array([0, 1.0, 0])
-    x = a - (a @ z) * z
-    x /= np.linalg.norm(x)
-    return make_T(np.column_stack([x, np.cross(z, x), z]), np.asarray(p) + standoff * np.asarray(n))
+        draw_preview(self)

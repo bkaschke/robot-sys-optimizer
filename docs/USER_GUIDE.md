@@ -43,8 +43,8 @@ This guide is built into the tool: **User guide** (top of the panel) → **📖 
 
 Then try a full job on the test plate:
 
-1. **Targets tab** → *Click on part* = `select surface` → click the top of the plate (it turns green).
-2. Set *Spacing / step (mm)* to `100` → **Generate on selection**. Points with normals appear.
+1. **Targets tab** → *Tool* = `Fill +` → click the top of the plate (it turns green).
+2. *Generate points*: set *Row spacing* and *Column spacing* to `100` → **Generate on selection**. Points with normals appear.
 3. **Optimize tab** → **Check all targets**. The points turn green, amber or red (reachable, marginal, unreachable).
 4. **Optimize tab** → *Base placement* → **Show base heatmap** (the first run builds a reachability map, about 1 min) → **Move base to best**.
 5. **Optimize tab** → *Station planner* → **Plan stations**. The result appears in the **Results** tab.
@@ -261,9 +261,8 @@ Sample tools: **orbital_sander** (bent extension range, pad as the contact link)
 
 | Section | What it does |
 | --- | --- |
-| **Select surface** | *Click on part* = `select surface`: click selects a smooth region; **shift-click** adds, **ctrl-click** removes. **Select by normal** picks every face within an angle of a direction. **Box select (drag in view)** selects the faces inside a rectangle you drag. The point modes (`add single point`, `remove point`, `brush points`) are described under *Brush & single points*. |
-| **Generate points** | Methods run on the selection: **Projected grid** (spacing in mm, rays against the mean normal or a direction you give), **Poisson (even)** (even spacing on curved surfaces), **Raster lines** (step-over plus step along the line, alternating direction), **Selection edges** (along the borders, for deburring). Normals are *interpolated* by default (smooth), or *face*. |
-| **Brush & single points** | Set *Click on part* to: **add single point** (one target exactly where you click, normal from the surface); **remove point** (deletes the target nearest the click, within the brush radius); **brush points** (each click adds a "dab": a grid of *Row spacing* × *Column spacing* inside the *Brush radius*; rows run along *Row direction*; the dab does not spill over edges sharper than *Brush max surface angle*). All dabs share one grid anchored at the part origin, and points that already exist are skipped, so overlapping dabs never double up. **Fill selection with rows/columns** applies the same grid to the whole selection. **Undo last add** removes the last click/dab/fill. |
+| **Select surface & points** | Pick a **Tool**; only its settings are shown. **Fill +** / **Fill −**: click a face to add / remove its smooth region (neighbouring faces may turn by at most the *Fill angle limit*). **Brush +** / **Brush −**: an orange-ringed **handle** appears on the part; drag it and every face within the *Brush radius* of its path is added / removed (it follows the surface even if you drag above it, and skips faces turned more than *Brush max surface angle* from the surface under it, so it stays off the back of thin parts). A click paints one dab and moves the handle there. **Box +** / **Box −**: drag a rectangle in the 3D view (the camera does not orbit while a Box tool is chosen). **By normal**: every face within an angle of a direction. **Full surface**: click a body of the part to add all of its faces. **Single point**: one target exactly where you click (normal from the surface). **Remove point**: deletes the target nearest the click, within the brush radius. **Point brush**: each click adds a dab of the *Part-anchored lattice* inside the brush radius. **Ctrl-click** turns + into − (and back) for the click tools. **Select all**, **Clear** and **Invert** act on the whole part; the selected face count and area are shown below. |
+| **Generate points** | Pick a **Generator** (only its settings are shown); it runs on the selection. **Surface grid (rows/columns)** (as in the sand-optimizer): the grid lies across the selection's mean facing direction, rows run along the part X axis turned by *Row direction (deg)*, points along a row are *Column spacing* apart and rows *Row spacing* apart, centred on the selection; points closer than *Edge inset* to the selection's edge are left out. A strongly curved selection gets a warning (select one side at a time). **Part-anchored lattice**: rows / columns anchored at the part origin (the Point brush grid), rows along *Row direction (part frame)*. **Projected grid**, **Poisson (even)**, **Raster lines** and **Selection edges** as before (spacing in mm). Normals are *interpolated* (smooth) or *face*. Points that already exist are skipped, and **Undo last add** removes the last generate, click or dab. |
 | **Refine part mesh** | **Tessellate part mesh** splits the part's triangles until no edge is longer than *Max edge length*. The shape does not change, but clicks, region growing, brushes and interpolated normals work on a finer mesh (useful for coarse CAD exports with long thin triangles). The refined mesh is saved as `<project>/assets/parts/<name>_refined_<N>mm.stl` and becomes the part; the selection and existing points are kept. |
 | **Groups & tolerances** | Each point belongs to a group, and each group has spin, tilt, standoff and an allowed TCP list. **Apply to group** saves them. |
 | **Edit points** | Assign to group, flip normals, or delete the points on the selected surface; delete all. **Import CSV** reads `x,y,z,nx,ny,nz[,group]` in mm or m. |
@@ -303,6 +302,7 @@ It also re-runs the tip-over and localization checks for the chosen solutions. I
   The paths are drawn as coloured lines (one colour per zone). **▶ Play** / **⏸ Pause** moves the carrier (or base) to each stop and the arm along the samples at *Speed (mm/s)*; *Sample* scrubs. **Export path CSV** writes `export/paths.csv` (stop, zone, from / to point, TCP pose in the world in mm + quaternion, joints in degrees, issue per sample). It is a preview of the TCP paths, not a timed robot program: the moves between stops and the reconfiguration moves are not planned.
 - **Export**:
   - **TCP poses (CSV)**
+  - **Userframes (CSV)**: one row per stop: its carrier values and the **user frame**, the pose of the part frame in the robot's base frame at that stop (teach the points in it and they stay valid). The columns follow the robot model: UR arms `x_mm, y_mm, z_mm` + rotation vector `rx_rad, ry_rad, rz_rad` (as in a UR pose `p[...]`, with x y z converted to m); FANUC-style arms `X Y Z` (mm) + `W P R` (deg); every robot also gets the rotation matrix `r11 … r33`. The format comes from `frame_convention` in the robot's `spec.yaml` (`ur`, `fanuc` or `matrix`).
   - **Optimized tool URDF (zip)**
   - **HTML report**: self-contained, printable to PDF, with an optional 3D snapshot.
 
@@ -315,7 +315,7 @@ It also re-runs the tip-over and localization checks for the chosen solutions. I
 ### Example A: sand a flat plate from one base (static)
 
 1. Cell → *Part* `flat_plate`, xyz `900, 0, 300` mm.
-2. Targets → click the plate top → *Spacing* `100` → **Generate on selection**.
+2. Targets → *Tool* `Fill +` → click the plate top → *Row* / *Column spacing* `100` → **Generate on selection**.
 3. Optimize → **Check all targets**. Everything should be reachable from the origin.
 4. Optimize → **Plan stations** → Results: "1 floor station: N/N reached".
 5. Optimize → **Optimize tool**. On this plate the shortest straight tool is the bottom of the range (50 mm), and the bend stage may lower the cost further.
@@ -354,7 +354,7 @@ Shortcut: **Project** → *Examples* `mobile_amr` → **Open example** (four whe
 
 1. Cell → *Part* `deep_hole`, xyz `800, 0, 0` (100 mm hole, 300 mm deep).
 2. Tool Setup → upload or define a slim straight tool. The test suite uses a probe with capsule radius 20 mm and no head; see `tests/test_tool_geometry.py::_probe`.
-3. Targets → *Click on part* `add single point` → click the hole bottom; group standoff `50` mm, tilt `0`.
+3. Targets → *Tool* `Single point` → click the hole bottom; group standoff `50` mm, tilt `0`.
 4. Optimize → **Optimize tool**: L ≈ **260 mm** = depth − standoff + clearance (the wrist cannot enter the hole).
 
 ### Example D: your own robot cell

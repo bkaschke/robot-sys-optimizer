@@ -39,19 +39,15 @@ class PointTools:
         self.on_mesh_replaced = None  # set by the app: reload the part in the scene
         self._ring = None
         gui = server.gui
-        with gui.add_folder("Brush & single points"):
-            gui.add_markdown(
-                "_Set **Click on part** to `add single point`, `remove point` or `brush points`. "
-                "Each brush click adds a dab of rows/columns; existing points are skipped._"
-            )
-            self.row = gui.add_number("Row spacing (mm)", 25.0, min=0.5, step=1.0)
-            self.col = gui.add_number("Column spacing (mm)", 25.0, min=0.5, step=1.0)
-            self.row_dir = gui.add_vector3("Row direction (part frame)", (1.0, 0.0, 0.0), step=0.1)
-            self.radius = gui.add_number("Brush radius (mm)", 60.0, min=1.0, step=5.0)
-            self.max_angle = gui.add_number("Brush max surface angle (deg)", 45.0, min=1.0, max=90.0)
-            self.fill = gui.add_button("Fill selection with rows/columns")
-            self.undo = gui.add_button("Undo last add")
-            self.info = gui.add_markdown("")
+        # the spacing lives in Generate points, the radius with the click tools
+        self.row, self.col, self.row_dir = tab.row, tab.col, tab.row_dir
+        self.radius, self.max_angle = tab.surf.radius, tab.surf.max_angle
+        self.undo = gui.add_button("Undo last add")
+        self.info = gui.add_markdown("")
+        self.undo.on_click(lambda e: self.undo_last(e))
+
+    def build_refine(self) -> None:
+        gui = self.server.gui
         with gui.add_folder("Refine part mesh", expand_by_default=False):
             self.max_edge = gui.add_number("Max edge length (mm)", 20.0, min=0.5, step=1.0)
             self.refine = gui.add_button("Tessellate part mesh")
@@ -60,8 +56,6 @@ class PointTools:
                 "_Splits triangles (the surface shape is unchanged) so clicks, regions and normals "
                 "work on a finer mesh. Saved as a new STL in the project; the selection is kept._"
             )
-        self.fill.on_click(lambda e: self.fill_selection(e))
-        self.undo.on_click(lambda e: self.undo_last(e))
         self.refine.on_click(lambda e: self.refine_part(e))
 
     # --- helpers ------------------------------------------------------------------------------
@@ -77,10 +71,13 @@ class PointTools:
     def _tol(self) -> float:
         return 0.4 * min(self.row.value, self.col.value) / 1000
 
-    def add(self, P: np.ndarray, N: np.ndarray, event=None, what: str = "points") -> int:
+    def add(
+        self, P: np.ndarray, N: np.ndarray, event=None, what: str = "points", tol: float | None = None
+    ) -> int:
         """Append points (deduplicated against existing ones) as one undo step."""
         _, P_old, _, _ = tg.as_arrays(self.s.targets)
-        P, N = tt.dedupe(np.asarray(P).reshape(-1, 3), np.asarray(N).reshape(-1, 3), P_old, self._tol())
+        tol = self._tol() if tol is None else tol
+        P, N = tt.dedupe(np.asarray(P).reshape(-1, 3), np.asarray(N).reshape(-1, 3), P_old, tol)
         if len(P) == 0:
             self.info.content = f"_No new {what} (all already present)._"
             return 0
@@ -109,10 +106,10 @@ class PointTools:
         if not len(locs):
             return
         p, face = locs[0], int(tris[0])
-        if mode == "add single point":
+        if mode == "Single point":
             n = tg.surface_normals(mesh, locs[:1], tris[:1], None, self.tab.normals_mode.value)
             self.add(locs[:1], n, event, "point")
-        elif mode == "remove point":
+        elif mode == "Remove point":
             ids, P, _, _ = tg.as_arrays(self.s.targets)
             k = tt.nearest_point(P, p, self.radius.value / 1000)
             if k is None:
@@ -122,7 +119,7 @@ class PointTools:
             self.s.targets = self.s.targets.model_copy(update={"points": pts})
             self.tab.refresh()
             self.info.content = f"Removed point {int(ids[k])}."
-        elif mode == "brush points":
+        elif mode == "Point brush":
             self.dab(mesh, face, p, event)
 
     def dab(self, mesh, face: int, p: np.ndarray, event=None) -> int:
