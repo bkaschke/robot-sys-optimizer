@@ -452,7 +452,19 @@ class Weights(_Model):
     limits: float = Field(default=0.2, ge=0)
     torque: float = Field(default=0.5, ge=0)
     standoff: float = Field(default=1.0, ge=0)  # soft: carrier closer than the preferred standoff
-    config: float = Field(default=1.0, ge=0)  # per joint-configuration change (zoning)
+    group: float = Field(default=1.0, ge=0)  # per extra joint-configuration group at a stop (zoning)
+    wrist_flip: float = Field(default=1.0, ge=0)  # per joint 4 / 6 jump > 180 deg inside a group
+
+    @model_validator(mode="before")
+    @classmethod
+    def _legacy_config(cls, data):
+        """Projects before v5 had one ``config`` weight for both counts."""
+        if isinstance(data, dict) and "config" in data:
+            data = dict(data)
+            c = data.pop("config")
+            data.setdefault("group", c)
+            data.setdefault("wrist_flip", c)
+        return data
 
 
 class Margins(_Model):
@@ -466,7 +478,7 @@ FreeVar = Literal["L", "theta", "d", "roll", "base", "stations"]
 
 class Optimizer(_Model):
     free: list[FreeVar] = Field(default_factory=lambda: ["L", "base"])
-    max_stations: int = Field(default=4, ge=1)  # movable bases; static mode always plans one base
+    max_stations: int = Field(default=4, ge=1, le=40)  # movable bases; static mode plans one base
     weights: Weights = Field(default_factory=Weights)
     margins: Margins = Field(default_factory=Margins)
 
@@ -493,6 +505,8 @@ class Solution(_Model):
     breakdown: dict[str, float] = Field(default_factory=dict)
     tool_values: ExtensionValues | None = None
     zones: list[Zone] = Field(default_factory=list)  # joint-configuration zones (zoning on)
+    split_stops: list[int] = Field(default_factory=list)  # stops whose area is in pieces (opt.areas)
+    violations: list[str] = Field(default_factory=list)  # broken "must be met" rules: not ranked
 
     @model_validator(mode="after")
     def _station_refs(self) -> Solution:

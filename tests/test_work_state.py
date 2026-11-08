@@ -36,6 +36,7 @@ def worked(tmp_path_factory):
     s.project_dir = folder
     s.targets = s.targets.model_copy(update={"points": []})
     t.on_part_click(FakeClick((1.0, 0.0, 2.0), (0.0, 0.0, -1.0)))  # select the plate top
+    t.method.value = "Projected grid"
     t.spacing.value = 150.0
     t.run_generate()
     st["optimize"].start(block=True)

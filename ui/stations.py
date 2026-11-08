@@ -54,26 +54,38 @@ class StationsPanel:
         gui = server.gui
         with gui.add_folder("Station planner"):
             opt = self._optimizer()
-            self.max_stations = gui.add_number("Max stations", opt.max_stations, min=1, max=12, step=1)
+            self.max_stations = gui.add_number(
+                "Max stations",
+                opt.max_stations,
+                min=1,
+                max=40,
+                step=1,
+                hint="the planner stops early once more stops no longer give a better plan",
+            )
             gui.add_markdown(
                 "_Static base mode places one base (k = 1); set Mode = movable with a carrier in the "
                 "External Axis tab for several stations._"
             )
             self.step = gui.add_number("Candidate grid (mm)", 100.0, min=25.0, max=500.0, step=25.0)
             self.refine = gui.add_checkbox("Refine with exact check (CMA-ES)", True)
+            self.areas = gui.add_checkbox(
+                "Connected station areas", True, hint="each stop's points one area on the part (no overlap)"
+            )
             self.zoning = gui.add_dropdown("Joint configuration", ZONING)
-            self.config_cost = gui.add_number("Cost per config change", 1.0, min=0.0, step=0.5)
             self.zoning_note = gui.add_markdown(
                 "_**zones**: each stop's points are grouped by joint configuration (shoulder/elbow/"
-                "wrist) into ordered paths; changes (zone boundaries and wrist jumps > 180°) cost "
-                "the value above (a stop costs 5). About 3× slower._"
+                "wrist) into ordered paths; extra groups and wrist jumps > 180° cost what *Costs & "
+                "requirements* says. About 3× slower._"
             )
 
             def zoning_fields(_e=None) -> None:  # zoning settings only when zoning is on
-                self.config_cost.visible = self.zoning_note.visible = self.zoning.value == ZONING[1]
+                self.zoning_note.visible = self.zoning.value == ZONING[1]
 
             self.zoning.on_update(zoning_fields)
             zoning_fields()
+            from ui.costs_ui import CostPanel
+
+            self.costs = CostPanel(server, session)
             self.run = gui.add_button("Plan stations", color="green")
             self.stop = gui.add_button("Cancel", visible=False)
             self.progress = gui.add_progress_bar(0.0, visible=False)
@@ -83,7 +95,12 @@ class StationsPanel:
 
     def options(self) -> dict:
         """Planner options shared with the tool-geometry panel."""
-        return {"zoning": self.zoning.value == ZONING[1], "config_cost": float(self.config_cost.value)}
+        req = self.costs.requirements()
+        return {
+            "zoning": self.zoning.value == ZONING[1] or req["require_one_config"],
+            "areas": bool(self.areas.value),
+            **req,
+        }
 
     def _optimizer(self) -> Optimizer:
         return self.s.extra.get("optimizer") or Optimizer()
@@ -105,6 +122,9 @@ class StationsPanel:
             candidate_step=self.step.value / 1000,
             refine=self.refine.value,
             zoning=self.options()["zoning"],
+            areas=self.options()["areas"],
+            require_all=self.options()["require_all"],
+            require_one_config=self.options()["require_one_config"],
         )
         robot = Robot(s.robot.spec)
         tcp = s.tool.tcps[0].name
@@ -113,7 +133,7 @@ class StationsPanel:
         mesh = s.part_mesh()
         obstacles = s.obstacle_entries()  # stay-out zones
         T_base0, T_part = s.T_world_base.copy(), s.part.T_world_part.copy()
-        weights = self._optimizer().weights.model_copy(update={"config": self.options()["config_cost"]})
+        weights = self.costs.commit()
         L = s.tool_model.length()
         L_ref = length_ref(s.tool.extension)
         self._cancel.clear()
@@ -136,7 +156,7 @@ class StationsPanel:
             ]
             s.stamps[sol.label] = stamp
             s.result_points[sol.label] = res
-            s.results = sorted([*keep, sol], key=lambda x: x.cost)
+            s.results = sorted([*keep, sol], key=lambda x: (bool(x.violations), x.cost))
             self.on_solution()
 
         def say(msg: str, f: float) -> None:

@@ -3,7 +3,7 @@
 J = w_L L/L_ref + w_U N_unreached + w_S (k-1) + w_T D_travel/D_ref + w_M mean(1/(1+mu))
   + w_C mean(max(0, 1 - c/c_ref)) + w_J mean(s_limit) + w_P max(tau_util)
   + w_standoff mean(carrier standoff penalty)   [M9: soft preferred-standoff term]
-  + w_config N_config_changes                     [zoning: zone boundaries + wrist jumps]
+  + w_group N_groups + w_wrist_flip N_flips      [zoning: extra groups per stop, wrist jumps]
 
 mu is |det J| normalized by the robot's best value (from the reachability map), c the
 part clearance, travel the carrier's own metric (rail |ds|, gantry max axis, mobile
@@ -36,7 +36,8 @@ def cost_breakdown(
     max_manip: float = 1.0,
     travel: float | None = None,
     standoff_penalty: float = 0.0,
-    config_changes: int = 0,
+    groups: int = 0,
+    wrist_flips: int = 0,
 ) -> tuple[float, dict[str, float]]:
     ok = [r for r in point_results if r.status != "unreachable"]
     mu = np.array([r.manipulability / max_manip for r in ok]) if ok else np.zeros(0)
@@ -53,7 +54,8 @@ def cost_breakdown(
         "limits": float(np.mean(np.maximum(0, 1 - lim / LIMIT_REF_DEG))) if len(lim) else 0.0,
         "torque": float(tau.max()) if len(tau) else 0.0,
         "standoff": float(standoff_penalty),
-        "config": float(config_changes),
+        "group": float(groups),
+        "wrist_flip": float(wrist_flips),
     }
     w = weights.model_dump()
     weighted = {k: w[k] * v for k, v in terms.items()}

@@ -160,6 +160,8 @@ class _Evaluator:
         pref = np.array([sol.assignment.get(int(i), 0) for i in self.t.ids])
         assignment, res = verify(checker, self.t, stations, sites, pref)
         zones, changes = [], 0
+        from opt.zoning import zone_counts
+
         if self.st.planner.zoning:
             from opt.zoning import zone_solution
 
@@ -175,7 +177,8 @@ class _Evaluator:
             self.tm.length(v),
             self.L_ref,
             self.max_manip,
-            config_changes=changes,
+            groups=zone_counts(zones)[0],
+            wrist_flips=zone_counts(zones)[1],
         )
         new = sol.model_copy(
             update={

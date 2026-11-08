@@ -122,7 +122,7 @@ def _configs_per_station(sol, res, ik):
 def test_scene_forces_changes_without_zoning(rail_plans):
     plans, ch, _, _ = rail_plans[False]
     sol, res = plans[0]
-    assert not sol.zones and sol.breakdown["config"] == 0.0
+    assert not sol.zones and sol.breakdown["group"] == sol.breakdown["wrist_flip"] == 0.0
     assert sum(len(v) - 1 for v in _configs_per_station(sol, res, ch.ik).values()) >= 1
 
 
@@ -151,7 +151,7 @@ def test_zoning_removes_changes_and_stays_exact(rail_plans):
     # this scene: one configuration per station, no changes at all
     switches = len(sol.zones) - len({z.station for z in sol.zones})
     jumps = sum(z.wrap_jumps for z in sol.zones)
-    assert switches + jumps == 0 and sol.breakdown["config"] == 0.0
+    assert switches + jumps == 0 and sol.breakdown["group"] == sol.breakdown["wrist_flip"] == 0.0
 
 
 def test_csv_and_report_follow_zones(rail_plans):
@@ -209,12 +209,12 @@ def test_gui_zoning_option_results_and_save(tmp_path):
         s, t = st["session"], st["targets"]
         s.targets = s.targets.model_copy(update={"points": []})
         t.on_part_click(FakeClick((1.0, 0.0, 2.0), (0.0, 0.0, -1.0)))
+        t.method.value = "Projected grid"
         t.spacing.value = 200.0
         t.run_generate()
         stations = st["stations"]
         stations.zoning.value = ZONING[1]
-        stations.config_cost.value = 2.5
-        assert st["tool_opt"].planner_options() == {"zoning": True, "config_cost": 2.5}
+        assert st["tool_opt"].planner_options()["zoning"] is True
         stations.start(block=True)
         sol = s.results[0]
         assert sol.zones and "Zones" in st["results"].summary.content

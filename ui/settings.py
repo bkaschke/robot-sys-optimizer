@@ -35,9 +35,10 @@ SAVED: dict[str, tuple[str, ...]] = {
     "optimize": ("clearance", "joint_margin", "torque", "check_from"),
     "objects": ("gizmo_size", "gizmo_top"),
     "placement": ("res", "grid", "half"),
-    "stations": ("max_stations", "step", "refine", "zoning", "config_cost"),
+    "stations": ("max_stations", "step", "refine", "areas", "zoning"),
+    "stations.costs": ("require_all", "require_config"),
     "tool_opt": ("max_stations", "tol", "shape_evals"),
-    "results": ("choice", "show_lines", "show_ghosts"),
+    "results": ("choice", "show_lines", "show_ghosts", "show_areas"),
     "results.export": ("screenshot",),
     "sim": ("step", "jump", "pattern", "angle", "corner", "row_tol", "inward", "no_cross", "lift", "home"),
 }

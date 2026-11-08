@@ -27,6 +27,7 @@ def app():
     cell, tab = state["cell"], state["targets"]
     cell.part_pose.xyz.value = (900.0, 0.0, 300.0)  # flat plate, as in the golden scene
     tab.on_part_click(FakeClick((0.9, 0.0, 2.0), (0, 0, -1)))  # select the plate top
+    tab.method.value = "Projected grid"
     tab.spacing.value = 150.0
     tab.run_generate()
     state["optimize"].start(block=True)

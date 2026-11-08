@@ -81,3 +81,22 @@ def zone_solution(
             changes += jumps
         changes += len(final) - 1
     return zones, changes
+
+
+def zone_counts(zones) -> tuple[int, int]:
+    """(extra groups beyond one per stop, wrist jumps inside groups)."""
+    return len(zones) - len({z.station for z in zones}), sum(z.wrap_jumps for z in zones)
+
+
+def violations(unreached: int, zones, zoning: bool, require_all: bool, require_one_config: bool) -> list[str]:
+    """The "must be met" rules a plan breaks."""
+    out = []
+    if require_all and unreached:
+        out.append(f"{unreached} point(s) unreached")
+    if require_one_config:
+        flips = zone_counts(zones)[1]
+        if not zoning:
+            out.append("configuration groups not computed (zoning off)")
+        elif flips:
+            out.append(f"{flips} wrist flip(s) inside a group")
+    return out

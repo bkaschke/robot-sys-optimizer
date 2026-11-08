@@ -37,7 +37,7 @@ class ToolOptPanel:
         gui = server.gui
         with gui.add_folder("Tool geometry"):
             opt = session.extra.get("optimizer") or Optimizer()
-            self.max_stations = gui.add_number("Max stations", opt.max_stations, min=1, max=12, step=1)
+            self.max_stations = gui.add_number("Max stations", opt.max_stations, min=1, max=40, step=1)
             self.tol = gui.add_number(
                 "Length tolerance (mm)", 1.0, min=0.01, step=0.5
             )  # user-defined, no upper limit
@@ -109,7 +109,7 @@ class ToolOptPanel:
             return notify(event, "No robot", "Choose a robot first (tab 1 Robot & cell)")
         if s.robot.spec.ik != "ur_analytic":
             return notify(event, "Not supported", "Needs a UR-type arm (v1)")
-        opts = self.planner_options() if self.planner_options else {"zoning": False, "config_cost": 1.0}
+        opts = self.planner_options() if self.planner_options else {"zoning": False}
         robot = Robot(s.robot.spec)
         ee = s.tool
         urdf = s.resolve(ee.urdf) if ee.urdf else None
@@ -122,13 +122,12 @@ class ToolOptPanel:
             s.T_world_base.copy(),
             world_targets(s),
             part_footprint(s),
-            (s.extra.get("optimizer") or Optimizer()).weights.model_copy(
-                update={"config": opts["config_cost"]}
-            ),
+            (s.extra.get("optimizer") or Optimizer()).weights,
             int(self.max_stations.value),
         )
         st = GeometrySettings(L_tol=self.tol.value / 1000, shape_evals=int(self.shape_evals.value))
         st.planner.zoning = opts["zoning"]
+        st.planner.areas = opts.get("areas", True)
         sites = s.sites()
         obstacles = s.obstacle_entries()  # stay-out zones
         if sites is None:

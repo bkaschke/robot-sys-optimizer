@@ -36,6 +36,7 @@ class ResultsTab:
         self.set_base = set_base
         self._handles: list = []
         self._ghosts: list = []
+        self._areas: list = []  # station areas painted on the part
         self._busy = False
         gui = server.gui
         self.choice = gui.add_dropdown("Solution", ("(none)",))
@@ -50,6 +51,9 @@ class ResultsTab:
         self.goto = gui.add_button("Move robot to station")
         self.show_lines = gui.add_checkbox("Lines to served points", True)
         self.show_ghosts = gui.add_checkbox("Ghost robots", True)
+        self.show_areas = gui.add_checkbox(
+            "Station areas on the part", True, hint="the part painted by stop (groups lighter)"
+        )
         self.clear = gui.add_button("Clear from scene")
         from ui.export_ui import ExportPanel
 
@@ -58,7 +62,7 @@ class ResultsTab:
         self.move_carrier: Callable[[dict], None] | None = None  # set by app.py: carrier DOFs
         self.set_q: Callable[[np.ndarray], None] | None = None  # set by app.py: arm joints
 
-        for w in (self.show_lines, self.show_ghosts):
+        for w in (self.show_lines, self.show_ghosts, self.show_areas):
             w.on_update(lambda e: None if self._busy else self.draw())
         self.choice.on_update(lambda e: None if self._busy else self._chosen())
         self.nav.on_click(lambda e: self.switch(-1 if e.target.value.startswith("◀") else 1))
@@ -149,7 +153,7 @@ class ResultsTab:
 
     @staticmethod
     def _label(i: int, sol) -> str:
-        return f"#{i + 1} {sol.label} (cost {sol.cost:.2f})"
+        return f"#{i + 1} {'✗ ' if sol.violations else ''}{sol.label} (cost {sol.cost:.2f})"
 
     def refresh(self) -> None:
         """Called whenever the result list changes (streamed from the planner thread)."""
@@ -165,9 +169,24 @@ class ResultsTab:
     # --- drawing -------------------------------------------------------------------------------
 
     def _drop(self) -> None:
-        for h in self._handles + self._ghosts:
+        for h in self._handles + self._ghosts + self._areas:
             quiet_remove(h)
-        self._handles, self._ghosts = [], []
+        self._handles, self._ghosts, self._areas = [], [], []
+
+    def draw_areas(self, sol) -> None:
+        from ui.station_areas import PATH, area_meshes, display_mesh
+
+        mesh = self.s.part_mesh() if self.s.part else None
+        if mesh is None or not self.show_areas.value:
+            return
+        ids, P, _, _ = tg.as_arrays(self.s.targets)
+        mesh = display_mesh(mesh, P)
+        for name, v, f, color in area_meshes(mesh, ids, P, sol, STATION_COLORS):
+            self._areas.append(
+                self.server.scene.add_mesh_simple(
+                    f"{PATH}/{name}", v, f, color=color, opacity=0.55, side="double", flat_shading=False
+                )
+            )
 
     def draw(self) -> None:
         self.compare.content = self._compare_table()
@@ -183,6 +202,14 @@ class ResultsTab:
             f"**{len(sol.stations)} station(s)**, {n - len(sol.unreached)}/{n} points reached, "
             f"cost **{sol.cost:.2f}**" + (f"  \nUnreached ids: {sol.unreached[:20]}" if sol.unreached else "")
         )
+        if sol.violations:
+            self.summary.content += "  \n✗ **Breaks a must-be-met rule**: " + "; ".join(sol.violations)
+        if sol.split_stops:
+            names = ", ".join(f"S{k + 1}" for k in sol.split_stops)
+            self.summary.content += (
+                f"  \n⚠ Area of {names} is in pieces (no stop could take the points between)."
+            )
+        self.draw_areas(sol)
         if sol.zones:
             switches = len(sol.zones) - len({z.station for z in sol.zones})
             jumps = sum(z.wrap_jumps for z in sol.zones)

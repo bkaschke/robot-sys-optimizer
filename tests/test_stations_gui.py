@@ -22,7 +22,8 @@ def app():
     tab.normal_angle.value = 5.0
     from core import targets as tg
 
-    tab._set_selection(tg.select_by_normal(tab.mesh(), (0, 0, 1), 5.0), None)
+    tab.select(tg.select_by_normal(tab.mesh(), (0, 0, 1), 5.0), "set")
+    tab.method.value = "Projected grid"
     tab.spacing.value = 250.0
     tab.run_generate()
     # several stations need a movable base (static mode = one base): plan-default mobile base

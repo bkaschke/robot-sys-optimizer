@@ -106,7 +106,8 @@ def build_app(
         # the project's station limit first; saved panel settings (if any) override it
         n = (session.extra.get("optimizer") or Optimizer()).max_stations
         for panel in (state["stations"], state["tool_opt"]):
-            panel.max_stations.value = float(min(max(n, 1), 12))
+            panel.max_stations.value = float(min(max(n, 1), 40))
+        state["stations"].costs.load()  # the project's cost weights
         ui_settings.apply(state, session.ui)
         t.refresh()
 

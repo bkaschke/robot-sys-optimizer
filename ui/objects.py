@@ -25,7 +25,7 @@ TREE = {
     "External axis": "*bodies",
     "Part": ("Targets", "Selection"),
     "Stay-out zones": "*zones",
-    "Results": ("Stops and lines", "Ghost robots", "Paths"),
+    "Results": ("Stops and lines", "Ghost robots", "Station areas", "Paths"),
 }
 INDENT = " └ "  # child entries
 
@@ -135,7 +135,10 @@ class ObjectsPanel:
         if key == "Results/Stops and lines":
             return list(r._handles) if r is not None else []
         if key == "Results/Ghost robots":
-            return list(r._ghosts) if r is not None else []
+            # the ghost frames: hiding one hides its whole robot (ViserUrdf has no .visible)
+            return [h for h in r._ghosts if hasattr(h, "visible")] if r is not None else []
+        if key == "Results/Station areas":
+            return list(r._areas) if r is not None else []
         if key == "Results/Paths":
             return list(sim._handles) if sim is not None else []
         return []

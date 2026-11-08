@@ -86,9 +86,9 @@ def test_fields_follow_mode_and_axis_type(app):
     from ui.stations import ZONING
 
     st.zoning.value = ZONING[0]
-    assert not st.config_cost.visible
+    assert not st.zoning_note.visible
     st.zoning.value = ZONING[1]
-    assert st.config_cost.visible
+    assert st.zoning_note.visible
     st.zoning.value = ZONING[0]
 
 
