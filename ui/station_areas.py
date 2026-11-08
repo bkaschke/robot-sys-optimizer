@@ -1,7 +1,8 @@
 """Results -> station areas on the part (v4 plan item 3): the part surface painted by stop in
 the station colours (the colours of the lines to the served points), groups (zones) of a stop
 in lighter shades of its colour. A face takes the stop of the nearest target within 1.5 x
-the point spacing of its centre; faces that hold a target always take that target's stop.
+the point spacing of its centre (coarse meshes are subdivided to the spacing first, so every
+target has faces around it).
 Drawn under /cell/part so it follows the part; on / off in the object tree."""
 
 from __future__ import annotations
@@ -54,8 +55,6 @@ def face_labels(mesh: trimesh.Trimesh, P: np.ndarray, point_label: np.ndarray) -
     d, j = tree.query(mesh.triangles_center, distance_upper_bound=1.5 * sp)
     near = np.isfinite(d)
     out[near] = j[near]
-    _, _, tri = trimesh.proximity.closest_point(mesh, P)  # faces that hold a target
-    out[tri] = np.arange(len(P))
     out[out >= 0] = np.where(point_label[out[out >= 0]] >= 0, out[out >= 0], -1)
     return out
 

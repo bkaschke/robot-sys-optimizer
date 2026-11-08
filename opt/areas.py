@@ -96,7 +96,7 @@ def split_stops(label: np.ndarray, adj: list[set[int]]) -> list[int]:
 class _Reach:
     """Exact per-(point, stop) checks, cached; ``set_base`` only when the stop changes."""
 
-    def __init__(self, checker, t, stations, sites, assignment, results):
+    def __init__(self, checker, t, stations, sites, assignment, results, hint=None):
         from opt.placement import _robust
 
         self.ch, self.t, self.st, self.sites, self._robust = checker, t, stations, sites, _robust
@@ -106,9 +106,12 @@ class _Reach:
             if pid in assignment:
                 self.cache[(i, assignment[pid])] = results[pid]
         self._at = None
+        self.hint = hint
 
     def __call__(self, i: int, k: int) -> PointResult | None:
         key = (i, k)
+        if key not in self.cache and self.hint is not None and not self.hint[k, i]:
+            return None
         if key not in self.cache:
             if self._at != k:
                 self.ch.set_base(self.sites.T(self.st[k]))
@@ -169,12 +172,17 @@ def make_areas(
     assignment: dict[int, int],
     results: dict[int, PointResult],
     max_rounds: int = 6,
+    hint: np.ndarray | None = None,
 ) -> tuple[dict[int, int], dict[int, PointResult], list[int]]:
-    """Reassigned (assignment, results) and the stops still split into pieces."""
+    """Reassigned (assignment, results) and the stops still split into pieces. ``hint``
+    (stops x targets, bool, e.g. the reachability map's coverage) skips the exact check of
+    pairs the map rules out (an unreachable point is the slowest check)."""
     ids = [int(x) for x in t.ids]
     label0 = np.array([assignment.get(pid, -1) for pid in ids])
     adj = neighbour_graph(t.P_world)
-    reach = _Reach(checker, t, stations, sites, assignment, results)
+    if _pieces(label0, adj) == len(np.unique(label0[label0 >= 0])):  # already one area per stop
+        return dict(assignment), dict(results), []
+    reach = _Reach(checker, t, stations, sites, assignment, results, hint)
     base_pos = np.array([sites.T(v)[:3, 3] for v in stations])
     label = grow(reach, t.P_world, base_pos, label0, adj)
     tried: set[tuple[int, int]] = set()

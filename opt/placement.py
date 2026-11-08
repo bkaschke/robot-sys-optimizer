@@ -54,6 +54,12 @@ class PlannerSettings:
     require_all: bool = False  # must be met: every point reached
     require_one_config: bool = False  # must be met: no configuration change inside a group (zoning)
     patience: int = 2  # stop adding stops after this many counts without a better plan
+    # coarse to fine (opt.sampling): set cover and refinement on a spread-out subsample of the
+    # targets (a quarter, 60..150 points; all of them below 60); verification uses every point
+    sample: bool = True
+    sample_fraction: float = 0.25
+    sample_max: int = 150
+    sample_min: int = 60
 
 
 @dataclass
@@ -261,26 +267,36 @@ def plan_stations(
     keep = prune(covered, mu / rmap.max_manip, st.max_candidates)
     cand = [cand[i] for i in keep]
     covered, mu_n = covered[keep], mu[keep] / rmap.max_manip
+    from opt.sampling import farthest_points, repair_cover, sample_size
+
+    n_t = len(t.ids)
+    m = sample_size(n_t, st.sample_fraction, st.sample_max, st.sample_min) if st.sample else n_t
+    S = farthest_points(t.P_world, m)  # the coarse targets
+    in_s = np.zeros(n_t, bool)
+    in_s[S] = True
+    cov_s, mu_s = covered[:, S], mu_n[:, S]
     out = []
     prev, checker.cancelled = checker.cancelled, cancelled  # every exact check polls Cancel
     try:
-        k_min = min(min_stations(covered, st.time_limit_s, cancelled), st.max_stations)
+        k_min = min(min_stations(cov_s, st.time_limit_s, cancelled), st.max_stations)
         start = sites_start(sites, T_world_base0)
         ks = list(range(k_min, st.max_stations + 1))
         zoning = st.zoning or st.require_one_config
 
         def make_job(k: int):
             """(k, stations, preferred station per target, coverage) of one station count."""
-            chosen = set_cover(covered, mu_n, k, st.time_limit_s, cancelled) or greedy_cover(covered, mu_n, k)
+            chosen = set_cover(cov_s, mu_s, k, st.time_limit_s, cancelled) or greedy_cover(cov_s, mu_s, k)
             if not chosen:
                 return None
+            if m < n_t:  # a target the sample missed may need one more stop (map-level repair)
+                chosen = repair_cover(covered, mu_n, list(chosen))[: max(k, st.max_stations)]
             stations = [dict(cand[i]) for i in chosen]
             order = order_by(stations, sites, start)
             stations, chosen = [stations[i] for i in order], [chosen[i] for i in order]
             sub_cov, sub_mu = covered[chosen], mu_n[chosen]
             return (k, stations, np.argmax(np.where(sub_cov, sub_mu + 1, 0), axis=0), sub_cov)
 
-        def finish(stations: list[dict], first: np.ndarray, k: int, f: float):
+        def finish(stations: list[dict], first: np.ndarray, k: int, f: float, cov=None):
             """Exact verification (+ zoning) and cost of one station set."""
             assignment, results = verify(checker, t, stations, sites, first)
             split: list[int] = []
@@ -288,7 +304,9 @@ def plan_stations(
                 from opt.areas import make_areas
 
                 say(f"station areas k={k}", f)
-                assignment, results, split = make_areas(checker, t, stations, sites, assignment, results)
+                assignment, results, split = make_areas(
+                    checker, t, stations, sites, assignment, results, hint=cov
+                )
             zones = []
             from opt.zoning import violations, zone_counts
 
@@ -343,7 +361,7 @@ def plan_stations(
             stations = list(stations)
             for s_i in range(len(stations)):
                 say(f"refine k={k} station {s_i + 1}", f0 + (f1 - f0) * (s_i + 1) / len(stations))
-                idx = [i for i in range(len(t.ids)) if first[i] == s_i and sub_cov[s_i, i]]
+                idx = [i for i in range(len(t.ids)) if first[i] == s_i and sub_cov[s_i, i] and in_s[i]]
                 if idx:
                     stations[s_i] = refine_station(
                         checker, t, idx, stations[s_i], sites, st, rmap.max_manip, weights.standoff
@@ -378,7 +396,7 @@ def plan_stations(
                 stations = refine(k, stations, first, sub_cov, f0, f0 + 0.7 * span / len(ks))
             else:
                 say(f"quick plan k={k}", f0)
-            sol, res = finish(stations, first, k, f0 + span / len(ks))
+            sol, res = finish(stations, first, k, f0 + span / len(ks), sub_cov)
             emit(sol, res)
             if best is None or rank(sol) < best:
                 best, stale = rank(sol), 0
@@ -405,7 +423,8 @@ def plan_stations(
                 ]
                 for n, (k, stations, first, sub_cov) in enumerate(top):
                     f0 = 0.5 + 0.5 * n / len(top)
-                    new = finish(refine(k, stations, first, sub_cov, f0, f0 + 0.4 / len(top)), first, k, f0)
+                    stations = refine(k, stations, first, sub_cov, f0, f0 + 0.4 / len(top))
+                    new = finish(stations, first, k, f0, sub_cov)
                     old = quick.get(k)
                     if old is None or rank(new[0]) < rank(old):
                         emit(*new)

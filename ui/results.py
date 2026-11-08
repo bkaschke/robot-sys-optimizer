@@ -36,6 +36,10 @@ class ResultsTab:
         self.set_base = set_base
         self._handles: list = []
         self._ghosts: list = []
+        # ghost robots are kept per stop index and re-posed on redraw (building a URDF model
+        # costs ~0.4 s, and the planner thread redraws after every streamed plan)
+        self._pool: dict[int, tuple] = {}
+        self._used: set[int] = set()
         self._areas: list = []  # station areas painted on the part
         self._busy = False
         gui = server.gui
@@ -77,6 +81,7 @@ class ResultsTab:
         @self.clear.on_click
         def _(e) -> None:
             self._drop()
+            self._prune_ghosts()
 
     def switch(self, delta: int) -> None:
         """Arrow: the previous / next plan in the list (best cost first)."""
@@ -169,9 +174,17 @@ class ResultsTab:
     # --- drawing -------------------------------------------------------------------------------
 
     def _drop(self) -> None:
-        for h in self._handles + self._ghosts + self._areas:
+        for h in self._handles + self._areas:
             quiet_remove(h)
         self._handles, self._ghosts, self._areas = [], [], []
+        self._used = set()
+
+    def _prune_ghosts(self) -> None:
+        """Remove the pooled ghosts not used by the last draw."""
+        for k in [k for k in self._pool if k not in self._used]:
+            frame, urdf, _ = self._pool.pop(k)
+            quiet_remove(urdf)
+            quiet_remove(frame)
 
     def draw_areas(self, sol) -> None:
         from ui.station_areas import PATH, area_meshes, display_mesh
@@ -196,6 +209,7 @@ class ResultsTab:
             self.summary.content = "_No results yet: run the station planner (Optimize tab)._"
             self.breakdown.content = ""
             self.station.options = ("-",)
+            self._prune_ghosts()
             return
         n = len(self.s.targets.points)
         self.summary.content = (
@@ -294,23 +308,34 @@ class ResultsTab:
                     None,
                 )
                 self._ghost(k, T, q, color)
+        self._prune_ghosts()  # stops this plan does not have (or ghosts switched off)
 
     def _ghost(self, k: int, T: np.ndarray, q, color) -> None:
         robot = self.s.robot
         if robot is None:  # empty study: no arm to show
             return
         name = f"{ROOT}/ghost{k + 1}"
-        self._ghosts.append(
-            self.server.scene.add_frame(
+        key = str(robot.spec.folder / robot.spec.urdf)
+        entry = self._pool.get(k)
+        if entry is not None and entry[2] == key:
+            frame, urdf, _ = entry
+            frame.wxyz, frame.position = matrix_to_wxyz(T[:3, :3]), T[:3, 3]
+        else:
+            if entry is not None:
+                quiet_remove(entry[1])
+                quiet_remove(entry[0])
+            frame = self.server.scene.add_frame(
                 name, show_axes=False, wxyz=matrix_to_wxyz(T[:3, :3]), position=T[:3, 3]
             )
-        )
-        urdf = ViserUrdf(
-            self.server,
-            robot.spec.folder / robot.spec.urdf,
-            root_node_name=name,
-            mesh_color_override=(*[c / 255 for c in color], 0.35),
-        )
+            urdf = ViserUrdf(
+                self.server,
+                robot.spec.folder / robot.spec.urdf,
+                root_node_name=name,
+                mesh_color_override=(*[c / 255 for c in color], 0.35),
+            )
+            self._pool[k] = (frame, urdf, key)
+        self._used.add(k)
+        self._ghosts.append(frame)
         names = list(urdf.get_actuated_joint_names())
         q = q if q is not None else HOME_Q.get(self.s.robot_name or "", np.zeros(robot.nq))
         cfg = np.zeros(len(names))

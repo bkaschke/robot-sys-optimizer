@@ -88,3 +88,19 @@ path patterns are to be matched. Decisions marked **(user)** were answered on 20
 
 1 (targets) → 2 + 4 (patterns, carrier moves) → 3 (station areas + colour layer) → 5 (costs,
 must-meet, 30 stops) → 6 (speed) → 7 (userframes, small, may go first).
+
+## Status (2026-11-08, branch `v5`)
+
+All seven items are implemented and tested (`tests/test_v5_*.py`). Deviations from the text above:
+
+* **1:** the existing generators sit in a second *Generator* dropdown (with the new *Surface grid*
+  and *Part-anchored lattice*) rather than under *Tool = Other generators*; each tool and each
+  generator shows only its own settings.
+* **3:** reassignment is region growing from the point nearest each base (exact checks only),
+  then a majority clean-up; kept only when it leaves fewer pieces. Path crossings between stops
+  are not checked separately.
+* **5:** a wrist flip inside a group also breaks *No configuration change within a group*. The
+  must-meet rules apply to the station planner; the tool optimizer keeps its own criterion
+  (every target reached).
+* **6:** coarse to fine is done (43 s -> 18 s on 357 points); parallel processes were measured and
+  left out (a worker starts in ~2.7 s, about the time one stop's refinement takes).
