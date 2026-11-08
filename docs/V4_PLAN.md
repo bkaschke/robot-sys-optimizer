@@ -56,8 +56,13 @@ path patterns are to be matched. Decisions marked **(user)** were answered on 20
 
 * **Max stations up to at least 30** (GUI limit 40). The planner stops adding stops once the
   cost has not improved for two counts, so 30 does not mean 30 full plans.
-* **Editable cost weights** in the GUI (tool length, stations, travel, manipulability,
-  clearance, joint limits, torque, standoff, configuration change).
+* **Editable cost weights** in the GUI (tool length, travel, manipulability, clearance, joint
+  limits, torque, standoff) with the count costs spelled out **(user, 2026-11-08)**:
+  * **Cost per stop** (each base / carrier position beyond the first: fewer base changes);
+  * **Cost per group** (each extra configuration group at a stop: fewer groups);
+  * **Cost per wrist flip** (a joint-4 / joint-6 jump > 180° inside a group's path).
+  Today the first is the *stations* weight (5) and the last two are lumped into *Cost per
+  config change* (1); they become separate weights (`Weights.group`, `Weights.wrist_flip`).
 * **Must be met (user):** *All points reachable* and *No configuration change within a group*
   (a stop may hold several groups, each in one configuration). With them ticked the planner
   keeps adding stops until they hold (up to *Max stations*); plans that break a ticked rule are
