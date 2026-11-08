@@ -39,6 +39,7 @@ SAVED: dict[str, tuple[str, ...]] = {
     "tool_opt": ("max_stations", "tol", "shape_evals"),
     "results": ("choice", "show_lines", "show_ghosts"),
     "results.export": ("screenshot",),
+    "sim": ("step", "jump", "pattern", "angle", "corner", "row_tol", "inward", "no_cross", "lift", "home"),
 }
 
 

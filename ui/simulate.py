@@ -3,8 +3,8 @@
 
 The build runs in a thread on its own Robot (Pinocchio data is not thread-safe). Playback
 moves the carrier (or base) to each stop and the arm through the samples; it is a preview of
-the TCP paths, not a timed trajectory (the moves between stops and reconfigurations are not
-planned)."""
+the TCP paths, not a timed trajectory. v4 plan items 2 and 4: a path pattern per group, lifts
+over crossings, and (optionally) home moves with the carrier travelling between stops."""
 
 from __future__ import annotations
 
@@ -23,6 +23,8 @@ from ui.widgets import Latest, notify
 ROOT = "/results/paths"
 ZONE_COLORS = [(250, 120, 30), (30, 160, 230), (200, 60, 200), (40, 200, 120), (230, 200, 40), (120, 90, 220)]
 ISSUE_COLOR = (230, 30, 30)
+MOVE_COLOR = (150, 150, 150)  # lifts, home and carrier moves
+PLANNER_ORDER = "Planner order"
 
 
 class SimPanel:
@@ -58,6 +60,7 @@ class SimPanel:
         with self.folder:
             self.step = gui.add_number("Path sample step (mm)", 20.0, min=1.0, step=5.0)
             self.jump = gui.add_number("Max joint step (deg)", 20.0, min=1.0, step=5.0)
+            self._pattern_fields(gui)
             self.build_btn = gui.add_button("Build paths", color="green")
             self.stop = gui.add_button("Cancel", visible=False)
             self.progress = gui.add_progress_bar(0.0, visible=False)
@@ -77,6 +80,62 @@ class SimPanel:
         self._goto = Latest(self.go_to)
         self.frame.on_update(lambda e: self._goto(int(self.frame.value)))
         self.export.on_click(lambda e: self.export_csv(e))
+
+    def _pattern_fields(self, gui) -> None:
+        from core.patterns import CORNERS, PATTERNS
+
+        self.pattern = gui.add_dropdown("Pattern", (*PATTERNS, PLANNER_ORDER), initial_value="Zigzag")
+        self.angle = gui.add_number("Raster angle (deg)", 0.0, min=-180.0, max=180.0, step=5.0)
+        self.corner = gui.add_dropdown("Start corner", CORNERS, hint="<along rows>-<across rows>")
+        self.row_tol = gui.add_number("Row tolerance (mm)", 0.0, min=0.0, step=1.0, hint="0 = automatic")
+        self.inward = gui.add_checkbox("Outside → in", True)
+        self.no_cross = gui.add_checkbox(
+            "Prevent crossing paths", False, hint="lift off for moves that cross"
+        )
+        self.lift = gui.add_number("Lift height (mm)", 30.0, min=1.0, step=5.0)
+        self.home = gui.add_checkbox(
+            "Home between stops", True, hint="arm to home, carrier moves, arm to the next stop"
+        )
+        for w in (self.pattern, self.no_cross):
+            w.on_update(lambda e: self.show_pattern_fields())
+        self.show_pattern_fields()
+
+    def show_pattern_fields(self) -> None:
+        from core.patterns import ROW_PATTERNS
+
+        p = self.pattern.value
+        on = p != PLANNER_ORDER
+        self.angle.visible = self.corner.visible = self.no_cross.visible = on
+        self.row_tol.visible = p in (*ROW_PATTERNS, "Concentric", "Spiral")
+        self.inward.visible = p in ("Concentric", "Spiral")
+        self.lift.visible = on and self.no_cross.value
+
+    def pattern_settings(self):
+        from core.patterns import PatternSettings
+
+        if self.pattern.value == PLANNER_ORDER:
+            return None
+        return PatternSettings(
+            self.pattern.value,
+            self.angle.value,
+            self.corner.value,
+            self.row_tol.value / 1000,
+            self.inward.value,
+            self.no_cross.value,
+        )
+
+    def _carrier_path(self, sol, step: float):
+        """(k_from, k_to) -> carrier poses between two stops, or None (no carrier)."""
+        s = self.s
+        sites = s.sites() if s.base.mode == "movable" else None
+        if sites is None or not hasattr(sites, "transit") or not all(st.carrier for st in sol.stations):
+            return None
+
+        def path(a: int, b: int):
+            moves = sites.transit(sol.stations[a].carrier, sol.stations[b].carrier, step)
+            return [(d, sites.T(d), ok) for d, ok in moves]
+
+        return path
 
     # --- build ---------------------------------------------------------------------------------
 
@@ -126,6 +185,11 @@ class SimPanel:
         poses = [station_pose(s.base, st, s.T_world_base) for st in sol.stations]
         mesh = s.part_mesh()
         targets_key = s.targets.model_dump_json()  # paths belong to these targets
+        home = checker.robot.home_q() if self.home.value else None
+        carrier_path = (
+            self._carrier_path(sol, max(self.step.value / 1000, 0.05)) if home is not None else None
+        )
+        pattern = self.pattern_settings()
         self._cancel.clear()
         self.build_btn.visible, self.stop.visible, self.progress.visible = False, True, True
         self.progress.value = 0.0
@@ -143,6 +207,10 @@ class SimPanel:
                     jump_deg=self.jump.value,
                     cancelled=self._cancel.is_set,
                     progress=lambda f: setattr(self.progress, "value", 100.0 * f),
+                    pattern=pattern,
+                    lift=self.lift.value / 1000,
+                    home=home,
+                    carrier_path=carrier_path,
                 )
                 self.label = sol.label
                 self._targets_key = targets_key
@@ -166,7 +234,9 @@ class SimPanel:
         problems = ", ".join(f"{v} {k.replace('_', ' ')}" for k, v in c.items() if v) or "none"
         self.info.content = (
             f"**{len(plan.samples)} samples**, {plan.length():.2f} m of TCP path over "
-            f"{len(plan.stations)} stop(s) for _{self.label}_.  \nFlagged samples: **{problems}**."
+            f"{len(plan.stations)} stop(s) for _{self.label}_ "
+            f"({self.pattern.value.lower()}{', home between stops' if self.home.value else ''}).  \n"
+            f"Flagged samples: **{problems}**."
             + (
                 "  \n_Reconfigure = the plan switches joint configuration there: plan with Joint "
                 "configuration = zones to keep paths continuous._"
@@ -224,12 +294,17 @@ class SimPanel:
         if self.plan is None or not self.show.value or self.s.part is None:
             return
         T = self.s.part.T_world_part
-        segs, cols, bad = [], [], []
+        segs, cols, moves, bad = [], [], [], []
         for st in self.plan.stations:
             for p0, p1 in zip(st.samples[:-1], st.samples[1:], strict=True):
-                if p1.issue == "reconfigure" or p1.zone != p0.zone:
+                if p1.issue == "reconfigure":
                     continue
                 a, b = (T @ p0.T_part_tcp)[:3, 3], (T @ p1.T_part_tcp)[:3, 3]
+                if p0.kind or p1.kind:  # lift, home or carrier move: grey
+                    moves.append((a, b))
+                    continue
+                if p1.zone != p0.zone:
+                    continue
                 segs.append((a, b))
                 k = p1.zone if p1.zone is not None else p1.station
                 cols.append(ZONE_COLORS[k % len(ZONE_COLORS)])
@@ -240,6 +315,16 @@ class SimPanel:
             self._handles.append(
                 self.server.scene.add_line_segments(
                     f"{ROOT}/lines", seg, col, thickness=3.0, thickness_units="screen"
+                )
+            )
+        if moves:
+            self._handles.append(
+                self.server.scene.add_line_segments(
+                    f"{ROOT}/moves",
+                    np.array(moves, dtype=np.float32),
+                    MOVE_COLOR,
+                    thickness=1.5,
+                    thickness_units="screen",
                 )
             )
         if bad:
@@ -260,7 +345,13 @@ class SimPanel:
             return
         i = int(np.clip(i, 0, len(samples) - 1))
         p = samples[i]
-        if p.station != self._station:
+        if p.kind == "carrier" and p.carrier is not None:  # between stops: the carrier moves
+            if self.s.base.mode == "movable":
+                self.move_carrier(p.carrier)
+            else:
+                self.set_base(p.T_world_base)
+            self._station = None  # back to the stop's own pose afterwards
+        elif p.station != self._station:
             st = self.plan.stations[[x.station for x in self.plan.stations].index(p.station)]
             if st.carrier and self.s.base.mode == "movable":
                 self.move_carrier(st.carrier)
@@ -274,7 +365,13 @@ class SimPanel:
             (self.show_q if self._playing.is_set() else self.set_q)(np.asarray(q))
         zone = "" if p.zone is None else f", zone {p.zone + 1}"
         flag = f" · **{p.issue.replace('_', ' ')}**" if p.issue else ""
-        self.status.content = f"Stop S{p.station + 1}{zone}: point {p.a} → {p.b} ({100 * p.s:.0f} %){flag}"
+        ends = ("home" if p.a == 0 else p.a, "home" if p.b == 0 else p.b)
+        what = {
+            "carrier": "carrier moving, arm at home",
+            "home": f"{ends[0]} → {ends[1]}",
+            "lift": f"point {p.a} → {p.b} (lifted)",
+        }.get(p.kind, f"point {p.a} → {p.b}")
+        self.status.content = f"Stop S{p.station + 1}{zone}: {what} ({100 * p.s:.0f} %){flag}"
 
     def toggle(self) -> None:
         if self._playing.is_set():

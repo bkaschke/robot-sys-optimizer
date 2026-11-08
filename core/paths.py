@@ -19,8 +19,16 @@ collision. Problems are flagged per sample:
   collision     the arm or tool is closer than the clearance (contact faces excepted)
   reconfigure   the start of a new zone at the same stop (a planned configuration change)
 
-The motion between stops (carrier travel) and the reconfiguration moves themselves are not
-planned. Pure geometry + core.feasibility: no viser.
+v4 plan items 2 and 4: the points of each group are ordered by a path pattern
+(core.patterns); moves that would cross an earlier move can lift off the surface (kind
+"lift"). With a ``home`` pose every stop starts and ends with a joint move from / to home
+(kind "home"), and between stops the carrier moves with the arm at home (kind "carrier",
+``carrier_path``), so all points of a stop are done before the carrier moves on:
+
+  carrier_blocked   a carrier pose on the way hits a keep-out, the part standoff or a
+                    stay-out zone
+
+Reconfiguration moves are not planned. Pure geometry + core.feasibility: no viser.
 """
 
 from __future__ import annotations
@@ -34,8 +42,10 @@ from scipy.spatial.transform import Rotation, Slerp
 
 from core.configs import config_label, order_path
 from core.feasibility import CancelledError, FeasibilityChecker, PointResult
+from core.patterns import CORNERS, PatternSettings, crossing_lifts, order_points
 
-ISSUES = ("unreachable", "config_flip", "jump", "collision", "reconfigure")
+ISSUES = ("unreachable", "config_flip", "jump", "collision", "reconfigure", "carrier_blocked")
+HOME_STEP = np.radians(3.0)  # joint step of the moves to / from home
 
 
 @dataclass
@@ -49,6 +59,9 @@ class PathSample:
     tcp: str
     q: np.ndarray | None
     issue: str = ""
+    kind: str = ""  # "" on the surface, "lift", "home" (to / from home), "carrier" (between stops)
+    carrier: dict | None = None  # carrier values of this sample (None = its stop's)
+    T_world_base: np.ndarray | None = None  # base pose when it differs from the stop's
 
 
 @dataclass
@@ -76,11 +89,11 @@ class PathPlan:
         return out
 
     def length(self) -> float:
-        """TCP path length (m), within sequences (no jumps between stops or zones)."""
+        """TCP path length (m) on the surface (no lifts, home or carrier moves)."""
         total = 0.0
         for st in self.stations:
             for p0, p1 in zip(st.samples[:-1], st.samples[1:], strict=True):
-                if p1.issue != "reconfigure" and p1.a != p1.b:
+                if p1.issue != "reconfigure" and p1.a != p1.b and not p1.kind and not p0.kind:
                     total += float(np.linalg.norm(p1.T_part_tcp[:3, 3] - p0.T_part_tcp[:3, 3]))
         return total
 
@@ -109,6 +122,55 @@ def sequences(sol, results: dict[int, PointResult], P_part: dict[int, np.ndarray
     return out
 
 
+@dataclass
+class Seq:
+    zone: int | None
+    pids: list[int]
+    lifts: list[bool]  # per move pids[k] -> pids[k + 1]: lift off the surface
+
+
+def ordered_sequences(
+    sol, results, points: dict, pattern: PatternSettings | None = None
+) -> dict[int, list[Seq]]:
+    """Per stop: its groups (zones) as Seq. Without a pattern, the planner's order. With one,
+    each group is ordered by the pattern, groups follow each other nearest first, and a later
+    group starts at the corner nearest where the previous one ended."""
+    P_part = {p: v[0] for p, v in points.items()}
+    base = sequences(sol, results, P_part)
+    if pattern is None:
+        return {k: [Seq(z, ids, [False] * (len(ids) - 1)) for z, ids in v] for k, v in base.items()}
+    out: dict[int, list[Seq]] = {}
+    for k, groups in base.items():
+        cents = [np.mean([P_part[i] for i in ids], axis=0) for _, ids in groups]
+        left, chain = list(range(1, len(groups))), [0]
+        while left:
+            j = min(left, key=lambda i: float(np.linalg.norm(cents[i] - cents[chain[-1]])))
+            left.remove(j)
+            chain.append(j)
+        seqs, end = [], None
+        for gi in chain:
+            zone, ids = groups[gi]
+            P = np.array([points[i][0] for i in ids])
+            N = np.array([points[i][1] for i in ids])
+            if end is None:
+                o = order_points(P, N, pattern)
+            else:  # start near the previous group's end
+                o = min(
+                    (order_points(P, N, pattern, c) for c in CORNERS),
+                    key=lambda r: float(np.linalg.norm(P[r.order[0]] - end)),
+                )
+            pids = [ids[i] for i in o.order]
+            lifts = (
+                crossing_lifts(o.uv, o.order, o.passes)
+                if pattern.no_crossing
+                else np.zeros(len(pids) - 1, bool)
+            )
+            seqs.append(Seq(zone, pids, [bool(x) for x in lifts]))
+            end = P[o.order[-1]]
+        out[k] = seqs
+    return out
+
+
 class _Tracer:
     def __init__(self, checker: FeasibilityChecker, mesh: trimesh.Trimesh, step: float, jump_deg: float):
         self.ch, self.mesh, self.step = checker, mesh, step
@@ -117,8 +179,22 @@ class _Tracer:
 
     def tcp_pose(self, r: PointResult) -> np.ndarray:
         """Planned TCP pose in the part frame (from the planned joints, exact)."""
+        return self.fk_pose(r.q, r.tcp)
+
+    def fk_pose(self, q, tcp: str) -> np.ndarray:
         ch = self.ch
-        return np.linalg.inv(ch.T_base_part) @ ch.robot.fk(r.q) @ ch.T_flange_tcp[r.tcp]
+        return np.linalg.inv(ch.T_base_part) @ ch.robot.fk(np.asarray(q, float)) @ ch.T_flange_tcp[tcp]
+
+    def joint_move(self, k, zone, qa, qb, tcp: str, a: int, b: int) -> list[PathSample]:
+        """Straight joint move qa -> qb (to / from home), collision-checked per sample."""
+        qa, qb = np.asarray(qa, float), np.asarray(qb, float)
+        n = max(1, int(np.ceil(np.max(np.abs(qb - qa)) / HOME_STEP)))
+        out = []
+        for s in np.arange(1, n + 1) / n:
+            q = qa + s * (qb - qa)
+            issue = "collision" if self.ch.scene.collides(q, tcp) else ""
+            out.append(PathSample(k, zone, a, b, float(s), self.fk_pose(q, tcp), tcp, q, issue, kind="home"))
+        return out
 
     def solve(self, T_part_tcp: np.ndarray, tcp: str, prev: np.ndarray, label: str):
         """(q, issue) for one sample: keep ``label``, nearest 2*pi copy to ``prev``."""
@@ -152,7 +228,7 @@ class _Tracer:
         return q, ""
 
     def segment(
-        self, k, zone, ra: PointResult, rb: PointResult, Pa, Pb, Na, Nb, prev, label
+        self, k, zone, ra: PointResult, rb: PointResult, Pa, Pb, Na, Nb, prev, label, lift: float = 0.0
     ) -> list[PathSample]:
         Ta, Tb = self.tcp_pose(ra), self.tcp_pose(rb)
         n = max(1, int(np.ceil(np.linalg.norm(Pb - Pa) / self.step)))
@@ -163,13 +239,19 @@ class _Tracer:
         normal = Na + s[:, None] * (Nb - Na)
         normal /= np.linalg.norm(normal, axis=1, keepdims=True)
         so = ra.standoff + s * (rb.standoff - ra.standoff)
+        if lift > 0:  # off the surface: up, across, down (full height from 15 % to 85 %)
+            so = so + lift * np.minimum(1.0, 8 * s * (1 - s))
         rot = Slerp([0.0, 1.0], Rotation.from_matrix([Ta[:3, :3], Tb[:3, :3]]))(s).as_matrix()
         out = []
         for i in range(n):
             T = np.eye(4)
             T[:3, :3], T[:3, 3] = rot[i], on[i] + so[i] * normal[i]
             q, issue = self.solve(T, rb.tcp, prev, label)
-            out.append(PathSample(k, zone, ra.id, rb.id, float(s[i]), T, rb.tcp, q, issue))
+            out.append(
+                PathSample(
+                    k, zone, ra.id, rb.id, float(s[i]), T, rb.tcp, q, issue, kind="lift" if lift > 0 else ""
+                )
+            )
             if q is not None:
                 prev = q
         return out
@@ -186,26 +268,52 @@ def trace(
     jump_deg: float = 20.0,
     cancelled: Callable[[], bool] | None = None,
     progress: Callable[[float], None] | None = None,
+    pattern: PatternSettings | None = None,
+    lift: float = 0.03,
+    home: np.ndarray | None = None,
+    carrier_path: Callable[[int, int], list[tuple[dict, np.ndarray, bool]]] | None = None,
 ) -> PathPlan:
     """Paths of solution ``sol``. ``points``: point id -> (p, n) in the part frame;
-    ``base_poses``: world base pose per station (core.export.station_pose)."""
+    ``base_poses``: world base pose per station (core.export.station_pose). ``pattern``
+    orders each group; ``lift`` (m) is the height of lifted moves; ``home`` (joints) adds the
+    moves to / from home; ``carrier_path(k_from, k_to)`` gives the carrier poses between two
+    stops as (carrier values, T_world_base, clear)."""
     tr = _Tracer(checker, part_mesh, step, jump_deg)
-    seqs = sequences(sol, results, {p: v[0] for p, v in points.items()})
+    seqs = ordered_sequences(sol, results, points, pattern)
     plan = PathPlan([], step)
     n_seq = max(1, sum(len(v) for v in seqs.values()))
     done = 0
-    for k in sorted(seqs):
+    stops = sorted(seqs)
+    for idx, k in enumerate(stops):
         checker.set_base(base_poses[k])
         sp = StationPath(k, base_poses[k], dict(sol.stations[k].carrier))
-        for j, (zone, pids) in enumerate(seqs[k]):
+        if home is not None and idx > 0 and carrier_path is not None:
+            r0 = results[seqs[k][0].pids[0]]
+            for f, (dofs, T, ok) in enumerate(carrier_path(stops[idx - 1], k)):
+                checker.set_base(T)
+                issue = "" if ok else "carrier_blocked"
+                if not issue and checker.scene.collides(home, r0.tcp):
+                    issue = "collision"
+                sp.samples.append(
+                    PathSample(
+                        k, None, 0, 0, float(f), tr.fk_pose(home, r0.tcp), r0.tcp, np.asarray(home, float),
+                        issue, kind="carrier", carrier=dict(dofs), T_world_base=np.asarray(T, float),
+                    )
+                )  # fmt: skip
+            checker.set_base(base_poses[k])
+        q = None
+        for j, sq in enumerate(seqs[k]):
+            zone, pids = sq.zone, sq.pids
             if cancelled is not None and cancelled():
                 raise CancelledError
             r0 = results[pids[0]]
             q = np.asarray(r0.q, float)
             label = config_label(checker.ik, q)
             first = "reconfigure" if j > 0 else ""
+            if home is not None and j == 0:  # from home to the stop's first point
+                sp.samples += tr.joint_move(k, zone, home, q, r0.tcp, 0, pids[0])
             sp.samples.append(PathSample(k, zone, pids[0], pids[0], 0.0, tr.tcp_pose(r0), r0.tcp, q, first))
-            for a, b in zip(pids[:-1], pids[1:], strict=True):
+            for m, (a, b) in enumerate(zip(pids[:-1], pids[1:], strict=True)):
                 if cancelled is not None and cancelled():
                     raise CancelledError
                 rb = results[b]
@@ -217,18 +325,24 @@ def trace(
                     )
                     continue
                 (Pa, Na), (Pb, Nb) = points[a], points[b]
-                seg = tr.segment(k, zone, results[a], results[b], Pa, Pb, Na, Nb, q, label)
+                h = lift if sq.lifts[m] else 0.0
+                seg = tr.segment(k, zone, results[a], results[b], Pa, Pb, Na, Nb, q, label, h)
                 sp.samples += seg
                 q = next((p.q for p in reversed(seg) if p.q is not None), q)
             done += 1
             if progress is not None:
                 progress(done / n_seq)
+        if home is not None and q is not None:  # back home before the carrier moves on
+            last = sp.samples[-1]
+            sp.samples += tr.joint_move(k, last.zone, q, home, last.tcp, last.b, 0)
         plan.stations.append(sp)
     return plan
 
 
 CSV_COLUMNS = (
     "station",
+    "kind",
+    "carrier",
     "zone",
     "from_point",
     "to_point",
@@ -259,13 +373,17 @@ def path_csv(plan: PathPlan, T_world_part: np.ndarray) -> str:
     buf = io.StringIO()
     w = csv.writer(buf, lineterminator="\n")
     w.writerow(CSV_COLUMNS)
+    carriers = {st.station: st.carrier for st in plan.stations}
     for p in plan.samples:
         T = T_world_part @ p.T_part_tcp
+        dofs = p.carrier if p.carrier is not None else carriers.get(p.station) or {}
         x, y, z, qw = Rotation.from_matrix(T[:3, :3]).as_quat()[[0, 1, 2, 3]]
         joints = [""] * 6 if p.q is None else [f"{v:.4f}" for v in np.degrees(p.q)]
         w.writerow(
             [
                 p.station + 1,
+                p.kind or "surface",
+                " ".join(f"{d}={v:.6f}" for d, v in dofs.items()),
                 "" if p.zone is None else p.zone + 1,
                 p.a,
                 p.b,

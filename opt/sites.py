@@ -153,6 +153,26 @@ class CarrierSites:
     def travel(self, a: dict, b: dict) -> float:
         return self.c.travel(a, b)
 
+    def transit(self, a: dict, b: dict, step: float) -> list[tuple[dict, bool]]:
+        """Carrier poses moving from stop a to stop b (b included, a not), every ``step`` of
+        travel, each with whether it is clear (v4 plan item 4: the arm waits at home)."""
+        A, B = self.full(a), self.full(b)
+        keys = [d for d in self.c.dofs if d in A and d in B]
+        n = max(1, int(np.ceil(self.travel(A, B) / step)))
+        out = []
+        for s in np.arange(1, n + 1) / n:
+            v = {d: B[d] for d in keys}
+            for d in keys:
+                dv = B[d] - A[d]
+                if d == "yaw":
+                    dv = (dv + np.pi) % (2 * np.pi) - np.pi
+                v[d] = float(A[d] + s * dv)
+            out.append((v, self.transit_ok(v)))
+        return out
+
+    def transit_ok(self, v: dict) -> bool:
+        return self.accept(v)[0]
+
     def point_ok(self, v: dict, r, checker, n_world: np.ndarray) -> tuple[bool, str]:
         if self.kind != "mobile" or not self.c.base.tip_over or r.q is None:
             return True, ""

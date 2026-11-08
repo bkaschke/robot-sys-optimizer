@@ -48,6 +48,9 @@ class RobotSpec(BaseModel):
     # how the controller writes a frame (userframe export): "ur" = x y z + rotation vector,
     # "fanuc" = X Y Z W P R, "matrix" = the 4 x 4 transform only (always added as well)
     frame_convention: Literal["ur", "fanuc", "matrix"] = "matrix"
+    # joint angles (deg) the arm waits at while the carrier moves between stops; None = all
+    # joints at 0 (clipped into the limits)
+    home_deg: list[float] | None = None
     dh: DHParams | None = None
     payload: PayloadSpec = Field(default_factory=PayloadSpec)
     folder: Path | None = None  # filled in by load_spec
@@ -138,6 +141,12 @@ class Robot:
         return q
 
     # --- kinematics ---------------------------------------------------------
+
+    def home_q(self) -> np.ndarray:
+        """Home joints (spec ``home_deg``, else all 0), clipped into the joint limits."""
+        h = self.spec.home_deg
+        q = np.radians(np.asarray(h, float)) if h is not None and len(h) == self.nq else np.zeros(self.nq)
+        return np.clip(q, self.lower, self.upper)
 
     def random_q(self, rng: np.random.Generator) -> np.ndarray:
         return rng.uniform(self.lower, self.upper)
