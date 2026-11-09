@@ -131,6 +131,7 @@ def test_contour_plan_full_coverage_fast_and_safe(app):
     assert s.base.facing == "front" and s.base.fixed_standoff_m == pytest.approx(0.4)
     seen = []
     st = app["stations"]
+    st.zoning.value = "best per point"  # contour speed (zoning, the GUI default, adds ~45 s here)
     orig = st.on_solution
     st.on_solution = lambda: (seen.append(len(s.results)), orig())
     t0 = time.perf_counter()

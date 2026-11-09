@@ -49,14 +49,24 @@ def zone_solution(
         if not pids:
             continue
         checker.set_base(sites.T(v))
-        options: dict[int, dict[str, PointResult]] = {}
         for pid in pids:
-            i = index[pid]
-            r0 = results[pid]
-            r0.config = config_label(checker.ik, r0.q)
+            results[pid].config = config_label(checker.ik, results[pid].q)
+
+        def search(pid: int) -> dict[str, PointResult]:
+            i, r0 = index[pid], results[pid]
             opts = checker.check_point_configs(pid, t.P_part[i], t.N_part[i], t.groups[i], max_poses)
             opts.setdefault(r0.config, r0)  # the verified solution is always an option
-            options[pid] = opts
+            return opts
+
+        # fast path: points already in the stop's most common configuration keep it; only the
+        # others are searched. If they can all join it, one zone is optimal; else search all.
+        labels = [results[p].config for p in pids]
+        major = max(set(labels), key=labels.count)
+        options: dict[int, dict[str, PointResult]] = {
+            pid: {major: results[pid]} if results[pid].config == major else search(pid) for pid in pids
+        }
+        if not all(major in o for o in options.values()):
+            options = {pid: search(pid) if len(o) == 1 and major in o else o for pid, o in options.items()}
         chosen = min_zones({pid: {c: _quality(r) for c, r in o.items()} for pid, o in options.items()})
         final: dict[str, list[int]] = {}
         for config, members in chosen:
@@ -100,3 +110,52 @@ def violations(unreached: int, zones, zoning: bool, require_all: bool, require_o
         elif flips:
             out.append(f"{flips} wrist flip(s) inside a group")
     return out
+
+
+MOTION_REF = np.pi / 2  # rad: a 90 deg joint move between neighbouring points costs 1
+
+
+def stop_sequences(checker, t, assignment: dict[int, int], results: dict[int, PointResult], zones):
+    """Per stop, its point sequences as the paths run them (core.paths.sequences): the zones,
+    or without zones one group per joint configuration (largest first), each in serpentine
+    order. Returns {stop: [[point ids], ...]}."""
+    index = {int(pid): i for i, pid in enumerate(t.ids)}
+    out: dict[int, list[list[int]]] = {}
+    if zones:
+        for z in zones:
+            pts = [p for p in z.points if results.get(p) is not None and results[p].q is not None]
+            if pts:
+                out.setdefault(z.station, []).append(pts)
+        return out
+    by: dict[int, dict[str, list[int]]] = {}
+    for pid, k in assignment.items():
+        r = results.get(pid)
+        if r is None or r.q is None or r.status == "unreachable":
+            continue
+        by.setdefault(k, {}).setdefault(config_label(checker.ik, np.asarray(r.q, float)), []).append(pid)
+    for k, groups in by.items():
+        for members in sorted(groups.values(), key=len, reverse=True):
+            members = sorted(members)
+            if len(members) > 2:
+                order = order_path(np.array([t.P_world[index[p]] for p in members]))
+                members = [members[j] for j in order]
+            out.setdefault(k, []).append(members)
+    return out
+
+
+def config_changes(seqs: dict[int, list[list[int]]]) -> int:
+    """Extra configuration groups beyond one per stop."""
+    return sum(len(v) - 1 for v in seqs.values())
+
+
+def arm_motion(seqs: dict[int, list[list[int]]], results: dict[int, PointResult]) -> float:
+    """Mean over neighbouring points of a stop's sequences of the largest joint move
+    (nearest 2*pi copy), in units of ``MOTION_REF``: large arm moves between points cost."""
+    steps = []
+    for groups in seqs.values():
+        for members in groups:
+            q = [np.asarray(results[p].q, float) for p in members]
+            for a, b in zip(q[:-1], q[1:], strict=True):
+                d = np.mod(b - a + np.pi, 2 * np.pi) - np.pi
+                steps.append(float(np.max(np.abs(d))))
+    return float(np.mean(steps)) / MOTION_REF if steps else 0.0

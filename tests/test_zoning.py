@@ -122,8 +122,11 @@ def _configs_per_station(sol, res, ik):
 def test_scene_forces_changes_without_zoning(rail_plans):
     plans, ch, _, _ = rail_plans[False]
     sol, res = plans[0]
-    assert not sol.zones and sol.breakdown["group"] == sol.breakdown["wrist_flip"] == 0.0
-    assert sum(len(v) - 1 for v in _configs_per_station(sol, res, ch.ik).values()) >= 1
+    changes = sum(len(v) - 1 for v in _configs_per_station(sol, res, ch.ik).values())
+    assert changes >= 1 and not sol.zones and sol.breakdown["wrist_flip"] == 0.0
+    # v6: an unzoned plan pays for its configuration changes (one per extra configuration)
+    assert sol.breakdown["group"] == pytest.approx(Weights().group * changes)
+    assert sol.breakdown["motion"] > 0
 
 
 def test_zoning_removes_changes_and_stays_exact(rail_plans):

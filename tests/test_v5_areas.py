@@ -83,7 +83,13 @@ def test_mobile_plans_have_one_area_per_stop(app):
     # v6: an unzoned stop has one group per joint configuration (the main one in its colour)
     from ui.station_areas import config_groups
 
-    groups = config_groups(sol, r._configs(sol))
+    if sol.zones:  # zones (the default): one group per zone of a stop
+        groups = {}
+        for k in {z.station for z in sol.zones}:
+            for j, z in enumerate([z for z in sol.zones if z.station == k]):
+                groups.update(dict.fromkeys(z.points, j))
+    else:
+        groups = config_groups(sol, r._configs(sol))
     want = {f"S{sol.assignment[p] + 1}_G{g + 1}" for p, g in groups.items()}
     assert names == want and {f"S{k + 1}_G1" for k in range(len(sol.stations))} <= names
     for h in r._areas:

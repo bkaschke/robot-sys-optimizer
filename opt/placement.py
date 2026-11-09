@@ -308,7 +308,7 @@ def plan_stations(
                     checker, t, stations, sites, assignment, results, hint=cov
                 )
             zones = []
-            from opt.zoning import violations, zone_counts
+            from opt.zoning import arm_motion, config_changes, stop_sequences, violations, zone_counts
 
             if zoning:
                 from opt.zoning import zone_solution
@@ -317,6 +317,9 @@ def plan_stations(
                 zones, _ = zone_solution(checker, t, stations, sites, assignment, results, st.zoning_poses)
             unreached = sorted(pid for pid, r in results.items() if r.status == "unreachable")
             groups, flips = zone_counts(zones)
+            seqs = stop_sequences(checker, t, assignment, results, zones)
+            if not zones:  # v6: unzoned plans pay for their configuration changes too
+                groups = config_changes(seqs)
             Tst = [sites.T(v) for v in stations]
             penalty = float(np.mean([sites.accept(v)[1] for v in stations]))
             cost, breakdown = cost_breakdown(
@@ -331,6 +334,7 @@ def plan_stations(
                 standoff_penalty=penalty,
                 groups=groups,
                 wrist_flips=flips,
+                motion=arm_motion(seqs, results),
             )
             full = getattr(sites, "full", lambda v: v)
             plural = "s" if len(stations) > 1 else ""

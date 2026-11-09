@@ -245,9 +245,16 @@ class SimPanel:
                     lift=self.lift.value / 1000,
                     home=home,
                     carrier_path=carrier_path,
+                    group_of={p.id: p.group for p in s.targets.points},
                 )
                 self.label = sol.label
                 self._targets_key = targets_key
+                self.home_blocked = []  # stops where the home pose itself collides
+                if home is not None:
+                    for st in self.plan.stations:
+                        checker.set_base(st.T_world_base)
+                        if checker.scene.collides(home):
+                            self.home_blocked.append(st.station)
                 self._after_build()
             except CancelledError:
                 self.info.content = "**Cancelled.**"
@@ -275,6 +282,14 @@ class SimPanel:
                 "  \n_Reconfigure = the plan switches joint configuration there: plan with Joint "
                 "configuration = zones to keep paths continuous._"
                 if c["reconfigure"]
+                else ""
+            )
+            + (
+                "  \n⚠ **The home pose collides at stop "
+                + ", ".join(f"S{k + 1}" for k in self.home_blocked)
+                + "**: the moves to and from home cannot avoid it. Set a home that is clear there "
+                "(Robot & cell → Robot → *Home position*)."
+                if getattr(self, "home_blocked", None)
                 else ""
             )
         )

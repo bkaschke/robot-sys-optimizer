@@ -51,7 +51,14 @@
       "curve_extrapolate": "linear",
       "curve_source": "UR20 datasheet Dec 2024 (plot reading); >800 mm extrapolated estimate"
     },
-    "home_deg": null
+    "home_deg": [
+      0.0,
+      -165.0,
+      -150.0,
+      -180.0,
+      -90.0,
+      0.0
+    ]
   },
   "base": {
     "mode": "movable",

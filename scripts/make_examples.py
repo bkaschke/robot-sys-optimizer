@@ -104,14 +104,17 @@ def build(
     pose: np.ndarray = PART_POSE,
     faces: tuple = (("top", (0, 0, 1), -np.inf, np.inf),),
     spacing: float = 0.25,
+    home_deg: list[float] | None = None,
 ) -> Path:
-    """``faces``: (group, outward normal, z min, z max) per target group (part frame, m)."""
+    """``faces``: (group, outward normal, z min, z max) per target group (part frame, m);
+    ``home_deg``: the project's home pose (None = the robot's spec home)."""
     s = Session(project_dir=EXAMPLES / name)
     s.load_robot_from_registry("ur20")
     s.load_tool_from_library("orbital_sander")
     s.part = PartState(f"assets/parts/{part}.stl", "m", pose)
     s.base = base
     s.T_world_base = Carrier(base).T_world_base(start)
+    s.home_deg = home_deg
     mesh = gp.GOLDEN_PARTS[part]()
     tilt = s.tool.tolerances.tilt_deg
     targets = ProjectTargets(groups=[TargetGroup(name=g, tilt_deg=tilt) for g, *_ in faces])
@@ -229,7 +232,14 @@ def main() -> None:
     build("rail_long_part", rail_base(), {"s": -1.5})
     build("mobile_amr", mobile_base(), {"x": -1.5, "y": -0.2, "yaw": 0.0})
     wall = dict(part="tall_wall", pose=np.eye(4))
-    build("gantry_overhead", gantry_base(), {"x": -1.0, "y": 0.0}, faces=WALL_FACES_GANTRY, **wall)
+    build(  # hanging upside down, the spec home (arm "up") would point into the wall
+        "gantry_overhead",
+        gantry_base(),
+        {"x": -1.0, "y": 0.0},
+        faces=WALL_FACES_GANTRY,
+        home_deg=[0.0, -165.0, -150.0, -180.0, -90.0, 0.0],  # folded towards the carriage
+        **wall,
+    )
     build(
         "floor_xy_rails",
         floor_xy_base(),

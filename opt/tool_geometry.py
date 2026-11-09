@@ -169,6 +169,10 @@ class _Evaluator:
                 checker, self.t, stations, sites, assignment, res, self.st.planner.zoning_poses
             )
         unreached = sorted(p for p, r in res.items() if r.status == "unreachable")
+        from opt.zoning import arm_motion, config_changes, stop_sequences
+
+        seqs = stop_sequences(checker, self.t, assignment, res, zones)
+        groups = zone_counts(zones)[0] if zones else config_changes(seqs)
         cost, terms = cost_breakdown(
             list(res.values()),
             len(unreached),
@@ -177,8 +181,9 @@ class _Evaluator:
             self.tm.length(v),
             self.L_ref,
             self.max_manip,
-            groups=zone_counts(zones)[0],
+            groups=groups,
             wrist_flips=zone_counts(zones)[1],
+            motion=arm_motion(seqs, res),
         )
         new = sol.model_copy(
             update={

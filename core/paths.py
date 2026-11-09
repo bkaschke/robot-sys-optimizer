@@ -101,12 +101,35 @@ class PathPlan:
 
 
 def sequences(
-    sol, results: dict[int, PointResult], P_part: dict[int, np.ndarray], label_of: Callable | None = None
+    sol,
+    results: dict[int, PointResult],
+    P_part: dict[int, np.ndarray],
+    label_of: Callable | None = None,
+    group_of: dict[int, str] | None = None,
 ) -> dict[int, list]:
     """Per station: [(zone index | None, [point ids in path order])]. Without zones and with
     ``label_of(result)`` (joint configuration label), a stop's points are split by
     configuration, largest group first: one configuration change per extra configuration,
-    not one per switch along the path."""
+    not one per switch along the path. With ``group_of`` (point id -> target group), each
+    sequence is also split by target group (v6): the tool is not dragged over an edge of the
+    part from one face to the next; a planned joint move joins them."""
+    out = _sequences(sol, results, P_part, label_of)
+    if not group_of:
+        return out
+    split: dict[int, list] = {}
+    for k, seqs in out.items():
+        for zone, ids in seqs:
+            parts: dict[str, list[int]] = {}
+            for p in ids:  # keeps the path order inside each group
+                parts.setdefault(group_of.get(p, ""), []).append(p)
+            for g in parts.values():
+                if len(parts) > 1 and len(g) > 2:  # re-order each face on its own
+                    g = [g[i] for i in order_path(np.array([P_part[p] for p in g]))]
+                split.setdefault(k, []).append((zone, g))
+    return split
+
+
+def _sequences(sol, results, P_part, label_of) -> dict[int, list]:
     out: dict[int, list] = {}
 
     def usable(p: int) -> bool:  # solved, and still a target (points deleted after planning are skipped)
@@ -141,13 +164,18 @@ class Seq:
 
 
 def ordered_sequences(
-    sol, results, points: dict, pattern: PatternSettings | None = None, label_of: Callable | None = None
+    sol,
+    results,
+    points: dict,
+    pattern: PatternSettings | None = None,
+    label_of: Callable | None = None,
+    group_of: dict[int, str] | None = None,
 ) -> dict[int, list[Seq]]:
     """Per stop: its groups (zones) as Seq. Without a pattern, the planner's order. With one,
     each group is ordered by the pattern, groups follow each other nearest first, and a later
     group starts at the corner nearest where the previous one ended."""
     P_part = {p: v[0] for p, v in points.items()}
-    base = sequences(sol, results, P_part, label_of)
+    base = sequences(sol, results, P_part, label_of, group_of)
     if pattern is None:
         return {k: [Seq(z, ids, [False] * (len(ids) - 1)) for z, ids in v] for k, v in base.items()}
     out: dict[int, list[Seq]] = {}
@@ -155,7 +183,11 @@ def ordered_sequences(
         cents = [np.mean([P_part[i] for i in ids], axis=0) for _, ids in groups]
         left, chain = list(range(1, len(groups))), [0]
         while left:
-            j = min(left, key=lambda i: float(np.linalg.norm(cents[i] - cents[chain[-1]])))
+            here = groups[chain[-1]][0]  # finish this zone (configuration) before the next
+            j = min(
+                left,
+                key=lambda i: (groups[i][0] != here, float(np.linalg.norm(cents[i] - cents[chain[-1]]))),
+            )
             left.remove(j)
             chain.append(j)
         seqs, end = [], None
@@ -346,15 +378,17 @@ def trace(
     lift: float = 0.03,
     home: np.ndarray | None = None,
     carrier_path: Callable[[int, int], list[tuple[dict, np.ndarray, bool]]] | None = None,
+    group_of: dict[int, str] | None = None,
 ) -> PathPlan:
     """Paths of solution ``sol``. ``points``: point id -> (p, n) in the part frame;
     ``base_poses``: world base pose per station (core.export.station_pose). ``pattern``
     orders each group; ``lift`` (m) is the height of lifted moves; ``home`` (joints) adds the
     moves to / from home; ``carrier_path(k_from, k_to)`` gives the carrier poses between two
-    stops as (carrier values, T_world_base, clear)."""
+    stops as (carrier values, T_world_base, clear); ``group_of`` (point id -> target group)
+    keeps each face's points in their own sequences."""
     tr = _Tracer(checker, part_mesh, step, jump_deg)
     seqs = ordered_sequences(  # unzoned stops: one group per joint configuration
-        sol, results, points, pattern, lambda r: config_label(checker.ik, np.asarray(r.q, float))
+        sol, results, points, pattern, lambda r: config_label(checker.ik, np.asarray(r.q, float)), group_of
     )
     plan = PathPlan([], step)
     n_seq = max(1, sum(len(v) for v in seqs.values()))
@@ -385,8 +419,9 @@ def trace(
             r0 = results[pids[0]]
             ref = home if (home is not None and j == 0) or q is None else q
             q_prev, q = q, tr.nearest_copy(r0.q, r0.q if ref is None else ref)  # short joint moves
+            label_prev = None if q_prev is None else config_label(checker.ik, q_prev)
             label = config_label(checker.ik, q)
-            first = "reconfigure" if j > 0 else ""
+            first = "reconfigure" if j > 0 and label != label_prev else ""
             if home is not None and j == 0:  # from home to the stop's first point
                 sp.samples += tr.joint_move(k, zone, home, q, r0.tcp, 0, pids[0], (False, True))
             elif q_prev is not None:  # the next zone at this stop: a planned joint move
@@ -421,63 +456,4 @@ def trace(
     return plan
 
 
-CSV_COLUMNS = (
-    "station",
-    "kind",
-    "carrier",
-    "zone",
-    "from_point",
-    "to_point",
-    "s",
-    "tcp",
-    "x_mm",
-    "y_mm",
-    "z_mm",
-    "qw",
-    "qx",
-    "qy",
-    "qz",
-    "j1_deg",
-    "j2_deg",
-    "j3_deg",
-    "j4_deg",
-    "j5_deg",
-    "j6_deg",
-    "issue",
-)
-
-
-def path_csv(plan: PathPlan, T_world_part: np.ndarray) -> str:
-    """One row per sample: TCP pose in the world (mm, quaternion wxyz), joints, issue."""
-    import csv
-    import io
-
-    buf = io.StringIO()
-    w = csv.writer(buf, lineterminator="\n")
-    w.writerow(CSV_COLUMNS)
-    carriers = {st.station: st.carrier for st in plan.stations}
-    for p in plan.samples:
-        T = T_world_part @ p.T_part_tcp
-        dofs = p.carrier if p.carrier is not None else carriers.get(p.station) or {}
-        x, y, z, qw = Rotation.from_matrix(T[:3, :3]).as_quat()[[0, 1, 2, 3]]
-        joints = [""] * 6 if p.q is None else [f"{v:.4f}" for v in np.degrees(p.q)]
-        w.writerow(
-            [
-                p.station + 1,
-                p.kind or "surface",
-                " ".join(f"{d}={v:.6f}" for d, v in dofs.items()),
-                "" if p.zone is None else p.zone + 1,
-                p.a,
-                p.b,
-                f"{p.s:.4f}",
-                p.tcp,
-                *(f"{v * 1000:.3f}" for v in T[:3, 3]),
-                f"{qw:.6f}",
-                f"{x:.6f}",
-                f"{y:.6f}",
-                f"{z:.6f}",
-                *joints,
-                p.issue,
-            ]
-        )
-    return buf.getvalue()
+from core.path_csv import CSV_COLUMNS, path_csv  # noqa: E402,F401 (re-export)

@@ -264,3 +264,60 @@ def test_jog_panel_joint_steps_and_refusals(app):
     jp.refresh()
     jp.step.value = 5000.0  # 5 m: out of reach
     assert not jp.jog("X", +1) and np.degrees(s.q[2]) == pytest.approx(105)
+
+
+def test_jog_refuses_steps_into_the_floor_or_the_external_axis(app):
+    s, cell = app["session"], app["cell"]
+    assert app["project"].load_example("rail_long_part")
+    jp = cell.jog_panel
+    jp.point.value = jp.point.options[0]  # the flange
+    up = np.radians([0, -90, 0, -90, 0, 0])
+    down = np.radians([0, 90, 0, -90, 0, 0])  # upper arm pointing down: through the floor / rail
+    cell.set_q(up)
+    assert jp.coll.hits() == [] and "Collision" not in jp.readout.content
+    hits = jp.coll.hits(down)
+    assert hits and any(b == "floor" or b.startswith("carrier_") for _, b in hits)
+    assert not jp._go(down) and np.allclose(s.q, up)  # refused
+    cell.set_q(down)  # a joint-slider move is not refused, but warned about
+    assert "Collision" in jp.readout.content
+    jp.allow.value = True
+    cell.set_q(up)
+    assert jp._go(down) and np.allclose(s.q, down)
+    jp.allow.value = False
+    cell.set_q(up)
+
+
+def test_sequences_keep_each_face_on_its_own():
+    from types import SimpleNamespace
+
+    from core.paths import sequences
+
+    zone = SimpleNamespace(station=0, points=[0, 1, 2, 3, 4, 5])
+    sol = SimpleNamespace(zones=[zone], assignment=dict.fromkeys(range(6), 0))
+    res = {i: SimpleNamespace(q=np.zeros(6)) for i in range(6)}
+    P = {i: np.array([i * 0.1, 0.0, 0.0]) for i in range(6)}
+    group = {0: "top", 1: "side", 2: "top", 3: "side", 4: "top", 5: "side"}
+    plain = sequences(sol, res, P)
+    assert plain == {0: [(0, [0, 1, 2, 3, 4, 5])]}
+    split = sequences(sol, res, P, group_of=group)
+    assert [sorted(ids) for _, ids in split[0]] == [[0, 2, 4], [1, 3, 5]]
+    assert all(z == 0 for z, _ in split[0])  # still the same zone (configuration)
+
+
+def test_arm_motion_and_unzoned_config_cost():
+    from types import SimpleNamespace
+
+    from core.schema import Weights
+    from opt.cost import cost_breakdown
+    from opt.zoning import arm_motion, config_changes
+
+    res = {
+        0: SimpleNamespace(q=np.radians([0, 0, 0, 0, 0, 0])),
+        1: SimpleNamespace(q=np.radians([90, 0, 0, 0, 0, 0])),
+        2: SimpleNamespace(q=np.radians([90, 0, 0, 0, 0, 350])),  # -10 deg the short way
+    }
+    seqs = {0: [[0, 1, 2]], 1: [[0], [2]]}
+    assert arm_motion(seqs, res) == pytest.approx((1.0 + 10 / 90) / 2)
+    assert config_changes(seqs) == 1
+    _, terms = cost_breakdown([], 0, [[0, 0]], Weights(motion=2.0, group=3.0), groups=1, motion=0.5)
+    assert terms["motion"] == pytest.approx(1.0) and terms["group"] == pytest.approx(3.0)

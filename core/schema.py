@@ -458,7 +458,8 @@ class Weights(_Model):
     limits: float = Field(default=0.2, ge=0)
     torque: float = Field(default=0.5, ge=0)
     standoff: float = Field(default=1.0, ge=0)  # soft: carrier closer than the preferred standoff
-    group: float = Field(default=1.0, ge=0)  # per extra joint-configuration group at a stop (zoning)
+    group: float = Field(default=1.0, ge=0)  # per extra joint-configuration group at a stop
+    motion: float = Field(default=1.0, ge=0)  # mean largest joint move between neighbouring points / 90 deg
     wrist_flip: float = Field(default=1.0, ge=0)  # per joint 4 / 6 jump > 180 deg inside a group
 
     @model_validator(mode="before")

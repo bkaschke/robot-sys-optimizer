@@ -19,7 +19,8 @@ from ui.session import Session
 # (Weights field, label, hint); the count costs first
 FIELDS = (
     ("stations", "Cost per stop", "each base / carrier position beyond the first (fewer base changes)"),
-    ("group", "Cost per group", "each extra joint-configuration group at a stop (zoning)"),
+    ("group", "Cost per group", "each extra joint configuration at a stop (a configuration change)"),
+    ("motion", "Cost of arm motion", "mean largest joint move between neighbouring points, per 90°"),
     ("wrist_flip", "Cost per wrist flip", "a joint 4 / joint 6 jump > 180° inside a group's path (zoning)"),
     ("unreached", "Cost per unreached point", "keep it large: reaching points comes first"),
     ("travel", "Carrier travel (per m)", "rail |Δs|, gantry max axis, mobile straight line"),

@@ -2,7 +2,10 @@
 the world, the robot base, the part or the tool frame (core.jog), step by step with - / +
 buttons, like a teach pendant. The joints come from IK nearest the current pose; a step that
 would need a configuration flip (a joint moving more than 30 deg) or leave the reach is
-refused. The readout shows the jogged point's pose in the chosen frame."""
+refused, and so is one that collides with the floor, the part, the external axis or a
+stay-out zone (ui.cell_collision; *Allow collisions* turns that off). The readout shows the
+jogged point's pose in the chosen frame and warns when the current pose collides (also after
+a joint-slider move)."""
 
 from __future__ import annotations
 
@@ -11,6 +14,7 @@ import viser
 
 from core.jog import AXES, MAX_STEP, jog_pose, nearest_ik
 from core.transforms import matrix_to_rpy
+from ui.cell_collision import CellCollision, describe
 from ui.widgets import notify
 
 FRAMES = ("Joint", "World", "Robot base", "Part", "Tool")
@@ -21,6 +25,7 @@ class JogPanel:
     def __init__(self, server: viser.ViserServer, cell) -> None:
         self.cell, self.s = cell, cell.s
         self._ik = self._ik_for = None
+        self.coll = CellCollision(cell.s)
         gui = server.gui
         with gui.add_folder("Jog", expand_by_default=False):
             self.frame = gui.add_dropdown("Frame", FRAMES, initial_value="World")
@@ -32,6 +37,9 @@ class JogPanel:
             self.plus = gui.add_button_group("Jog +", AXES)
             self.j_minus = gui.add_button_group("Joint −", ("J1", "J2", "J3", "J4", "J5", "J6"))
             self.j_plus = gui.add_button_group("Joint +", ("J1", "J2", "J3", "J4", "J5", "J6"))
+            self.allow = gui.add_checkbox(
+                "Allow collisions", False, hint="jog steps into the floor, part or external axis"
+            )
             self.readout = gui.add_markdown("")
         self.minus.on_click(lambda e: self.jog(e.target.value, -1, e))
         self.plus.on_click(lambda e: self.jog(e.target.value, +1, e))
@@ -95,7 +103,7 @@ class JogPanel:
                 return False
             qn = q.copy()
             qn[j] = np.clip(q[j] + sign * np.radians(self.joint_step.value), r.lower[j], r.upper[j])
-            return self._go(qn)
+            return self._go(qn, event)
         if self.frame.value == "Joint":
             return False
         T = self.T_world_point()
@@ -113,7 +121,7 @@ class JogPanel:
         if np.max(np.abs(qn - q)) > MAX_STEP:
             notify(event, "Cannot jog", "the arm would have to change configuration (near a singularity)")
             return False
-        return self._go(qn)
+        return self._go(qn, event)
 
     def _solver(self):
         from core.ik import make_ik
@@ -122,7 +130,16 @@ class JogPanel:
             self._ik, self._ik_for = make_ik(self.s.robot), self.s.robot
         return self._ik
 
-    def _go(self, q: np.ndarray) -> bool:
+    def _tcp(self) -> str | None:
+        """The jog point's TCP (its contact faces may touch the part), or None (flange)."""
+        return None if self.point.value == FLANGE else self.point.value
+
+    def _go(self, q: np.ndarray, event=None) -> bool:
+        if not self.allow.value:
+            hits = self.coll.hits(q, self._tcp())
+            if hits:
+                notify(event, "Collision", f"that step collides: {describe(hits)}")
+                return False
         self.cell.set_q(q)
         self.update_readout()
         return True
@@ -132,10 +149,12 @@ class JogPanel:
         if T is None:
             self.readout.content = "_No robot._"
             return
+        hits = self.coll.hits(None, self._tcp())
+        warn = "  \n⚠ **Collision:** " + describe(hits) if hits else ""
         f = self.frame.value
         if f == "Joint":
             deg = ", ".join(f"{v:.1f}" for v in np.degrees(self.s.q))
-            self.readout.content = f"Joints (deg): {deg}"
+            self.readout.content = f"Joints (deg): {deg}{warn}"
             return
         ref = {"Robot base": np.asarray(self.s.T_world_base)}
         if f == "Part" and self.s.part is not None:
@@ -146,5 +165,5 @@ class JogPanel:
         p, rpy = P[:3, 3] * 1000, np.degrees(matrix_to_rpy(P[:3, :3]))
         self.readout.content = (
             f"**{self.point.value}** in {where}: xyz mm {p[0]:.1f}, {p[1]:.1f}, {p[2]:.1f}  \n"
-            f"rpy deg {rpy[0]:.2f}, {rpy[1]:.2f}, {rpy[2]:.2f}"
+            f"rpy deg {rpy[0]:.2f}, {rpy[1]:.2f}, {rpy[2]:.2f}{warn}"
         )

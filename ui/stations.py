@@ -71,7 +71,8 @@ class StationsPanel:
             self.areas = gui.add_checkbox(
                 "Connected station areas", True, hint="each stop's points one area on the part (no overlap)"
             )
-            self.zoning = gui.add_dropdown("Joint configuration", ZONING)
+            # v6: zones by default (best per point mixed all configurations at a stop)
+            self.zoning = gui.add_dropdown("Joint configuration", ZONING, initial_value=ZONING[1])
             self.zoning_note = gui.add_markdown(
                 "_**zones**: each stop's points are grouped by joint configuration (shoulder/elbow/"
                 "wrist) into ordered paths; extra groups and wrist jumps > 180° cost what *Costs & "
