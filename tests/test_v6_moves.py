@@ -93,8 +93,19 @@ def test_home_moves_are_clear_and_clear_paths(app):
             for i, p in enumerate(st.samples):
                 if p.issue == "reconfigure" and p.kind == "":
                     assert st.samples[i - 1].kind == "home"
+    n = len(plan.samples)  # Back to start: playback position and the robot at the first sample
+    assert not sim.restart.disabled
+    sim.frame.value = n - 1
+    sim.go_to(n - 1)
+    sim.rewind()
+    assert sim.frame.value == 0 and np.allclose(s.q, plan.samples[0].q)
+    sim.frame.value = n - 1  # Play at the end starts again from the beginning
+    sim.toggle()
+    sim.pause()
+    sim._player.join(timeout=2.0)
+    assert sim.frame.value < n - 1
     sim.clear_paths()
-    assert sim.plan is None and sim.clear_btn.disabled and sim.export.disabled
+    assert sim.plan is None and sim.clear_btn.disabled and sim.export.disabled and sim.restart.disabled
     assert "cleared" in sim.info.content
 
 

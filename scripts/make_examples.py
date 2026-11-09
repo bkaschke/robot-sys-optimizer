@@ -14,7 +14,8 @@ examples/gantry_overhead/project.json
     UR20 hanging from an overhead X-Y gantry (two fixed beams on posts), top face and the
     upper part (from 1.8 m) of both long faces.
 examples/floor_xy_rails/project.json
-    UR20 on a carriage riding two crossed floor axes (X-Y), 0.25 m to 1.8 m up one long face
+    UR20 on a floor X-Y gantry (X rails, a bridge moving in x, carriage along it in y),
+    0.25 m to 1.8 m up one long face
     and of the end face.
 examples/mobile_lift/project.json
     UR20 on a mobile base with a vertical lift (0..1 m, planned per stop), one long face from
@@ -175,13 +176,14 @@ def gantry_base() -> Base:
 
 
 def floor_xy_base() -> Base:
-    """Two crossed floor axes: rails along x (fixed) under a carriage that also moves in y;
-    the UR20 stands on a riser on the carriage. Works the -y side of the wall and its end."""
+    """A floor X-Y gantry: two fixed X rails, a bridge across them that moves in x (attach
+    "x_axis"), and a carriage running along the bridge in y; the UR20 stands on a riser on
+    the carriage. Works the -y side of the wall and its end."""
     rails = [
         Primitive(
-            name=f"rail_{t}", shape="box", size=(6.0, 0.15, 0.08), pose=Pose(xyz=(0, y, 0)), attach="fixed"
+            name=f"x_rail_{t}", shape="box", size=(6.0, 0.15, 0.08), pose=Pose(xyz=(0, y, 0)), attach="fixed"
         )
-        for t, y in (("a", -0.35), ("b", 0.35))
+        for t, y in (("a", -0.75), ("b", 0.75))
     ]
     return Base(
         mode="movable",
@@ -189,11 +191,19 @@ def floor_xy_base() -> Base:
         pose=Pose(xyz=(0.0, -1.4, 0.0)),  # axis frame on the floor, 1.4 m in front of the wall
         bodies=[
             *rails,
-            Primitive(
-                name="carriage", shape="box", size=(0.6, 0.6, 0.15), pose=Pose(xyz=(0, 0, 0.08)), kg=70
+            Primitive(  # the Y axis: spans both rails, rides along them in x
+                name="bridge",
+                shape="box",
+                size=(0.3, 1.8, 0.1),
+                pose=Pose(xyz=(0, 0, 0.08)),
+                attach="x_axis",
+                kg=50,
             ),
             Primitive(
-                name="riser", shape="cylinder", radius=0.15, height=0.55, pose=Pose(xyz=(0, 0, 0.23)), kg=40
+                name="carriage", shape="box", size=(0.4, 0.5, 0.12), pose=Pose(xyz=(0, 0, 0.18)), kg=50
+            ),
+            Primitive(
+                name="riser", shape="cylinder", radius=0.15, height=0.48, pose=Pose(xyz=(0, 0, 0.30)), kg=40
             ),
         ],
         T_mount=Pose(xyz=(0.0, 0.0, 0.78)),

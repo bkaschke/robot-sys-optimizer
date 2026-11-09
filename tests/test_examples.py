@@ -29,7 +29,7 @@ def test_examples_are_listed():
     [
         ("rail_long_part", "rail", 3),
         ("mobile_amr", "mobile", 7),
-        ("floor_xy_rails", "gantry", 4),  # v6 (gantry_overhead: same code path, 96 s)
+        ("floor_xy_rails", "gantry", 5),  # v6: X rails + bridge (gantry_overhead: same code path, 96 s)
         ("mobile_lift", "mobile", 8),  # v6: lift height planned per stop
     ],
 )

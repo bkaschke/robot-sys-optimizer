@@ -136,7 +136,9 @@ class Primitive(_Model):
     the carriage frame (``attach="carriage"``, moves with the carrier DOFs), the lift stage
     (``attach="lift"``: the carriage frame raised by the lift DOF, e.g. a platform that rises
     with the robot) or the carrier frame ``Base.pose`` (``attach="fixed"``, e.g. a rail track
-    or a gantry beam).
+    or a gantry beam) or the X axis (``attach="x_axis"``: a gantry bridge across the X rails
+    that moves in x but not in y; the carriage runs along it. Rails and mobile bases treat it
+    as the carriage).
     """
 
     shape: Literal["box", "cylinder", "mesh"]
@@ -145,7 +147,7 @@ class Primitive(_Model):
     height: float | None = Field(default=None, gt=0)
     kg: float | None = Field(default=None, ge=0)
     name: str = Field(default="", max_length=64)
-    attach: Literal["carriage", "lift", "fixed"] = "carriage"
+    attach: Literal["carriage", "lift", "fixed", "x_axis"] = "carriage"
     pose: Pose = Field(default_factory=Pose)
     mesh: str | None = None  # mesh path, relative to the project folder or the repo
     units: Literal["m", "mm", "in"] = "m"

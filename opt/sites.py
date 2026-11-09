@@ -140,6 +140,9 @@ class CarrierSites:
             base.append((*entry, CarriageFollow(self.c, np.linalg.inv(Tc) @ b.T)) if lifted else entry)
         lift_T = Tc @ make_T(p=(0, 0, v.get("lift", 0.0)))
         base += [(b.name, b.mesh, T_base_inv @ b.T) for b in self.c._bodies("lift", lift_T)]
+        Ta = self.c.T_world_axis(v)  # gantry bridge: moves in x only
+        for b in self.c._bodies("x_axis", Ta):
+            base.append((b.name, b.mesh, T_base_inv @ b.T, self.c.axis_follow(np.linalg.inv(Ta) @ b.T)))
         world = [(b.name, b.mesh, b.T) for b in self.c.static_bodies()]
         return base, world
 

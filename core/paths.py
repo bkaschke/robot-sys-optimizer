@@ -43,7 +43,14 @@ from scipy.spatial.transform import Rotation, Slerp
 
 from core.configs import config_label, order_path
 from core.feasibility import CancelledError, FeasibilityChecker, PointResult
-from core.patterns import CORNERS, PatternSettings, crossing_lifts, order_points
+from core.patterns import (
+    CORNERS,
+    PatternSettings,
+    crossing_lifts,
+    order_points,
+    pass_over_lifts,
+    point_spacing,
+)
 
 ISSUES = ("unreachable", "config_flip", "jump", "collision", "reconfigure", "carrier_blocked")
 HOME_STEP = np.radians(3.0)  # joint step of the moves to / from home
@@ -173,12 +180,15 @@ def ordered_sequences(
 ) -> dict[int, list[Seq]]:
     """Per stop: its groups (zones) as Seq. Without a pattern, the planner's order. With one,
     each group is ordered by the pattern, groups follow each other nearest first, and a later
-    group starts at the corner nearest where the previous one ended."""
+    group starts at the corner nearest where the previous one ended. With ``no_crossing`` a
+    move lifts when it crosses an earlier move or would run over another target point."""
     P_part = {p: v[0] for p, v in points.items()}
     base = sequences(sol, results, P_part, label_of, group_of)
     if pattern is None:
         return {k: [Seq(z, ids, [False] * (len(ids) - 1)) for z, ids in v] for k, v in base.items()}
     out: dict[int, list[Seq]] = {}
+    P_all = np.array([v[0] for v in points.values()], float).reshape(-1, 3)
+    spacing = point_spacing(P_all) if pattern.no_crossing else 0.0
     for k, groups in base.items():
         cents = [np.mean([P_part[i] for i in ids], axis=0) for _, ids in groups]
         left, chain = list(range(1, len(groups))), [0]
@@ -203,11 +213,9 @@ def ordered_sequences(
                     key=lambda r: float(np.linalg.norm(P[r.order[0]] - end)),
                 )
             pids = [ids[i] for i in o.order]
-            lifts = (
-                crossing_lifts(o.uv, o.order, o.passes)
-                if pattern.no_crossing
-                else np.zeros(len(pids) - 1, bool)
-            )
+            lifts = np.zeros(len(pids) - 1, bool)
+            if pattern.no_crossing:  # lift over crossings and over other points (sand each once)
+                lifts = crossing_lifts(o.uv, o.order, o.passes) | pass_over_lifts(P[o.order], P_all, spacing)
             seqs.append(Seq(zone, pids, [bool(x) for x in lifts]))
             end = P[o.order[-1]]
         out[k] = seqs

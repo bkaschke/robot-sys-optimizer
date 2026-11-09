@@ -18,7 +18,6 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from xml.sax.saxutils import quoteattr
 
 import numpy as np
 import pinocchio as pin
@@ -179,6 +178,10 @@ class Carrier:
         self.base = base
         self.resolve = resolve
         self.specs = body_list(base)
+        if base.carrier != "gantry" or base.mode != "movable":  # one axis: the bridge is the carriage
+            self.specs = [
+                p.model_copy(update={"attach": "carriage"}) if p.attach == "x_axis" else p for p in self.specs
+            ]
         self._meshes: dict[int, trimesh.Trimesh] = {}
         self.kind = base.carrier if base.mode == "movable" else "static"
         self.T_static = np.eye(4) if T_world_base_static is None else np.asarray(T_world_base_static, float)
@@ -215,6 +218,12 @@ class Carrier:
             return make_T(rpy_to_matrix((0, 0, v["yaw"])), (v["x"], v["y"], 0))
         return self.T_static @ np.linalg.inv(self.T_mount)
 
+    def T_world_axis(self, v: dict) -> np.ndarray:
+        """Frame of the bodies on the X axis (a gantry bridge: moves in x, not in y)."""
+        if self.kind == "gantry":
+            return self.T_frame @ make_T(p=(v["x"], 0, 0))
+        return self.T_world_carriage(v)
+
     def T_world_base(self, v: dict) -> np.ndarray:
         if self.kind == "static":
             return self.T_static
@@ -247,11 +256,28 @@ class Carrier:
         ]
 
     def moving_bodies(self, v: dict) -> list[Body]:
-        """Bodies on the carriage and on the lift stage (world poses for DOF values v)."""
+        """Bodies on the X axis (bridge), the carriage and the lift stage (world poses for DOF
+        values v)."""
         if self.kind == "static":
             return []
         Tc = self.T_world_carriage(v)
-        return self._bodies("carriage", Tc) + self._bodies("lift", Tc @ make_T(p=(0, 0, v.get("lift", 0.0))))
+        return (
+            self._bodies("x_axis", self.T_world_axis(v))
+            + self._bodies("carriage", Tc)
+            + self._bodies("lift", Tc @ make_T(p=(0, 0, v.get("lift", 0.0))))
+        )
+
+    def axis_follow(self, T_axis_body: np.ndarray):
+        """fn(T_world_base) -> T_base_body for a body on the X axis (core.collision re-places
+        it per base pose: the bridge stays put in y while the carriage moves along it)."""
+        M_inv, F_inv = np.linalg.inv(self.T_mount), np.linalg.inv(self.T_frame)
+
+        def follow(T_world_base: np.ndarray) -> np.ndarray:
+            x = float((F_inv @ T_world_base @ M_inv)[0, 3])
+            T_axis = self.T_frame @ make_T(p=(x, 0, 0))
+            return np.linalg.inv(T_world_base) @ T_axis @ T_axis_body
+
+        return follow
 
     def local_footprint(self) -> Polygon | None:
         """Carriage-frame outline of the carriage and lift-stage bodies (the lift moves along
@@ -298,7 +324,16 @@ class Carrier:
         else:
             moving = self._moved(self.local_footprint(), Tc)
         static = self._local("fp_static", lambda: self._hulls(self.static_bodies()))
-        polys = [p for p in (moving, static) if p is not None]
+        axis = None
+        if any(p.attach == "x_axis" for p in self.specs):
+            Ta = self.T_world_axis(v)
+            if abs(Ta[2, 2] - 1.0) > 1e-9:
+                axis = self._hulls(self._bodies("x_axis", Ta))
+            else:
+                axis = self._moved(
+                    self._local("fp_axis", lambda: self._hulls(self._bodies("x_axis", np.eye(4)))), Ta
+                )
+        polys = [p for p in (moving, axis, static) if p is not None]
         if not polys:
             return None
         return polys[0] if len(polys) == 1 else unary_union(polys)
@@ -412,87 +447,7 @@ class Carrier:
     # --- URDF ---------------------------------------------------------------------------------
 
     def urdf(self) -> str:
-        """Carrier chain world -> DOF joints -> carriage -> mount, primitives as geometry."""
+        """Carrier chain world -> DOF joints -> carriage -> mount (core.carrier_urdf)."""
+        from core.carrier_urdf import carrier_urdf
 
-        def geom(p: Primitive) -> str:
-            if p.shape == "box":
-                return f'<box size="{p.size[0]} {p.size[1]} {p.size[2]}"/>'
-            if p.shape == "mesh":
-                path = (self.resolve or default_resolve)(p.mesh).resolve().as_posix()
-                sc = UNIT_SCALE[p.units]
-                return f'<mesh filename={quoteattr(path)} scale="{sc} {sc} {sc}"/>'
-            return f'<cylinder radius="{p.radius}" length="{p.height}"/>'
-
-        def link(name: str, p: Primitive | None = None) -> str:
-            if p is None:
-                return f'  <link name="{name}"/>'
-            h = 0.0 if p.shape == "mesh" else primitive_height(p) / 2
-            g = f'<origin xyz="0 0 {h}"/><geometry>{geom(p)}</geometry>'
-            return f'  <link name="{name}"><visual>{g}</visual><collision>{g}</collision></link>'
-
-        def joint(name, kind, parent, child, xyz="0 0 0", rpy="0 0 0", axis="1 0 0", lim=None) -> str:
-            lim_s = (
-                f'<limit lower="{lim[0]}" upper="{lim[1]}" effort="1000" velocity="1"/>'
-                if lim is not None
-                else ""
-            )
-            ax = f'<axis xyz="{axis}"/>' if kind != "fixed" else ""
-            return (
-                f'  <joint name="{name}" type="{kind}"><parent link="{parent}"/><child link="{child}"/>'
-                f'<origin xyz="{xyz}" rpy="{rpy}"/>{ax}{lim_s}</joint>'
-            )
-
-        def xyz_rpy(T: np.ndarray) -> tuple[str, str]:
-            from core.transforms import matrix_to_rpy
-
-            return " ".join(f"{v:.9g}" for v in T[:3, 3]), " ".join(
-                f"{v:.9g}" for v in matrix_to_rpy(T[:3, :3])
-            )
-
-        lines = ['<robot name="carrier">', link("world")]
-        for p in self.specs:
-            if p.attach == "fixed":
-                xyz, rpy = xyz_rpy(self.T_frame @ pose_to_matrix(p.pose))
-                lines += [
-                    link(f"fixed_{p.name}", p),
-                    joint(f"fixed_{p.name}_joint", "fixed", "world", f"fixed_{p.name}", xyz, rpy),
-                ]
-        parent = "world"
-        bnd = dict(zip(self.dofs, self.bounds.tolist(), strict=True))
-        if self.kind in ("rail", "gantry"):
-            xyz, rpy = xyz_rpy(self.T_frame)
-            lines += [link("carrier_frame"), joint("frame", "fixed", "world", "carrier_frame", xyz, rpy)]
-            parent = "carrier_frame"
-        axes = {
-            "s": ("1 0 0", "prismatic"),
-            "x": ("1 0 0", "prismatic"),
-            "y": ("0 1 0", "prismatic"),
-            "yaw": ("0 0 1", "revolute"),
-        }
-        for n in [d for d in self.dofs if d != "lift"]:
-            axis, kind = axes[n]
-            lines += [
-                link(f"{n}_link"),
-                joint(f"{n}_joint", kind, parent, f"{n}_link", axis=axis, lim=bnd[n]),
-            ]
-            parent = f"{n}_link"
-        lines += [link("carriage"), joint("carriage_fixed", "fixed", parent, "carriage")]
-        parent = "carriage"
-        if "lift" in self.dofs:
-            lines += [
-                link("lift_link"),
-                joint("lift_joint", "prismatic", "carriage", "lift_link", axis="0 0 1", lim=bnd["lift"]),
-            ]
-        stage = "lift_link" if "lift" in self.dofs else "carriage"
-        for p in self.specs:
-            if p.attach in ("carriage", "lift"):
-                on = stage if p.attach == "lift" else "carriage"
-                xyz, rpy = xyz_rpy(pose_to_matrix(p.pose))
-                lines += [
-                    link(f"body_{p.name}", p),
-                    joint(f"body_{p.name}_joint", "fixed", on, f"body_{p.name}", xyz, rpy),
-                ]
-        parent = stage
-        xyz, rpy = xyz_rpy(self.T_mount)
-        lines += [link("mount"), joint("mount_fixed", "fixed", parent, "mount", xyz, rpy), "</robot>"]
-        return "\n".join(lines)
+        return carrier_urdf(self)

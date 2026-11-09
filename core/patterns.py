@@ -6,7 +6,8 @@ Points are projected onto the plane across their mean normal; the raster angle i
 in that plane from the part X axis (as the surface grid's row direction). Start corners are
 "<along>-<across>" in the raster frame: min-min starts on the lowest row at its low end.
 ``crossing_lifts`` marks the moves that would cross an earlier move ("prevent crossing
-paths"): the tool lifts off for them instead of following the surface.
+paths"): the tool lifts off for them instead of following the surface; `pass_over_lifts` also
+lifts moves that would run over another target point (each point is sanded once).
 """
 
 from __future__ import annotations
@@ -424,3 +425,42 @@ def crossing_lifts(uv: np.ndarray, order: np.ndarray, passes: np.ndarray | None 
         A.append(a)
         B.append(b)
     return lift
+
+
+PASS_OVER = 0.4  # x point spacing: a move this close to another point passes over it
+
+
+def pass_over_lifts(P_moves: np.ndarray, P_all: np.ndarray, spacing: float) -> np.ndarray:
+    """Per move P_moves[k] -> P_moves[k + 1] (3D, part frame): True when the straight move
+    passes within ``PASS_OVER`` x spacing of a target point other than its two ends, i.e.
+    the tool would sand that point a second time (or before its turn) on the way."""
+    from scipy.spatial import cKDTree
+
+    m = len(P_moves) - 1
+    out = np.zeros(max(m, 0), bool)
+    if m <= 0 or len(P_all) < 3 or spacing <= 0:
+        return out
+    tree, r = cKDTree(P_all), PASS_OVER * spacing
+    for k in range(m):
+        a, b = P_moves[k], P_moves[k + 1]
+        u = b - a
+        L2 = float(u @ u)
+        if L2 <= (2 * r) ** 2:  # a short move cannot pass over a third point
+            continue
+        idx = tree.query_ball_point((a + b) / 2, np.sqrt(L2) / 2 + r)
+        Q = P_all[idx]
+        t = np.clip((Q - a) @ u / L2, 0.0, 1.0)
+        d = np.linalg.norm(a + t[:, None] * u - Q, axis=1)
+        ends = (np.linalg.norm(Q - a, axis=1) < 1e-9) | (np.linalg.norm(Q - b, axis=1) < 1e-9)
+        out[k] = bool(((d < r) & ~ends & (t > 0) & (t < 1)).any())
+    return out
+
+
+def point_spacing(P: np.ndarray) -> float:
+    """Median nearest-neighbour distance of the points (0 for fewer than 2)."""
+    from scipy.spatial import cKDTree
+
+    if len(P) < 2:
+        return 0.0
+    d, _ = cKDTree(P).query(P, k=2)
+    return float(np.median(d[:, 1]))

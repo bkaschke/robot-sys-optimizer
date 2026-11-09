@@ -38,6 +38,7 @@ ATTACH = {
     "carriage (moves)": "carriage",
     "lift stage (rises with the robot)": "lift",
     "fixed (track / frame)": "fixed",
+    "X axis / gantry bridge (moves in x only)": "x_axis",
 }
 ATTACH_LABEL = {v: k for k, v in ATTACH.items()}
 GIZMO = "/carrier_edit"

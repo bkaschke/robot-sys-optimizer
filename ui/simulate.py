@@ -69,6 +69,9 @@ class SimPanel:
             )
             self.show = gui.add_checkbox("Show paths", True)
             self.play = gui.add_button("▶ Play", disabled=True)
+            self.restart = gui.add_button(
+                "⏮ Back to start", disabled=True, hint="playback to the first sample"
+            )
             self.speed = gui.add_slider("Speed (mm/s)", 20.0, 2000.0, 10.0, 250.0)
             self.frame = gui.add_slider("Sample", 0, 1, 1, 0, disabled=True)
             self.status = gui.add_markdown("")
@@ -78,6 +81,7 @@ class SimPanel:
         self.stop.on_click(lambda e: self._cancel.set())
         self.show.on_update(lambda e: self.draw())
         self.play.on_click(lambda e: self.toggle())
+        self.restart.on_click(lambda e: self.rewind())
         self._goto = Latest(self.go_to)
         self.frame.on_update(lambda e: self._goto(int(self.frame.value)))
         self.export.on_click(lambda e: self.export_csv(e))
@@ -295,7 +299,9 @@ class SimPanel:
         )
         n = len(plan.samples)
         self.frame.max = max(1, n - 1)
-        self.frame.disabled = self.play.disabled = self.export.disabled = self.clear_btn.disabled = n == 0
+        self.frame.disabled = self.play.disabled = self.restart.disabled = self.export.disabled = (
+            self.clear_btn.disabled
+        ) = n == 0
         self._station = None
         self.draw()
         if n:
@@ -309,7 +315,9 @@ class SimPanel:
         self.pause()
         self.plan, self.label, self._targets_key = None, None, None
         self.clear()
-        self.frame.disabled = self.play.disabled = self.export.disabled = self.clear_btn.disabled = True
+        self.frame.disabled = self.play.disabled = self.restart.disabled = self.export.disabled = (
+            self.clear_btn.disabled
+        ) = True
         self.status.content = ""
         self.info.content = f"_Paths cleared{': ' + why if why else ''}. **Build paths** again._"
 
@@ -331,7 +339,9 @@ class SimPanel:
         self.pause()
         self.plan, self.label = None, None
         self.clear()
-        self.frame.disabled = self.play.disabled = self.export.disabled = self.clear_btn.disabled = True
+        self.frame.disabled = self.play.disabled = self.restart.disabled = self.export.disabled = (
+            self.clear_btn.disabled
+        ) = True
         self.status.content = ""
         self.info.content = f"_Paths were for another plan: **Build paths** for {sol.label}._"
 
@@ -431,6 +441,8 @@ class SimPanel:
             return self.pause()
         if self.plan is None or not self.plan.samples:
             return
+        if int(self.frame.value) >= len(self.plan.samples) - 1:  # at the end: play from the start
+            self.rewind()
         self._playing.set()
         self.play.label = "⏸ Pause"
 
@@ -448,11 +460,24 @@ class SimPanel:
             self.play.label = "▶ Play"
             self.go_to(int(self.frame.value))  # sync the joint sliders with the final pose
 
-        threading.Thread(target=run, daemon=True).start()
+        self._player = threading.Thread(target=run, daemon=True)
+        self._player.start()
 
     def pause(self) -> None:
         self._playing.clear()
         self.play.label = "▶ Play"
+
+    def rewind(self) -> None:
+        """Back to start: stop playback and show the first sample (carrier at the first stop)."""
+        self.pause()
+        player = getattr(self, "_player", None)
+        if player is not None and player is not threading.current_thread():
+            player.join(timeout=1.0)  # its last frame update must not land after the rewind
+        if self.plan is None or not self.plan.samples:
+            return
+        self._station = None
+        self.frame.value = 0
+        self.go_to(0)
 
     # --- export --------------------------------------------------------------------------------
 

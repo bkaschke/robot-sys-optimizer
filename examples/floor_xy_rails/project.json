@@ -51,7 +51,8 @@
       "curve_extrapolate": "linear",
       "curve_source": "UR20 datasheet Dec 2024 (plot reading); >800 mm extrapolated estimate"
     },
-    "home_deg": null
+    "home_deg": null,
+    "joint_limits_deg": null
   },
   "base": {
     "mode": "movable",
@@ -82,12 +83,12 @@
         "radius": null,
         "height": null,
         "kg": null,
-        "name": "rail_a",
+        "name": "x_rail_a",
         "attach": "fixed",
         "pose": {
           "xyz": [
             0.0,
-            -0.35,
+            -0.75,
             0.0
           ],
           "rpy": [
@@ -109,12 +110,12 @@
         "radius": null,
         "height": null,
         "kg": null,
-        "name": "rail_b",
+        "name": "x_rail_b",
         "attach": "fixed",
         "pose": {
           "xyz": [
             0.0,
-            0.35,
+            0.75,
             0.0
           ],
           "rpy": [
@@ -129,15 +130,15 @@
       {
         "shape": "box",
         "size": [
-          0.6,
-          0.6,
-          0.15
+          0.3,
+          1.8,
+          0.1
         ],
         "radius": null,
         "height": null,
-        "kg": 70.0,
-        "name": "carriage",
-        "attach": "carriage",
+        "kg": 50.0,
+        "name": "bridge",
+        "attach": "x_axis",
         "pose": {
           "xyz": [
             0.0,
@@ -154,10 +155,37 @@
         "units": "m"
       },
       {
+        "shape": "box",
+        "size": [
+          0.4,
+          0.5,
+          0.12
+        ],
+        "radius": null,
+        "height": null,
+        "kg": 50.0,
+        "name": "carriage",
+        "attach": "carriage",
+        "pose": {
+          "xyz": [
+            0.0,
+            0.0,
+            0.18
+          ],
+          "rpy": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "mesh": null,
+        "units": "m"
+      },
+      {
         "shape": "cylinder",
         "size": null,
         "radius": 0.15,
-        "height": 0.55,
+        "height": 0.48,
         "kg": 40.0,
         "name": "riser",
         "attach": "carriage",
@@ -165,7 +193,7 @@
           "xyz": [
             0.0,
             0.0,
-            0.23
+            0.3
           ],
           "rpy": [
             0.0,
@@ -1456,6 +1484,7 @@
       "torque": 0.5,
       "standoff": 1.0,
       "group": 1.0,
+      "motion": 1.0,
       "wrist_flip": 1.0
     },
     "margins": {
