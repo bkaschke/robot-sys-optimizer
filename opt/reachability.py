@@ -63,6 +63,15 @@ def within_limits(q: np.ndarray, lo: np.ndarray, hi: np.ndarray) -> np.ndarray:
     return np.all(k_lo <= k_hi, axis=-1)
 
 
+def map_limits(robot: Robot) -> tuple[np.ndarray, np.ndarray]:
+    """Joint limits the map uses: the robot's (user limits included), except joint 1 keeps the
+    URDF range. The map is symmetric about the base z axis, so it cannot hold a narrower base
+    joint; the exact checks (core.feasibility) apply that limit."""
+    lo, hi = robot.lower.copy(), robot.upper.copy()
+    lo[0], hi[0] = getattr(robot, "urdf_lower", lo)[0], getattr(robot, "urdf_upper", hi)[0]
+    return lo, hi
+
+
 @dataclass
 class ReachMap:
     r0: float
@@ -90,7 +99,8 @@ class ReachMap:
     ) -> ReachMap:
         if robot.spec.ik != "ur_analytic":
             raise NotImplementedError("reachability maps need the UR analytic solver (v1)")
-        if robot.upper[0] - robot.lower[0] < 2 * np.pi - 1e-6:
+        lower, upper = map_limits(robot)
+        if upper[0] - lower[0] < 2 * np.pi - 1e-6:
             raise NotImplementedError("map symmetry needs a full-turn first joint")
         ik = URAnalyticIK(robot)
         tcp_len = float(np.linalg.norm(T_flange_tcp[:3, 3]))
@@ -105,7 +115,7 @@ class ReachMap:
         R_all = np.einsum("dij,sjk->dsik", R_dirs, Rz).reshape(-1, 3, 3)  # (D*S,3,3)
         T_tcp_flange = np.linalg.inv(T_flange_tcp)
         m = np.radians(settings.joint_margin_deg)
-        lo, hi = robot.lower + m, robot.upper - m
+        lo, hi = lower + m, upper - m
         nr, nz, D, S = len(r_vals), len(z_vals), len(dirs), len(spins)
         reach_arr = np.zeros((nr, nz, D), bool)
         manip_arr = np.zeros((nr, nz, D), np.float32)
@@ -140,7 +150,7 @@ class ReachMap:
             "robot": robot.spec.name,
             "urdf": hashlib.sha256(urdf).hexdigest(),
             "dh": robot.spec.dh.model_dump() if robot.spec.dh else None,
-            "limits": np.round(np.concatenate([robot.lower, robot.upper]), 9).tolist(),
+            "limits": np.round(np.concatenate(map_limits(robot)), 9).tolist(),
             "tcp": np.round(T_flange_tcp, 6).tolist(),
             "settings": settings.__dict__,
         }

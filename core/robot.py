@@ -51,6 +51,8 @@ class RobotSpec(BaseModel):
     # joint angles (deg) the arm waits at while the carrier moves between stops; None = all
     # joints at 0 (clipped into the limits)
     home_deg: list[float] | None = None
+    # user joint limits (deg, (min, max) per joint) inside the URDF's; None = the URDF limits
+    limits_deg: list[tuple[float, float]] | None = None
     dh: DHParams | None = None
     payload: PayloadSpec = Field(default_factory=PayloadSpec)
     folder: Path | None = None  # filled in by load_spec
@@ -92,8 +94,10 @@ class Robot:
             )
         self.nq = self.model.nq
         self.joint_names = [n for n in self.model.names[1:]]
-        self.lower = np.array(self.model.lowerPositionLimit, dtype=float)
-        self.upper = np.array(self.model.upperPositionLimit, dtype=float)
+        self.urdf_lower = np.array(self.model.lowerPositionLimit, dtype=float)
+        self.urdf_upper = np.array(self.model.upperPositionLimit, dtype=float)
+        self.lower, self.upper = self.urdf_lower.copy(), self.urdf_upper.copy()
+        self.set_limits(spec.limits_deg)
         self.effort = np.array(self.model.effortLimit, dtype=float)
         self.base_frame_id = self._frame_id(spec.base_link)
         self.flange_frame_id = self._frame_id(spec.flange_link)
@@ -133,6 +137,23 @@ class Robot:
         """Point gravity along world -z for a base rotated by R_world_base (wall/ceiling)."""
         g_base = np.asarray(R_world_base, float).T @ np.array([0.0, 0.0, -GRAVITY])
         self.model.gravity.linear = self._base_rotation_world() @ g_base
+
+    def set_limits(self, limits_deg: list | None) -> None:
+        """Joint limits (deg, (min, max) per joint), kept inside the URDF limits; None = the
+        URDF limits. Stored in ``spec`` so ``Robot(robot.spec)`` copies keep them."""
+        lo, hi = self.urdf_lower.copy(), self.urdf_upper.copy()
+        if limits_deg is not None:
+            L = np.radians(np.asarray(limits_deg, float))
+            if L.shape != (self.nq, 2) or not np.all(np.isfinite(L)):
+                raise ValueError(f"joint limits need (min, max) for each of the {self.nq} joints")
+            lo, hi = np.maximum(lo, L[:, 0]), np.minimum(hi, L[:, 1])
+            bad = [self.joint_names[i] for i in np.flatnonzero(hi <= lo)]
+            if bad:
+                raise ValueError(f"empty joint range (min >= max inside the URDF limits): {', '.join(bad)}")
+            limits_deg = [(float(a), float(b)) for a, b in np.asarray(limits_deg, float)]
+        self.lower, self.upper = lo, hi
+        self.model.lowerPositionLimit, self.model.upperPositionLimit = lo.copy(), hi.copy()
+        self.spec = self.spec.model_copy(update={"limits_deg": limits_deg})
 
     def _check_q(self, q) -> np.ndarray:
         q = np.asarray(q, dtype=float)

@@ -115,6 +115,8 @@ class Robot(_Model):
     payload_spec: PayloadSpec = Field(default_factory=PayloadSpec)
     # home pose saved with the project (deg, one per joint); None = the robot's spec.yaml home
     home_deg: list[float] | None = None
+    # joint limits saved with the project (deg, (min, max) per joint); None = the URDF limits
+    joint_limits_deg: list[tuple[float, float]] | None = None
 
     @model_validator(mode="after")
     def _source(self) -> Robot:

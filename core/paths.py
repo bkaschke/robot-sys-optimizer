@@ -100,8 +100,13 @@ class PathPlan:
         return total
 
 
-def sequences(sol, results: dict[int, PointResult], P_part: dict[int, np.ndarray]) -> dict[int, list]:
-    """Per station: [(zone index | None, [point ids in path order])]."""
+def sequences(
+    sol, results: dict[int, PointResult], P_part: dict[int, np.ndarray], label_of: Callable | None = None
+) -> dict[int, list]:
+    """Per station: [(zone index | None, [point ids in path order])]. Without zones and with
+    ``label_of(result)`` (joint configuration label), a stop's points are split by
+    configuration, largest group first: one configuration change per extra configuration,
+    not one per switch along the path."""
     out: dict[int, list] = {}
 
     def usable(p: int) -> bool:  # solved, and still a target (points deleted after planning are skipped)
@@ -118,9 +123,13 @@ def sequences(sol, results: dict[int, PointResult], P_part: dict[int, np.ndarray
         if usable(pid):
             by.setdefault(k, []).append(pid)
     for k, pids in by.items():
-        pids = sorted(pids)
-        order = order_path(np.array([P_part[p] for p in pids])) if len(pids) > 2 else np.arange(len(pids))
-        out[k] = [(None, [pids[i] for i in order])]
+        split: dict[str, list[int]] = {}
+        for p in sorted(pids):
+            split.setdefault(label_of(results[p]) if label_of is not None else "", []).append(p)
+        out[k] = []
+        for ids in sorted(split.values(), key=len, reverse=True):
+            order = order_path(np.array([P_part[p] for p in ids])) if len(ids) > 2 else np.arange(len(ids))
+            out[k].append((None, [ids[i] for i in order]))
     return out
 
 
@@ -132,13 +141,13 @@ class Seq:
 
 
 def ordered_sequences(
-    sol, results, points: dict, pattern: PatternSettings | None = None
+    sol, results, points: dict, pattern: PatternSettings | None = None, label_of: Callable | None = None
 ) -> dict[int, list[Seq]]:
     """Per stop: its groups (zones) as Seq. Without a pattern, the planner's order. With one,
     each group is ordered by the pattern, groups follow each other nearest first, and a later
     group starts at the corner nearest where the previous one ended."""
     P_part = {p: v[0] for p, v in points.items()}
-    base = sequences(sol, results, P_part)
+    base = sequences(sol, results, P_part, label_of)
     if pattern is None:
         return {k: [Seq(z, ids, [False] * (len(ids) - 1)) for z, ids in v] for k, v in base.items()}
     out: dict[int, list[Seq]] = {}
@@ -344,7 +353,9 @@ def trace(
     moves to / from home; ``carrier_path(k_from, k_to)`` gives the carrier poses between two
     stops as (carrier values, T_world_base, clear)."""
     tr = _Tracer(checker, part_mesh, step, jump_deg)
-    seqs = ordered_sequences(sol, results, points, pattern)
+    seqs = ordered_sequences(  # unzoned stops: one group per joint configuration
+        sol, results, points, pattern, lambda r: config_label(checker.ik, np.asarray(r.q, float))
+    )
     plan = PathPlan([], step)
     n_seq = max(1, sum(len(v) for v in seqs.values()))
     done = 0

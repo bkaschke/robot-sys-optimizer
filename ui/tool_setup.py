@@ -59,7 +59,12 @@ class ToolSetupTab:
             self.tcp_name = gui.add_text("Rename", "")
             self.tcp_add = gui.add_button("Add TCP")
             self.tcp_del = gui.add_button("Remove TCP")
+            self.tcp_lock = gui.add_checkbox(
+                "Lock TCP position", True, hint="untick to move the TCP (fields or gizmo)"
+            )
             self.tcp_pose = PoseWidgets(server, f"{HEAD}/tcp_gizmo", np.eye(4), self._on_tcp_pose, scale=0.08)
+            self.tcp_lock.on_update(lambda _e: self._apply_tcp_lock())
+            self._apply_tcp_lock()
             self.pick = gui.add_checkbox("Pick contact faces (click tool)", False)
             self.pick_angle = gui.add_slider("Region angle (deg)", 1.0, 45.0, 1.0, 15.0)
             self.clear_faces = gui.add_button("Clear contact faces")
@@ -234,8 +239,16 @@ class ToolSetupTab:
         if not self._busy and self._commit(lambda d: d.update(T_flange_mount=matrix_to_pose(T).model_dump())):
             self._after()
 
+    def _apply_tcp_lock(self) -> None:
+        """Locked (the default): the TCP pose fields are read-only and the gizmo has no handles."""
+        self.tcp_pose.set_enabled(not self.tcp_lock.value)
+
     def _on_tcp_pose(self, T: np.ndarray) -> None:
         cur = self.tcp_choice.value
+        if self.tcp_lock.value:  # locked: put the fields / gizmo back to the stored pose
+            if not self._busy and self.s.tool is not None:
+                self._show_tcp()
+            return
         if not self._busy and self._commit(
             lambda d: self._tcp(d, cur).update(T_head_tcp=matrix_to_pose(T).model_dump())
         ):
@@ -393,7 +406,7 @@ class ToolSetupTab:
             self.tcp_name.value = tcp.name
             self.tcp_pose.set(pose_to_matrix(tcp.T_head_tcp))
             self.tcp_pose.gizmo.visible = True
-            self.tcp_pose.set_handles(self.tcp_pose.show.value)
+            self.tcp_pose.set_handles(self.tcp_pose.show.value and not self.tcp_lock.value)
             for link, cb in self._link_boxes.items():
                 cb.value = link in tcp.contact_links
         finally:

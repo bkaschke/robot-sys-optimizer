@@ -1,8 +1,9 @@
 """Results -> station areas on the part (v4 plan item 3): the part surface painted by stop in
 the station colours (the colours of the lines to the served points), groups (zones) of a stop
-in lighter shades of its colour. A face takes the stop of the nearest target within 1.5 x
-the point spacing of its centre (coarse meshes are subdivided to the spacing first, so every
-target has faces around it).
+in lighter shades of its colour. Without zones, each joint configuration of a stop is its own
+group (v6: the paths do a stop one configuration at a time). A face takes the stop of the
+nearest target within 1.5 x the point spacing of its centre (coarse meshes are subdivided to
+the spacing first, so every target has faces around it).
 Drawn under /cell/part so it follows the part; on / off in the object tree."""
 
 from __future__ import annotations
@@ -59,16 +60,33 @@ def face_labels(mesh: trimesh.Trimesh, P: np.ndarray, point_label: np.ndarray) -
     return out
 
 
+def config_groups(sol, config_of: dict[int, str]) -> dict[int, int]:
+    """Point id -> group index at its stop by joint configuration (largest group first, as
+    core.paths.sequences orders them)."""
+    by: dict[int, dict[str, list[int]]] = {}
+    for pid, k in sol.assignment.items():
+        if int(pid) in config_of:
+            by.setdefault(k, {}).setdefault(config_of[int(pid)], []).append(int(pid))
+    out: dict[int, int] = {}
+    for groups in by.values():
+        for j, pids in enumerate(sorted(groups.values(), key=len, reverse=True)):
+            out.update(dict.fromkeys(pids, j))
+    return out
+
+
 def area_meshes(
-    mesh: trimesh.Trimesh, ids, P: np.ndarray, sol, colors
+    mesh: trimesh.Trimesh, ids, P: np.ndarray, sol, colors, config_of: dict[int, str] | None = None
 ) -> list[tuple[str, np.ndarray, np.ndarray, tuple]]:
-    """(name, vertices, faces, colour) per (stop, group) of solution ``sol``."""
+    """(name, vertices, faces, colour) per (stop, group) of solution ``sol``. Groups are the
+    zones, or without zones the joint configurations in ``config_of`` (point id -> label)."""
     stop = np.array([sol.assignment.get(int(i), -1) for i in ids])
     zone_of: dict[int, int] = {}
     for k in {z.station for z in sol.zones}:
         for j, z in enumerate([z for z in sol.zones if z.station == k]):
             for p in z.points:
                 zone_of[int(p)] = j
+    if not sol.zones and config_of:
+        zone_of = config_groups(sol, config_of)
     group = np.array([zone_of.get(int(i), 0) for i in ids])
     lab = face_labels(mesh, P, stop)
     out = []

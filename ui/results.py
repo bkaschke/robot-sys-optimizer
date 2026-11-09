@@ -186,6 +186,20 @@ class ResultsTab:
             quiet_remove(urdf)
             quiet_remove(frame)
 
+    def _configs(self, sol) -> dict[int, str]:
+        """Point id -> joint configuration label of the selected plan's solutions."""
+        from core.configs import config_label
+        from core.ik import make_ik
+
+        robot = self.s.robot
+        res = self.s.result_points.get(sol.label, {})
+        if robot is None or not res:
+            return {}
+        if getattr(self, "_ik_for", None) is not robot:
+            self._ik, self._ik_for = make_ik(robot), robot
+        ok = {int(p): r.q for p, r in res.items() if r.q is not None}
+        return {p: config_label(self._ik, np.asarray(q, float)) for p, q in ok.items()}
+
     def draw_areas(self, sol) -> None:
         from ui.station_areas import PATH, area_meshes, display_mesh
 
@@ -194,7 +208,7 @@ class ResultsTab:
             return
         ids, P, _, _ = tg.as_arrays(self.s.targets)
         mesh = display_mesh(mesh, P)
-        for name, v, f, color in area_meshes(mesh, ids, P, sol, STATION_COLORS):
+        for name, v, f, color in area_meshes(mesh, ids, P, sol, STATION_COLORS, self._configs(sol)):
             self._areas.append(
                 self.server.scene.add_mesh_simple(
                     f"{PATH}/{name}", v, f, color=color, opacity=0.55, side="double", flat_shading=False

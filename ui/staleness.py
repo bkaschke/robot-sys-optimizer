@@ -51,6 +51,8 @@ def components(s, base_pose: bool = False, tool_nominal: bool = True) -> dict[st
     result itself out of date)."""
     T = np.asarray(s.T_world_base, float)
     robot = {"name": s.robot_name, "urdf": s.robot_urdf, "mount": s.mount}
+    if s.robot is not None and s.robot.spec.limits_deg is not None:  # v6: user joint limits
+        robot["limits"] = s.robot.spec.limits_deg
     if s.base.mode != "movable":
         robot["base_z"] = round(float(T[2, 3]), 6)  # the planner keeps height and orientation
         robot["base_R"] = _pose(T[:3, :3])

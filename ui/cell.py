@@ -72,6 +72,13 @@ class CellTab:
             from ui.robot_home import HomePanel
 
             self.home_panel = HomePanel(server, self)
+            from ui.robot_limits import LimitsPanel
+
+            self.limits_panel = LimitsPanel(server, self)
+            from ui.robot_jog import JogPanel
+
+            self.jog_panel = JogPanel(server, self)
+            self.listeners.append(lambda _T: self.jog_panel.update_readout())
         with server.gui.add_folder("Part"):
             self.part_choice = server.gui.add_dropdown(
                 "Part", (*GOLDEN_PARTS, "(uploaded mesh)", "(none)"), initial_value="(none)"
@@ -261,6 +268,8 @@ class CellTab:
             self._update_readout()
             self._rebuild_part()
             self.home_panel.refresh()
+            self.limits_panel.refresh()
+            self.jog_panel.refresh()
             return
         self.view = RobotView(self.server, s.robot, s.robot_urdf_path, BASE_NODE)
         with self.joint_folder:
@@ -277,6 +286,8 @@ class CellTab:
         self._update_readout()
         self._rebuild_part()
         self.home_panel.refresh()
+        self.limits_panel.refresh()
+        self.jog_panel.refresh()
 
     def refresh_part(self) -> None:
         self._busy = True

@@ -80,10 +80,16 @@ def test_mobile_plans_have_one_area_per_stop(app):
     r.choice.value = next(o for o in r.choice.options if sol.label in o)
     r.draw()
     names = {h.name.rsplit("/", 1)[-1] for h in r._areas}
-    assert names == {f"S{k + 1}_G1" for k in range(len(sol.stations))}
+    # v6: an unzoned stop has one group per joint configuration (the main one in its colour)
+    from ui.station_areas import config_groups
+
+    groups = config_groups(sol, r._configs(sol))
+    want = {f"S{sol.assignment[p] + 1}_G{g + 1}" for p, g in groups.items()}
+    assert names == want and {f"S{k + 1}_G1" for k in range(len(sol.stations))} <= names
     for h in r._areas:
         k = int(h.name.rsplit("/S", 1)[-1].split("_")[0]) - 1
-        assert tuple(h.color) == STATION_COLORS[k % len(STATION_COLORS)]
+        if h.name.endswith("_G1"):
+            assert tuple(h.color) == STATION_COLORS[k % len(STATION_COLORS)]
         assert h.name.startswith("/cell/part/areas/")
     objs = app["objects"]
     objs.show["Results/Station areas"].value = False

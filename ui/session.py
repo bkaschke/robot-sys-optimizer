@@ -211,6 +211,7 @@ class Session:
                 ik=r.spec.ik,
                 payload_spec=r.spec.payload,
                 home_deg=None if self.home_deg is None else [float(v) for v in self.home_deg],
+                joint_limits_deg=r.spec.limits_deg,
             )
         )
         part = None
@@ -246,6 +247,12 @@ class Session:
             self.T_world_base = pose_to_matrix(pr.base_pose)
             ok = pr.home_deg is not None and self.robot is not None and len(pr.home_deg) == self.robot.nq
             self.home_deg = list(pr.home_deg) if ok else None
+            if pr.joint_limits_deg is not None and self.robot is not None:
+                try:  # limits that do not fit this robot are dropped
+                    self.robot.set_limits(pr.joint_limits_deg)
+                    self.q = np.clip(self.q, self.robot.lower, self.robot.upper)
+                except ValueError:
+                    pass
         self.part = None
         if project.part is not None:
             self.part = PartState(project.part.mesh, project.part.units, pose_to_matrix(project.part.pose))

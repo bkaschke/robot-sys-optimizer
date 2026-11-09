@@ -92,14 +92,25 @@ def test_problems_are_flagged(app, zoned):
 def test_unzoned_plan_shows_its_reconfigurations(app):
     s, sol, res = _plan(app, zoning=False)
     ch, plan, pts = _trace(app, s, sol, res, step=0.05)
-    seqs = sequences(sol, res, {p: v[0] for p, v in pts.items()})
-    changes = sum(
+    P = {p: v[0] for p, v in pts.items()}
+    seqs = sequences(sol, res, P)
+    switches = sum(
         config_label(ch.ik, np.asarray(res[a].q)) != config_label(ch.ik, np.asarray(res[b].q))
         for v in seqs.values()
         for _, z in v
         for a, b in zip(z[:-1], z[1:], strict=True)
     )
-    assert plan.counts()["reconfigure"] == changes
+    # v6: the path does a stop's points one configuration at a time: one change per extra
+    # configuration at a stop, never more than switching along the planner's order would
+    lab = {p: config_label(ch.ik, np.asarray(r.q)) for p, r in res.items() if r.q is not None}
+    labels = {k: {lab[p] for _, z in v for p in z} for k, v in seqs.items()}
+    changes = sum(len(v) - 1 for v in labels.values())
+    assert plan.counts()["reconfigure"] == changes <= switches
+    split = sequences(sol, res, P, lambda r: config_label(ch.ik, np.asarray(r.q)))
+    for k, v in split.items():
+        assert len(v) == len(labels[k])
+        for _, z in v:  # each group has one configuration
+            assert len({config_label(ch.ik, np.asarray(res[p].q)) for p in z}) == 1
 
 
 def test_path_csv(app, zoned):
