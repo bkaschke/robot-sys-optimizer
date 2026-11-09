@@ -145,9 +145,15 @@ class CollisionScene:
         # T_world_body respectively.
         self.carrier_ids: list[int] = []
         self.world_body_T: dict[int, np.ndarray] = {}
-        for name, mesh, T_base_body in base_bodies or []:
+        self.follow: dict[int, object] = {}  # gid -> fn(T_world_base) -> T_base_body (lift)
+        for name, mesh, T_base_body, *follow in base_bodies or []:
+            if follow:
+                T_base_body = follow[0](T_world_base)
             go = pin.GeometryObject(f"carrier_{name}", 0, _se3(self.T_univ_base @ T_base_body), _bvh(mesh))
-            self.carrier_ids.append(self.gm.addGeometryObject(go))
+            gid = self.gm.addGeometryObject(go)
+            self.carrier_ids.append(gid)
+            if follow:
+                self.follow[gid] = follow[0]
         for name, mesh, T_world_body in world_bodies or []:
             go = pin.GeometryObject(f"carrier_{name}", 0, _se3(self.T_univ_world @ T_world_body), _bvh(mesh))
             gid = self.gm.addGeometryObject(go)
@@ -212,6 +218,8 @@ class CollisionScene:
             self.gm.geometryObjects[self.floor_id].placement = _se3(self.T_univ_world)
         for gid, T in self.world_body_T.items():
             self.gm.geometryObjects[gid].placement = _se3(self.T_univ_world @ T)
+        for gid, fn in self.follow.items():  # carriage bodies below a lift
+            self.gm.geometryObjects[gid].placement = _se3(self.T_univ_base @ fn(T_world_base))
 
     @staticmethod
     def _split_by_contact(tool: ToolModel, hl) -> list[tuple[frozenset, set[int]]]:

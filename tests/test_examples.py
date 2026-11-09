@@ -19,10 +19,20 @@ def app():
 
 
 def test_examples_are_listed():
-    assert {"rail_long_part", "mobile_amr"} <= set(list_examples())
+    assert {"rail_long_part", "mobile_amr", "gantry_overhead", "floor_xy_rails", "mobile_lift"} <= set(
+        list_examples()
+    )
 
 
-@pytest.mark.parametrize("name,kind,n_bodies", [("rail_long_part", "rail", 3), ("mobile_amr", "mobile", 7)])
+@pytest.mark.parametrize(
+    "name,kind,n_bodies",
+    [
+        ("rail_long_part", "rail", 3),
+        ("mobile_amr", "mobile", 7),
+        ("floor_xy_rails", "gantry", 4),  # v6 (gantry_overhead: same code path, 96 s)
+        ("mobile_lift", "mobile", 8),  # v6: lift height planned per stop
+    ],
+)
 def test_example_loads_and_plans(app, name, kind, n_bodies):
     s, panel = app["session"], app["carrier"]
     assert app["project"].load_example(name)
@@ -48,3 +58,6 @@ def test_example_loads_and_plans(app, name, kind, n_bodies):
                 assert lo - 1e-9 <= v[d] <= hi + 1e-9
         bodies = c.moving_bodies(v) + c.static_bodies()
         assert distance_3d(bodies, part, s.part.T_world_part) >= s.base.standoff_m.carrier_part_min - 1e-6
+    if "lift" in c.dofs:  # v6: each stop stores its own planned height; the 3 m wall needs it raised
+        assert all("lift" in station.carrier for station in best.stations)
+        assert max(station.carrier["lift"] for station in best.stations) > 0.25

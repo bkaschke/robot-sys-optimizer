@@ -36,6 +36,24 @@ def _accepted(sites, samples, cancelled=None) -> list[dict]:
     return out
 
 
+class CarriageFollow:
+    """Pose of a carriage body in the robot base frame for any base pose of a carrier with a
+    lift: the base is carriage @ Tz(lift) @ mount and the carriage height is the same at every
+    stop, so the lift is read from the base pose (core.collision re-places the body)."""
+
+    def __init__(self, carrier: Carrier, T_carriage_body: np.ndarray):
+        self.M_inv = np.linalg.inv(carrier.T_mount)
+        self.T_cb = T_carriage_body
+        v = {d: float(np.mean(b)) for d, b in zip(carrier.dofs, carrier.bounds, strict=True)}
+        Tc = carrier.T_world_carriage(v)
+        self.h0 = float(Tc[:3, 3] @ Tc[:3, 2])  # carriage origin along its own z axis
+
+    def __call__(self, T_world_base: np.ndarray) -> np.ndarray:
+        T = T_world_base @ self.M_inv  # the carriage frame raised by the lift
+        lift = float(T[:3, 3] @ T[:3, 2]) - self.h0
+        return self.M_inv @ make_T(p=(0, 0, -lift)) @ self.T_cb
+
+
 class FloorSites:
     """Robot base anywhere on the floor at fixed height/orientation (no carrier model)."""
 
@@ -94,10 +112,9 @@ class CarrierSites:
         self.part, self.T_part = part_mesh, T_world_part
         fp = footprint(part_mesh, T_world_part) if part_mesh is not None else None
         self.zones = Zones(carrier.base, fp)
-        self.dofs = [d for d in carrier.dofs if d != "lift"]
-        self.bounds = np.array(
-            [b for d, b in zip(carrier.dofs, carrier.bounds, strict=True) if d != "lift"]
-        ).reshape(-1, 2)
+        # v6: the lift is planned per stop like the other carrier axes
+        self.dofs = list(carrier.dofs)
+        self.bounds = np.array(carrier.bounds, float).reshape(-1, 2)
         b = carrier.base
         self.localization = (
             (b.localization_m, np.radians(b.localization_deg)) if self.kind == "mobile" else (0.0, 0.0)
@@ -109,16 +126,26 @@ class CarrierSites:
         )
 
     def scene_bodies(self) -> tuple[list, list]:
-        """(base_bodies, world_bodies) for core.collision.CollisionScene: carriage/riser are
-        rigid in the robot base frame; the rail track is fixed in the world."""
+        """(base_bodies, world_bodies) for core.collision.CollisionScene: the carriage bodies
+        and the lift stage ride with the robot base (with a lift, the carriage bodies get a
+        4th entry that re-places them for each base height: the lift moves the robot, not the
+        carriage); the rail track is fixed in the world."""
         v = self.full({d: float(np.mean(b)) for d, b in zip(self.dofs, self.bounds, strict=True)})
         T_base_inv = np.linalg.inv(self.c.T_world_base(v))
-        base = [(b.name, b.mesh, T_base_inv @ b.T) for b in self.c.moving_bodies(v)]
+        Tc = self.c.T_world_carriage(v)
+        lifted = "lift" in self.c.dofs
+        base = []
+        for b in self.c._bodies("carriage", Tc):
+            entry = (b.name, b.mesh, T_base_inv @ b.T)
+            base.append((*entry, CarriageFollow(self.c, np.linalg.inv(Tc) @ b.T)) if lifted else entry)
+        lift_T = Tc @ make_T(p=(0, 0, v.get("lift", 0.0)))
+        base += [(b.name, b.mesh, T_base_inv @ b.T) for b in self.c._bodies("lift", lift_T)]
         world = [(b.name, b.mesh, b.T) for b in self.c.static_bodies()]
         return base, world
 
     def full(self, v: dict) -> dict:
-        return {**v, **self._lift}
+        """DOF values with the lift filled in (its mid height when v has none)."""
+        return {**self._lift, **v}
 
     def candidates(self, P_world: np.ndarray, step: float, cancelled=None) -> list[dict]:
         return _accepted(self, self.c.samples(step), cancelled)
@@ -226,13 +253,13 @@ class CarrierSites:
         from opt.navigate import resample, route
 
         ends = (A, B)
-        lift = {k: v for k, v in A.items() if k == "lift"}
+        lifts = [{"lift": float(E["lift"])} for E in ends if "lift" in E] or [{}]
 
-        def pose(x: float, y: float, yaw: float) -> dict:
+        def pose(x: float, y: float, yaw: float, lift: dict) -> dict:
             return {"x": float(x), "y": float(y), "yaw": float(yaw), **lift}
 
-        def ok(x: float, y: float, yaw: float) -> bool:
-            return self.transit_ok(pose(x, y, yaw), ends)
+        def ok(x: float, y: float, yaw: float) -> bool:  # clear at both stops' lift heights
+            return all(self.transit_ok(pose(x, y, yaw, lf), ends) for lf in lifts)
 
         rad = self.footprint_radius()
         boxes = [(A["x"], A["y"], A["x"], A["y"]), (B["x"], B["y"], B["x"], B["y"])]
@@ -246,7 +273,12 @@ class CarrierSites:
         path = route(ok, (A["x"], A["y"], A["yaw"]), (B["x"], B["y"], B["yaw"]), region, rad)
         if path is None:
             return None
-        out = [pose(*p) for p in resample(path, step, rad)]
+        pts = resample(path, step, rad)
+        out = []
+        for i, p in enumerate(pts):  # the lift moves from A's height to B's along the way
+            s = (i + 1) / len(pts)
+            lf = {"lift": (1 - s) * lifts[0]["lift"] + s * lifts[-1]["lift"]} if lifts[0] else {}
+            out.append(pose(*p, lf))
         return [(v, self.transit_ok(v, ends)) for v in out]
 
     def point_ok(self, v: dict, r, checker, n_world: np.ndarray) -> tuple[bool, str]:

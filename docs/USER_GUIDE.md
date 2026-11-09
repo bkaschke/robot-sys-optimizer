@@ -54,7 +54,7 @@ Then try a full job on the test plate:
 
 Tick **Dark mode** at the top of the panel at any time.
 
-**Ready-made examples:** **Project** → *Examples* → `rail_long_part` (UR20 on a 7th-axis rail) or `mobile_amr` (UR20 on a mobile robot built from simple shapes) → **Open example** → **Optimize** → **Plan stations**. Examples are read-only templates: opening one makes a working copy in `workspace/examples/<name>/` (`<name>_2`, … when an earlier copy has your changes, which is never replaced), and saving or autosave only ever writes that copy.
+**Ready-made examples:** **Project** → *Examples* → `rail_long_part` (UR20 on a 7th-axis rail), `mobile_amr` (UR20 on a mobile robot built from simple shapes), or, around a 3 m tall wall, `gantry_overhead` (UR20 upside down on an overhead X-Y gantry), `floor_xy_rails` (UR20 on two crossed floor axes) and `mobile_lift` (mobile robot with a 1 m vertical lift) → **Open example** → **Optimize** → **Plan stations**. Examples are read-only templates: opening one makes a working copy in `workspace/examples/<name>/` (`<name>_2`, … when an earlier copy has your changes, which is never replaced), and saving or autosave only ever writes that copy.
 
 ---
 
@@ -235,8 +235,8 @@ Build the carrier (external axis) the robot rides on, mount the robot on it, and
 
 | Section | What it does |
 | --- | --- |
-| **Axis type** | *Mode* **static** (one fixed base; the planner places one station) or **movable** (a carrier; the planner chooses its stops). *Carrier*: **rail** (travel *s* along the track frame's x axis), **gantry** (x/y carriage, robot usually upside down) or **mobile** (x, y, yaw on the floor). **Load carrier defaults** fills in a ready-made carrier of that kind. *Track/gantry frame*, *Travel*, *Yaw range* and *Lift range* (optional vertical axis) set the motion. |
-| **Bodies** | The carrier's shapes. **Add box**, **Add cylinder**, or **Add STL/OBJ/PLY body** (choose *Mesh units* first; the file is stored in `<project>/assets/carriers/`). Pick a body in *Body* to edit its *Name*, size, *Position*, *Rotation* and *Mass*. *Attached to*: **carriage (moves)** for everything that travels with the axis (chassis, wheels, column), **fixed (track / frame)** for parts that stay put (rail track, gantry beam). Tick **Drag body with gizmo** to place it in 3D. **Duplicate body** / **Remove body**. The selected body is drawn in blue. |
+| **Axis type** | *Mode* **static** (one fixed base; the planner places one station) or **movable** (a carrier; the planner chooses its stops). *Carrier*: **rail** (travel *s* along the track frame's x axis), **gantry** (x/y carriage, robot usually upside down) or **mobile** (x, y, yaw on the floor). **Load carrier defaults** fills in a ready-made carrier of that kind. *Track/gantry frame*, *Travel*, *Yaw range* and *Lift range* (optional vertical axis) set the motion. With a lift, the planner chooses the **lift height of every stop** (like the travel position; seeded at 2 to 6 heights over the range) and the carrier move between two stops changes the height on the way. |
+| **Bodies** | The carrier's shapes. **Add box**, **Add cylinder**, or **Add STL/OBJ/PLY body** (choose *Mesh units* first; the file is stored in `<project>/assets/carriers/`). Pick a body in *Body* to edit its *Name*, size, *Position*, *Rotation* and *Mass*. *Attached to*: **carriage (moves)** for everything that travels with the axis (chassis, wheels, a lift mast), **lift stage (rises with the robot)** for the part of a lift that goes up and down with the robot (a platform or the moving column), **fixed (track / frame)** for parts that stay put (rail track, gantry beam). With a lift, carriage bodies stay on the floor while the robot rises, also in the collision check. Tick **Drag body with gizmo** to place it in 3D. **Duplicate body** / **Remove body**. The selected body is drawn in blue. |
 | **Robot mount** | *Mount on body* + **Snap robot to top of body** puts the robot base on the top centre of that body (keeps the yaw). Fine-tune with *Mount xyz / rpy* (robot base in the carriage frame) or **Drag mount with gizmo**. |
 | **Standoff and safety** | *Part standoff min / preferred*: carrier-to-part distance; the minimum is hard, closer than preferred adds a cost. It is measured in 3D, so a carrier may sit partly under a raised part: model fixtures and stands as part of the mesh or as keep-outs. *Keep-outs*: floor rectangles `x0,y0,x1,y1; ...` in mm. *Localization* (mobile): position/heading error every stop must tolerate. **Mobile base: robot sides, fixed standoff, part sides.** Tick the **robot sides that may face the part**: *Front*, *Side 1 (left)*, *Side 2 (right)*, *Rear* (several allowed: the planner picks per stop; *Side 1 / Side 2* = the base runs parallel to the part). With any side ticked, every stop keeps one *Fixed standoff (mm)*, and you can restrict the **part sides it may work from** (*Part ±X / ±Y side*, in the part's own frame; none ticked = all). No side ticked = the free x / y / heading search with *Part standoff min / preferred*. **Rail / gantry: *Align track with the part*** turns the track along the part's long axis and centres it on the part (keeping its side and distance); it follows the part when you move it. (Older wording: — pick which side of the base turns towards the part (front = carriage +x, left = +y) and one gap between the base outline and the part outline (top view). Every stop then sits exactly at that gap with that side facing the part: the stops lie on one contour around the part (like a rail wrapped around it), which keeps one safety distance everywhere and makes planning much faster. Choose *free (search the heading)* for the older free x / y / heading search with *Part standoff min / preferred*.) *Tip-over check* (mobile, needs a mass on at least one body). |
 | **Apply base settings** | Commits the axis-type and safety fields. Body and mount edits apply immediately. |
@@ -351,6 +351,16 @@ Shortcut: **Project** → *Examples* `mobile_amr` → **Open example** (four whe
 2. Optimize → *Station planner*: *Joint configuration* `best per point` → **Plan stations**. Targets → *Color points by* `configuration`: stops can mix two configurations, meaning the arm would reconfigure mid-pass (in the test version of this task every stop did).
 3. Switch to `zones (minimize changes)` → **Plan stations** again. The Results summary now lists the zones and the number of configuration changes (0 in the test version of this task, at almost the same cost), and the zone paths are drawn in the scene.
 
+### Example B4: tall wall with a gantry, floor X-Y axes or a mobile lift
+
+The 3 m tall wall (`tall_wall`, 2 × 0.3 m) is out of reach from one fixed robot height. Three examples work it with different carriers (orbital sander, 250 mm grid):
+
+* `gantry_overhead`: the UR20 hangs upside down from a carriage on an overhead X-Y gantry (two beams 4.4 m up on four posts). Targets: the top face and both long faces from 1.8 m up; the gantry's y axis takes the robot over to either side.
+* `floor_xy_rails`: the UR20 stands on a riser on a carriage that moves along two crossed floor axes (x along the wall, y towards it). Targets: the front face and the end face from 0.25 m to 1.8 m (the sander cannot work right at the floor).
+* `mobile_lift`: the mobile robot of `mobile_amr` with a 1 m lift (a *mast* on the chassis and a *lift_stage* that rises with the robot). Targets: the front face from 0.5 m to the top; every stop gets its own lift height, so the robot works the bottom low and the top raised.
+
+Open one, then Optimize → **Plan stations**; Results lists each stop's carrier values (with the lift height for `mobile_lift`).
+
 ### Example C: the shortest probe for a deep hole
 
 1. Cell → *Part* `deep_hole`, xyz `800, 0, 0` (100 mm hole, 300 mm deep).
@@ -380,7 +390,7 @@ Shortcut: **Project** → *Examples* `mobile_amr` → **Open example** (four whe
 | `assets/robots/ur20/` | UR20 URDF, meshes, `spec.yaml` (DH, limits, payload curve), licences |
 | `assets/tools/`, `tools/*.yaml` | sample tool geometry and the tool library |
 | `assets/parts/` | test parts (STL) |
-| `examples/` | example projects (`rail_long_part/`, `mobile_amr/`, regenerate with `scripts/make_examples.py`), `sander_mobile.json` (format sample) and `headless_plan.py` |
+| `examples/` | example projects (`rail_long_part/`, `mobile_amr/`, `gantry_overhead/`, `floor_xy_rails/`, `mobile_lift/`, regenerate with `scripts/make_examples.py`), `sander_mobile.json` (format sample) and `headless_plan.py` |
 | `workspace/` (not in git) | your project folders: `project.json`, uploads, `export/` |
 | `cache/` (not in git) | reachability maps |
 | `docs/USER_GUIDE.md` / `.html` | this guide; the HTML is generated from the Markdown with `scripts/build_guide.py` |

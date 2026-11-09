@@ -131,8 +131,10 @@ class Primitive(_Model):
 
     Box and cylinder frames sit at the centre of the bottom face; a mesh keeps its own
     origin (scaled by ``units``). ``pose`` places the body frame in its parent frame:
-    the carriage frame (``attach="carriage"``, moves with the carrier DOFs) or the carrier
-    frame ``Base.pose`` (``attach="fixed"``, e.g. a rail track or a gantry beam).
+    the carriage frame (``attach="carriage"``, moves with the carrier DOFs), the lift stage
+    (``attach="lift"``: the carriage frame raised by the lift DOF, e.g. a platform that rises
+    with the robot) or the carrier frame ``Base.pose`` (``attach="fixed"``, e.g. a rail track
+    or a gantry beam).
     """
 
     shape: Literal["box", "cylinder", "mesh"]
@@ -141,7 +143,7 @@ class Primitive(_Model):
     height: float | None = Field(default=None, gt=0)
     kg: float | None = Field(default=None, ge=0)
     name: str = Field(default="", max_length=64)
-    attach: Literal["carriage", "fixed"] = "carriage"
+    attach: Literal["carriage", "lift", "fixed"] = "carriage"
     pose: Pose = Field(default_factory=Pose)
     mesh: str | None = None  # mesh path, relative to the project folder or the repo
     units: Literal["m", "mm", "in"] = "m"

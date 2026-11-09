@@ -34,7 +34,11 @@ if TYPE_CHECKING:
     from ui.carrier_ui import CarrierPanel
 
 NONE = "(none)"
-ATTACH = {"carriage (moves)": "carriage", "fixed (track / frame)": "fixed"}
+ATTACH = {
+    "carriage (moves)": "carriage",
+    "lift stage (rises with the robot)": "lift",
+    "fixed (track / frame)": "fixed",
+}
 ATTACH_LABEL = {v: k for k, v in ATTACH.items()}
 GIZMO = "/carrier_edit"
 
@@ -97,7 +101,7 @@ class BodyEditor:
             keep = select if select in names else (self.pick.value if self.pick.value in names else names[0])
             self.pick.options = names
             self.pick.value = keep
-            moving = tuple(b.name for b in self.bodies if b.attach == "carriage") or (NONE,)
+            moving = tuple(b.name for b in self.bodies if b.attach in ("carriage", "lift")) or (NONE,)
             self.mount_on.options = moving
             if self.mount_on.value not in moving:
                 self.mount_on.value = moving[-1]

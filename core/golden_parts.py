@@ -127,10 +127,17 @@ def long_rail() -> trimesh.Trimesh:
     return _box((6.0, 0.2, 0.15), (0.0, 0.0, 0.075))
 
 
+def tall_wall() -> trimesh.Trimesh:
+    """2 m long (x), 0.3 m thick (y), 3 m high wall standing on the floor (v6 examples: a
+    UR20 on a 0.7 m riser reaches neither its top nor, raised, its lower part)."""
+    return _box((2.0, 0.3, 3.0), (0.0, 0.0, 1.5))
+
+
 GOLDEN_PARTS: dict[str, Callable[[], trimesh.Trimesh]] = {
     "flat_plate": flat_plate,
     "curved_panel": curved_panel,
     "open_box": open_box,
     "long_rail": long_rail,
     "deep_hole": deep_hole,
+    "tall_wall": tall_wall,
 }

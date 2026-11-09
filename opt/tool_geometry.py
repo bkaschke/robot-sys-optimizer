@@ -156,7 +156,7 @@ class _Evaluator:
         if sites.kind == "floor":
             stations = [{"x": s.xyz[0], "y": s.xyz[1]} for s in sol.stations]
         else:
-            stations = [{d: s.carrier[d] for d in sites.dofs} for s in sol.stations]
+            stations = [{d: s.carrier[d] for d in sites.dofs if d in s.carrier} for s in sol.stations]
         pref = np.array([sol.assignment.get(int(i), 0) for i in self.t.ids])
         assignment, res = verify(checker, self.t, stations, sites, pref)
         zones, changes = [], 0

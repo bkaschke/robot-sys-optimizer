@@ -356,8 +356,8 @@ class CarrierPanel:
         return {n: (np.radians(sl.value) if n == "yaw" else sl.value / 1000) for n, sl in self._dof.items()}
 
     def parent_T(self, attach: str) -> np.ndarray:
-        """World pose of a body's parent frame: carriage, fixed (carrier frame) or the mount
-        parent (carriage + lift)."""
+        """World pose of a body's parent frame: carriage, fixed (carrier frame), or the lift
+        stage = the mount parent (carriage + lift)."""
         c = self._carrier()
         if c.kind == "static":
             return np.eye(4)
@@ -365,7 +365,7 @@ class CarrierPanel:
             return c.T_frame
         v = self.current(c)
         T = c.T_world_carriage(v)
-        return T @ make_T(p=(0, 0, v.get("lift", 0.0))) if attach == "mount" else T
+        return T @ make_T(p=(0, 0, v.get("lift", 0.0))) if attach in ("mount", "lift") else T
 
     def _jog(self) -> None:
         if self._busy or self.s.base.mode != "movable":

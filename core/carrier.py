@@ -164,6 +164,14 @@ class Body:
     kg: float | None = None
 
 
+def lift_levels(lo: float, hi: float, step: float = 0.25) -> np.ndarray:
+    """Lift heights the planner seeds stops at: every ``step``, 2 to 6 levels, ends included."""
+    if hi <= lo:
+        return np.array([lo])
+    n = int(np.clip(round((hi - lo) / step) + 1, 2, 6))
+    return np.linspace(lo, hi, n)
+
+
 class Carrier:
     def __init__(
         self, base: Base, T_world_base_static: np.ndarray | None = None, resolve: Resolver | None = None
@@ -239,10 +247,17 @@ class Carrier:
         ]
 
     def moving_bodies(self, v: dict) -> list[Body]:
-        """Bodies on the carriage (world poses for DOF values v)."""
+        """Bodies on the carriage and on the lift stage (world poses for DOF values v)."""
         if self.kind == "static":
             return []
-        return self._bodies("carriage", self.T_world_carriage(v))
+        Tc = self.T_world_carriage(v)
+        return self._bodies("carriage", Tc) + self._bodies("lift", Tc @ make_T(p=(0, 0, v.get("lift", 0.0))))
+
+    def local_footprint(self) -> Polygon | None:
+        """Carriage-frame outline of the carriage and lift-stage bodies (the lift moves along
+        the carriage z axis, so the outline does not depend on it)."""
+        I4 = np.eye(4)
+        return self._local("fp", lambda: self._hulls(self._bodies("carriage", I4) + self._bodies("lift", I4)))
 
     def static_bodies(self) -> list[Body]:
         """Bodies fixed in the carrier frame (rail track, gantry beams, ...)."""
@@ -281,8 +296,7 @@ class Carrier:
         if abs(Tc[2, 2] - 1.0) > 1e-9:  # tilted carriage: project the bodies directly
             moving = self._hulls(self.moving_bodies(v))
         else:
-            local = self._local("fp", lambda: self._hulls(self._bodies("carriage", np.eye(4))))
-            moving = self._moved(local, Tc)
+            moving = self._moved(self.local_footprint(), Tc)
         static = self._local("fp_static", lambda: self._hulls(self.static_bodies()))
         polys = [p for p in (moving, static) if p is not None]
         if not polys:
@@ -292,15 +306,22 @@ class Carrier:
     # --- planning helpers ----------------------------------------------------------------------
 
     def travel(self, a: dict, b: dict) -> float:
+        """Carrier travel between two stops; the lift moves at the same time as the other
+        axes (the longer of the two counts)."""
+        d = 0.0
         if self.kind == "rail":
-            return abs(a["s"] - b["s"])
-        if self.kind == "gantry":
-            return max(abs(a["x"] - b["x"]), abs(a["y"] - b["y"]))  # both axes move at once
-        if self.kind == "mobile":
-            return float(np.hypot(a["x"] - b["x"], a["y"] - b["y"]))  # straight line (v1)
-        return 0.0
+            d = abs(a["s"] - b["s"])
+        elif self.kind == "gantry":
+            d = max(abs(a["x"] - b["x"]), abs(a["y"] - b["y"]))  # both axes move at once
+        elif self.kind == "mobile":
+            d = float(np.hypot(a["x"] - b["x"], a["y"] - b["y"]))  # straight line (v1)
+        if "lift" in a and "lift" in b:
+            d = max(d, abs(a["lift"] - b["lift"]))
+        return d
 
-    def samples(self, step: float, yaw_steps: int = 4) -> list[dict]:
+    def samples(self, step: float, yaw_steps: int = 4, lift_step: float = 0.25) -> list[dict]:
+        """Grid of DOF values: ``step`` along the travel axes, ``yaw_steps`` headings, lift
+        heights every ``lift_step`` (2 to 6 levels, ends included)."""
         if self.kind == "static":
             return [{}]
         axes = []
@@ -310,7 +331,7 @@ class Carrier:
                 k = yaw_steps if hi > lo else 1
                 axes.append(np.linspace(lo, hi, k, endpoint=not full) if k > 1 else np.array([lo]))
             elif n == "lift":
-                axes.append(np.array([(lo + hi) / 2]))
+                axes.append(lift_levels(lo, hi, lift_step))
             else:
                 axes.append(np.arange(lo, hi + 1e-9, step) if hi > lo else np.array([lo]))
         grid = np.meshgrid(*axes, indexing="ij")
@@ -457,19 +478,21 @@ class Carrier:
             parent = f"{n}_link"
         lines += [link("carriage"), joint("carriage_fixed", "fixed", parent, "carriage")]
         parent = "carriage"
-        for p in self.specs:
-            if p.attach == "carriage":
-                xyz, rpy = xyz_rpy(pose_to_matrix(p.pose))
-                lines += [
-                    link(f"body_{p.name}", p),
-                    joint(f"body_{p.name}_joint", "fixed", "carriage", f"body_{p.name}", xyz, rpy),
-                ]
         if "lift" in self.dofs:
             lines += [
                 link("lift_link"),
                 joint("lift_joint", "prismatic", "carriage", "lift_link", axis="0 0 1", lim=bnd["lift"]),
             ]
-            parent = "lift_link"
+        stage = "lift_link" if "lift" in self.dofs else "carriage"
+        for p in self.specs:
+            if p.attach in ("carriage", "lift"):
+                on = stage if p.attach == "lift" else "carriage"
+                xyz, rpy = xyz_rpy(pose_to_matrix(p.pose))
+                lines += [
+                    link(f"body_{p.name}", p),
+                    joint(f"body_{p.name}_joint", "fixed", on, f"body_{p.name}", xyz, rpy),
+                ]
+        parent = stage
         xyz, rpy = xyz_rpy(self.T_mount)
         lines += [link("mount"), joint("mount_fixed", "fixed", parent, "mount", xyz, rpy), "</robot>"]
         return "\n".join(lines)

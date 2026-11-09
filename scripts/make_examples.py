@@ -9,7 +9,18 @@ examples/mobile_amr/project.json
     UR20 on a mobile robot designed from simple shapes (4 wheels, chassis, battery box,
     column, robot on the column), tip-over check on, same long part, top face.
 
-Both use the orbital sander and are ready for Optimize -> Station planner -> Plan stations.
+v6, around the 3 m tall wall (assets/parts/tall_wall.stl, 2 x 0.3 m, on the floor):
+examples/gantry_overhead/project.json
+    UR20 hanging from an overhead X-Y gantry (two fixed beams on posts), top face and the
+    upper part (from 1.8 m) of both long faces.
+examples/floor_xy_rails/project.json
+    UR20 on a carriage riding two crossed floor axes (X-Y), 0.25 m to 1.8 m up one long face
+    and of the end face.
+examples/mobile_lift/project.json
+    UR20 on a mobile base with a vertical lift (0..1 m, planned per stop), one long face from
+    0.5 m to the top.
+
+All use the orbital sander and are ready for Optimize -> Station planner -> Plan stations.
 Paths in the files are repo-relative (part STL, tool URDF), so the folders can be loaded
 in place or copied anywhere inside the repo's workspace/.
 """
@@ -85,26 +96,154 @@ def mobile_base() -> Base:
     )
 
 
-def build(name: str, base: Base, start: dict) -> Path:
+def build(
+    name: str,
+    base: Base,
+    start: dict,
+    part: str = "long_rail",
+    pose: np.ndarray = PART_POSE,
+    faces: tuple = (("top", (0, 0, 1), -np.inf, np.inf),),
+    spacing: float = 0.25,
+) -> Path:
+    """``faces``: (group, outward normal, z min, z max) per target group (part frame, m)."""
     s = Session(project_dir=EXAMPLES / name)
     s.load_robot_from_registry("ur20")
     s.load_tool_from_library("orbital_sander")
-    s.part = PartState("assets/parts/long_rail.stl", "m", PART_POSE)
+    s.part = PartState(f"assets/parts/{part}.stl", "m", pose)
     s.base = base
     s.T_world_base = Carrier(base).T_world_base(start)
-    part = gp.long_rail()
-    top = select_by_normal(part, (0, 0, 1), 5.0)
-    P, N = projected_grid(part, top, 0.25)
-    group = TargetGroup(name="top", tilt_deg=s.tool.tolerances.tilt_deg)
-    s.targets = append_points(ProjectTargets(groups=[group]), P, N, "top")
+    mesh = gp.GOLDEN_PARTS[part]()
+    tilt = s.tool.tolerances.tilt_deg
+    targets = ProjectTargets(groups=[TargetGroup(name=g, tilt_deg=tilt) for g, *_ in faces])
+    n = 0
+    for g, normal, z0, z1 in faces:
+        P, N = projected_grid(mesh, select_by_normal(mesh, normal, 5.0), spacing)
+        keep = (P[:, 2] >= z0) & (P[:, 2] <= z1)
+        targets = append_points(targets, P[keep], N[keep], g)
+        n += int(keep.sum())
+    s.targets = targets
     path = save_project(s)
-    print(f"{path.relative_to(ROOT)}: {len(P)} targets, {len(base.bodies)} carrier bodies")
+    print(f"{path.relative_to(ROOT)}: {n} targets, {len(base.bodies)} carrier bodies")
     return path
+
+
+# --- v6: tall wall examples ---------------------------------------------------------------------
+
+WALL_FACES_GANTRY = (
+    ("top", (0, 0, 1), -np.inf, np.inf),
+    ("side_+y", (0, 1, 0), 1.8, np.inf),
+    ("side_-y", (0, -1, 0), 1.8, np.inf),
+)
+
+
+def gantry_base() -> Base:
+    """Overhead X-Y gantry: beams along x at y = +-1.8 m, 4.4 m up on posts; the carriage hangs
+    below the beam level and carries the UR20 upside down."""
+    posts = [
+        Primitive(
+            name=f"post_{i}", shape="box", size=(0.2, 0.2, 4.4), pose=Pose(xyz=(x, y, -4.4)), attach="fixed"
+        )
+        for i, (x, y) in enumerate(((-2.8, -1.8), (2.8, -1.8), (-2.8, 1.8), (2.8, 1.8)))
+    ]
+    beams = [
+        Primitive(
+            name=f"beam_{t}", shape="box", size=(5.8, 0.2, 0.25), pose=Pose(xyz=(0, y, 0.0)), attach="fixed"
+        )
+        for t, y in (("a", -1.8), ("b", 1.8))
+    ]
+    return Base(
+        mode="movable",
+        carrier="gantry",
+        pose=Pose(xyz=(0.0, 0.0, 4.4)),  # gantry frame on the beam bottoms
+        bodies=[
+            *posts,
+            *beams,
+            Primitive(
+                name="carriage", shape="box", size=(0.5, 0.5, 0.25), pose=Pose(xyz=(0, 0, -0.25)), kg=80
+            ),
+            Primitive(
+                name="drop", shape="cylinder", radius=0.12, height=0.6, pose=Pose(xyz=(0, 0, -0.85)), kg=30
+            ),
+        ],
+        T_mount=Pose(xyz=(0.0, 0.0, -0.85), rpy=(np.pi, 0.0, 0.0)),  # inverted under the drop
+        joints=CarrierJoints(x=(-2.4, 2.4), y=(-1.4, 1.4)),
+        standoff_m=Standoffs(carrier_part_min=0.3, carrier_part_preferred=0.4, carrier_env_min=0.1),
+    )
+
+
+def floor_xy_base() -> Base:
+    """Two crossed floor axes: rails along x (fixed) under a carriage that also moves in y;
+    the UR20 stands on a riser on the carriage. Works the -y side of the wall and its end."""
+    rails = [
+        Primitive(
+            name=f"rail_{t}", shape="box", size=(6.0, 0.15, 0.08), pose=Pose(xyz=(0, y, 0)), attach="fixed"
+        )
+        for t, y in (("a", -0.35), ("b", 0.35))
+    ]
+    return Base(
+        mode="movable",
+        carrier="gantry",
+        pose=Pose(xyz=(0.0, -1.4, 0.0)),  # axis frame on the floor, 1.4 m in front of the wall
+        bodies=[
+            *rails,
+            Primitive(
+                name="carriage", shape="box", size=(0.6, 0.6, 0.15), pose=Pose(xyz=(0, 0, 0.08)), kg=70
+            ),
+            Primitive(
+                name="riser", shape="cylinder", radius=0.15, height=0.55, pose=Pose(xyz=(0, 0, 0.23)), kg=40
+            ),
+        ],
+        T_mount=Pose(xyz=(0.0, 0.0, 0.78)),
+        joints=CarrierJoints(x=(-2.8, 2.8), y=(-0.35, 0.35)),
+        standoff_m=Standoffs(carrier_part_min=0.3, carrier_part_preferred=0.4, carrier_env_min=0.1),
+    )
+
+
+def mobile_lift_base() -> Base:
+    """The mobile base of mobile_amr with a 1 m vertical lift: a mast on the chassis (moves
+    with the base) and a lift stage that rises with the robot."""
+    b = mobile_base()
+    bodies = [p for p in b.bodies if p.name != "column"]
+    bodies += [
+        Primitive(name="mast", shape="box", size=(0.25, 0.3, 0.3), pose=Pose(xyz=(0.2, 0, 0.4)), kg=60),
+        Primitive(
+            name="lift_stage",  # a 1 m column, inside the chassis and mast when lowered
+            shape="cylinder",
+            radius=0.11,
+            height=1.0,
+            pose=Pose(xyz=(0.2, 0, -0.3)),
+            attach="lift",
+            kg=20,
+        ),
+    ]
+    return b.model_copy(
+        update={
+            "bodies": bodies,
+            "keepouts": [],
+            "joints": CarrierJoints(x=(-4.0, 4.0), y=(-3.0, 3.0), yaw_deg=(-180, 180), lift=(0.0, 1.0)),
+        }
+    )
 
 
 def main() -> None:
     build("rail_long_part", rail_base(), {"s": -1.5})
     build("mobile_amr", mobile_base(), {"x": -1.5, "y": -0.2, "yaw": 0.0})
+    wall = dict(part="tall_wall", pose=np.eye(4))
+    build("gantry_overhead", gantry_base(), {"x": -1.0, "y": 0.0}, faces=WALL_FACES_GANTRY, **wall)
+    build(
+        "floor_xy_rails",
+        floor_xy_base(),
+        {"x": -1.0, "y": 0.0},
+        faces=(("side_-y", (0, -1, 0), 0.25, 1.8), ("end_+x", (1, 0, 0), 0.25, 1.8)),
+        **wall,
+    )
+    build(
+        "mobile_lift",
+        mobile_lift_base(),
+        {"x": -1.0, "y": -1.2, "yaw": np.pi / 2, "lift": 0.0},
+        faces=(("side_-y", (0, -1, 0), 0.5, np.inf),),
+        **wall,
+    )
 
 
 if __name__ == "__main__":

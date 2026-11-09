@@ -42,7 +42,7 @@ class ContourSites(CarrierSites):
         self.part_sides = set(b.part_sides)
         R = np.asarray(T_world_part, float)[:3, :3] if T_world_part is not None else np.eye(3)
         self._R_part = R
-        local = carrier._local("fp", lambda: carrier._hulls(carrier._bodies("carriage", np.eye(4))))
+        local = carrier.local_footprint()
         tables, t0 = [], 0.0
         self.sides = b.robot_sides()
         for k, name in enumerate(self.sides):
@@ -55,6 +55,9 @@ class ContourSites(CarrierSites):
         self.table = np.vstack(tables)  # t, x, y, yaw, allowed, segment
         self.dofs = ["t"]
         self.bounds = np.array([[0.0, float(self.table[-1, 0])]])
+        if "lift" in carrier.dofs:  # v6: the lift height is planned per stop too
+            self.dofs.append("lift")
+            self.bounds = np.vstack([self.bounds, carrier.bounds[carrier.dofs.index("lift")]])
         self.kind = "mobile"
 
     # --- path ---------------------------------------------------------------------------------
@@ -105,7 +108,8 @@ class ContourSites(CarrierSites):
 
     def full(self, v: dict) -> dict:
         if "x" in v:  # already a full pose (localization perturbations)
-            return {**v, **self._lift}
+            return {**self._lift, **v}
+        lift = {"lift": float(v["lift"])} if "lift" in v and self._lift else self._lift
         tb = self.table
         t = float(np.clip(v["t"], tb[0, 0], tb[-1, 0]))
         i = self._row(t)
@@ -117,7 +121,7 @@ class ContourSites(CarrierSites):
             "x": float(tb[i, 1] + w * (tb[j, 1] - tb[i, 1])),
             "y": float(tb[i, 2] + w * (tb[j, 2] - tb[i, 2])),
             "yaw": float(tb[i, 3] + w * dyaw),
-            **self._lift,
+            **lift,
         }
 
     def side_at(self, v: dict) -> str:
@@ -127,11 +131,16 @@ class ContourSites(CarrierSites):
     # --- planner interface ------------------------------------------------------------------------
 
     def candidates(self, P_world: np.ndarray, step: float, cancelled=None) -> list[dict]:
+        from core.carrier import lift_levels
         from opt.sites import _accepted
 
         L = self.bounds[0, 1]
         n = max(4, int(np.ceil(L / step)))
-        return _accepted(self, ({"t": float(t)} for t in np.linspace(0.0, L, n, endpoint=False)), cancelled)
+        ts = np.linspace(0.0, L, n, endpoint=False)
+        if "lift" not in self.dofs:
+            return _accepted(self, ({"t": float(t)} for t in ts), cancelled)
+        lifts = lift_levels(*self.bounds[1])
+        return _accepted(self, ({"t": float(t), "lift": float(h)} for t in ts for h in lifts), cancelled)
 
     def accept(self, v: dict) -> tuple[bool, float]:
         """Allowed part side, keep-outs, stay-out zones and the standoff (exact on the path)."""
@@ -151,8 +160,12 @@ class ContourSites(CarrierSites):
         A, B = self.full(a), self.full(b)
         if "t" in A and "t" in B and self.table[self._row(A["t"]), 5] == self.table[self._row(B["t"]), 5]:
             n = max(1, int(np.ceil(abs(B["t"] - A["t"]) / step)))
-            ts = A["t"] + (B["t"] - A["t"]) * np.arange(1, n + 1) / n
-            moves = [(f, self.transit_ok(f, (A, B))) for f in (self.full({"t": float(t)}) for t in ts)]
+            s = np.arange(1, n + 1) / n
+            steps = [{"t": float(A["t"] + (B["t"] - A["t"]) * u)} for u in s]
+            if "lift" in A and "lift" in B:
+                for d, u in zip(steps, s, strict=True):
+                    d["lift"] = float(A["lift"] + (B["lift"] - A["lift"]) * u)
+            moves = [(f, self.transit_ok(f, (A, B))) for f in map(self.full, steps)]
             return self._or_route(A, B, moves, step)  # a zone on the contour: drive around it
         A = {k: v for k, v in A.items() if k != "t"}
         B = {k: v for k, v in B.items() if k != "t"}
@@ -169,4 +182,4 @@ class ContourSites(CarrierSites):
         """The path point closest to a base pose (to order the stops from the current one)."""
         v = self.c.values_for_base(T_world_base)
         k = int(np.argmin(np.hypot(self.table[:, 1] - v["x"], self.table[:, 2] - v["y"])))
-        return {"t": float(self.table[k, 0])}
+        return {"t": float(self.table[k, 0]), **self._lift}
