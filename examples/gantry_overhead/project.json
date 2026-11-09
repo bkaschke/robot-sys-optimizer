@@ -58,7 +58,8 @@
       -180.0,
       -90.0,
       0.0
-    ]
+    ],
+    "joint_limits_deg": null
   },
   "base": {
     "mode": "movable",
@@ -230,6 +231,33 @@
           "xyz": [
             0.0,
             1.8,
+            0.0
+          ],
+          "rpy": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "mesh": null,
+        "units": "m"
+      },
+      {
+        "shape": "box",
+        "size": [
+          0.3,
+          3.4,
+          0.25
+        ],
+        "radius": null,
+        "height": null,
+        "kg": 80.0,
+        "name": "bridge",
+        "attach": "x_axis",
+        "pose": {
+          "xyz": [
+            0.0,
+            0.0,
             0.0
           ],
           "rpy": [
@@ -2012,6 +2040,7 @@
       "torque": 0.5,
       "standoff": 1.0,
       "group": 1.0,
+      "motion": 1.0,
       "wrist_flip": 1.0
     },
     "margins": {

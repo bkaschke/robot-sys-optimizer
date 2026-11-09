@@ -38,7 +38,7 @@ def _yaw_about_world_z(R: np.ndarray) -> np.ndarray:
 
 
 class CellTab:
-    def __init__(self, server: viser.ViserServer, session: Session):
+    def __init__(self, server: viser.ViserServer, session: Session, jog_container=None):
         self.server = server
         self.s = session
         self.view: RobotView | None = None
@@ -77,7 +77,7 @@ class CellTab:
             self.limits_panel = LimitsPanel(server, self)
             from ui.robot_jog import JogPanel
 
-            self.jog_panel = JogPanel(server, self)
+            self.jog_panel = JogPanel(server, self, jog_container)  # left panel -> Jog -> Robot arm
             self.listeners.append(lambda _T: self.jog_panel.update_readout())
         with server.gui.add_folder("Part"):
             self.part_choice = server.gui.add_dropdown(

@@ -332,3 +332,16 @@ def test_arm_motion_and_unzoned_config_cost():
     assert config_changes(seqs) == 1
     _, terms = cost_breakdown([], 0, [[0, 0]], Weights(motion=2.0, group=3.0), groups=1, motion=0.5)
     assert terms["motion"] == pytest.approx(1.0) and terms["group"] == pytest.approx(3.0)
+
+
+def test_carrier_sliders_and_arm_jog_are_in_the_left_jog_panel(app):
+    objects, car, jp = app["objects"], app["carrier"], app["cell"].jog_panel
+    assert app["project"].load_example("floor_xy_rails")
+    assert car.dof_folder is objects.carrier_slot and set(car._dof) == {"x", "y"}
+    for sl in car._dof.values():  # the carrier's axis sliders, rebuilt in the left panel
+        assert sl._impl.parent_container_id == objects.carrier_slot._impl.uuid
+    for w in (jp.frame, jp.minus, jp.j_plus, jp.readout):  # the arm jog
+        assert w._impl.parent_container_id == objects.arm_slot._impl.uuid
+    car._dof["x"].value = 500.0  # the slider still drives the carrier (and the robot with it)
+    car._jog()
+    assert car.values()["x"] == pytest.approx(0.5)

@@ -77,7 +77,13 @@ def _mm(v) -> tuple:
 
 
 class CarrierPanel:
-    def __init__(self, server: viser.ViserServer, session: Session, set_base: Callable[[np.ndarray], None]):
+    def __init__(
+        self,
+        server: viser.ViserServer,
+        session: Session,
+        set_base: Callable[[np.ndarray], None],
+        dof_container=None,
+    ):
         self.server = server
         self.s = session
         self.set_base = set_base
@@ -114,7 +120,10 @@ class CarrierPanel:
             self.loc = gui.add_vector2("Localization ±mm / ±deg (mobile)", (10.0, 1.0), step=1.0)
             self.tip = gui.add_checkbox("Tip-over check (mobile, needs mass)", False)
         self.apply = gui.add_button("Apply base settings", color="green")
-        self.dof_folder = gui.add_folder("Carrier position")
+        if dof_container is not None:  # the left panel's Jog folder (app.py)
+            self.dof_folder = dof_container
+        else:
+            self.dof_folder = gui.add_folder("Carrier position")
         self.info = gui.add_markdown("")
         self._jog_latest = Latest(self._jog)  # slider drags: newest value only
         self.apply.on_click(lambda e: self.commit(e))
@@ -164,7 +173,7 @@ class CarrierPanel:
         self.locked_note.visible = not edit
         self.locked_note.content = (
             "**Setup confirmed:** the robot rides on the carrier. Move them together with the "
-            "carrier position sliders or the jog arrows (Objects). **Edit setup** to change it."
+            "*Carrier position* sliders or the jog arrows (left panel → Jog). **Edit setup** to change it."
             if movable
             else "**Setup confirmed** (static base). **Edit setup** to change it."
         )

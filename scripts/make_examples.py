@@ -11,8 +11,8 @@ examples/mobile_amr/project.json
 
 v6, around the 3 m tall wall (assets/parts/tall_wall.stl, 2 x 0.3 m, on the floor):
 examples/gantry_overhead/project.json
-    UR20 hanging from an overhead X-Y gantry (two fixed beams on posts), top face and the
-    upper part (from 1.8 m) of both long faces.
+    UR20 hanging from an overhead X-Y gantry (two fixed beams on posts, a bridge moving in x),
+    top face and the upper part (from 1.8 m) of both long faces.
 examples/floor_xy_rails/project.json
     UR20 on a floor X-Y gantry (X rails, a bridge moving in x, carriage along it in y),
     0.25 m to 1.8 m up one long face
@@ -141,8 +141,9 @@ WALL_FACES_GANTRY = (
 
 
 def gantry_base() -> Base:
-    """Overhead X-Y gantry: beams along x at y = +-1.8 m, 4.4 m up on posts; the carriage hangs
-    below the beam level and carries the UR20 upside down."""
+    """Overhead X-Y gantry: beams along x at y = +-1.8 m, 4.4 m up on posts, a bridge between
+    them that moves in x (attach "x_axis"); the carriage runs along the bridge, hangs below the
+    beam level and carries the UR20 upside down."""
     posts = [
         Primitive(
             name=f"post_{i}", shape="box", size=(0.2, 0.2, 4.4), pose=Pose(xyz=(x, y, -4.4)), attach="fixed"
@@ -162,6 +163,14 @@ def gantry_base() -> Base:
         bodies=[
             *posts,
             *beams,
+            Primitive(  # the Y axis: spans the gap between the beams, rides along them in x
+                name="bridge",
+                shape="box",
+                size=(0.3, 3.4, 0.25),
+                pose=Pose(xyz=(0, 0, 0.0)),
+                attach="x_axis",
+                kg=80,
+            ),
             Primitive(
                 name="carriage", shape="box", size=(0.5, 0.5, 0.25), pose=Pose(xyz=(0, 0, -0.25)), kg=80
             ),

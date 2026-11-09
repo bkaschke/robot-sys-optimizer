@@ -1,4 +1,5 @@
-"""Jog the robot (v6, Cell -> Robot -> Jog): per joint, or the TCP along / about the axes of
+"""Jog the robot (v6, left panel -> Jog -> Robot arm; Cell -> Robot -> Jog without one): per
+joint, or the TCP along / about the axes of
 the world, the robot base, the part or the tool frame (core.jog), step by step with - / +
 buttons, like a teach pendant. The joints come from IK nearest the current pose; a step that
 would need a configuration flip (a joint moving more than 30 deg) or leave the reach is
@@ -22,27 +23,29 @@ FLANGE = "(flange)"
 
 
 class JogPanel:
-    def __init__(self, server: viser.ViserServer, cell) -> None:
+    def __init__(self, server: viser.ViserServer, cell, container=None) -> None:
         self.cell, self.s = cell, cell.s
         self._ik = self._ik_for = None
         self.coll = CellCollision(cell.s)
         gui = server.gui
-        with gui.add_folder("Jog", expand_by_default=False):
+        with container if container is not None else gui.add_folder("Jog", expand_by_default=False):
             self.frame = gui.add_dropdown("Frame", FRAMES, initial_value="World")
             self.point = gui.add_dropdown("Jog point", (FLANGE,), hint="the TCP that moves")
             self.step = gui.add_number("Step (mm)", 10.0, min=0.1, step=1.0)
             self.turn = gui.add_number("Turn step (deg)", 5.0, min=0.1, step=1.0)
             self.joint_step = gui.add_number("Joint step (deg)", 5.0, min=0.1, step=1.0)
-            self.minus = gui.add_button_group("Jog −", AXES)
-            self.plus = gui.add_button_group("Jog +", AXES)
+            self.minus = gui.add_button_group("Move −", AXES[:3])
+            self.plus = gui.add_button_group("Move +", AXES[:3])
+            self.turn_minus = gui.add_button_group("Turn −", AXES[3:])
+            self.turn_plus = gui.add_button_group("Turn +", AXES[3:])
             self.j_minus = gui.add_button_group("Joint −", ("J1", "J2", "J3", "J4", "J5", "J6"))
             self.j_plus = gui.add_button_group("Joint +", ("J1", "J2", "J3", "J4", "J5", "J6"))
             self.allow = gui.add_checkbox(
                 "Allow collisions", False, hint="jog steps into the floor, part or external axis"
             )
             self.readout = gui.add_markdown("")
-        self.minus.on_click(lambda e: self.jog(e.target.value, -1, e))
-        self.plus.on_click(lambda e: self.jog(e.target.value, +1, e))
+        for group, sign in ((self.minus, -1), (self.plus, 1), (self.turn_minus, -1), (self.turn_plus, 1)):
+            group.on_click(lambda e, sg=sign: self.jog(e.target.value, sg, e))
         self.j_minus.on_click(lambda e: self.jog(e.target.value, -1, e))
         self.j_plus.on_click(lambda e: self.jog(e.target.value, +1, e))
         self.frame.on_update(lambda _e: self.refresh())
@@ -54,7 +57,7 @@ class JogPanel:
     def refresh(self) -> None:
         """Show the buttons and steps of the chosen frame; TCP list from the current tool."""
         joint = self.frame.value == "Joint"
-        for w in (self.minus, self.plus, self.step, self.turn, self.point):
+        for w in (self.minus, self.plus, self.turn_minus, self.turn_plus, self.step, self.turn, self.point):
             w.visible = not joint
         for w in (self.j_minus, self.j_plus, self.joint_step):
             w.visible = joint

@@ -97,3 +97,7 @@ def test_gantry_examples_have_two_axes():
     floor = Carrier(_base("floor_xy_rails"))
     assert floor.dofs == ["x", "y"]
     assert floor.T_world_base({"x": 0.0, "y": 0.0})[2, 2] == pytest.approx(1.0)  # upright
+    for g in (c, floor):  # each has a bridge on the X axis: it moves in x, stays centred in y
+        T0 = {b.name: b.T for b in g.moving_bodies({"x": 0.0, "y": 0.0})}["bridge"]
+        T1 = {b.name: b.T for b in g.moving_bodies({"x": 1.0, "y": 0.3})}["bridge"]
+        assert np.allclose(T1[:3, 3] - T0[:3, 3], g.T_frame[:3, 0])

@@ -64,6 +64,9 @@ class ObjectsPanel:
             self.jz = gui.add_button_group("Z", ("−Z", "+Z"))
             self.jr = gui.add_button_group("Turn", ("−Rz", "+Rz"))
             self.info = gui.add_markdown("")
+            # filled by the External Axis panel (carrier DOF sliders) and the Cell tab (arm jog)
+            self.carrier_slot = gui.add_folder("Carrier position", expand_by_default=True)
+            self.arm_slot = gui.add_folder("Robot arm", expand_by_default=True)
         for w in self.show.values():
             w.on_update(lambda e: self.apply_visibility())
         self.gizmo.on_update(lambda e: self.apply_gizmo())

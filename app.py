@@ -137,11 +137,11 @@ def build_app(
     tab_handles = {name: tabs.add_tab(f"{i + 1} {TAB_TITLES[i]}") for i, name in enumerate(TABS)}
     with tab_handles["Cell"]:
         workflow.header("Cell")
-        cell = CellTab(server, session)
+        cell = CellTab(server, session, jog_container=objects.arm_slot)
         stayouts = StayoutPanel(server, session)  # arm, tool and carrier keep clear (v3 item 5)
     with tab_handles["External Axis"]:
         workflow.header("External Axis")
-        carrier = CarrierPanel(server, session, set_base=cell.set_base)
+        carrier = CarrierPanel(server, session, set_base=cell.set_base, dof_container=objects.carrier_slot)
     with tab_handles["Tool Setup"]:
         workflow.header("Tool Setup")
         tool = ToolSetupTab(server, session)
