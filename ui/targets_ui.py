@@ -21,6 +21,7 @@ from ui.session import Session
 from ui.surface_select_ui import SurfaceTools
 from ui.target_preview import draw_preview, target_tcp_pose  # noqa: F401 (re-export)
 from ui.target_tools_ui import PointTools
+from ui.unreached_view import draw_unreached, unreached_ids
 from ui.widgets import MAX_UPLOAD, notify
 
 PART = "/cell/part"
@@ -123,6 +124,9 @@ class TargetsTab:
             self.show_normals = gui.add_checkbox("Show normals", True)
             self.normal_len = gui.add_number("Normal length (mm)", 20.0, min=1.0, step=1.0)
             self.point_size = gui.add_number("Point size (mm)", 4.0, min=0.5, step=0.5)
+            self.show_unreached = gui.add_checkbox(
+                "Highlight unreachable points", True, hint="red dot, cross and id (selected plan or check)"
+            )
             self.preview_on = gui.add_checkbox("Preview tool at point", False)
             self.preview_idx = gui.add_slider("Point #", 0, 1, 1, 0)
         self._wire()
@@ -297,7 +301,7 @@ class TargetsTab:
             self.refresh()
             notify(e, "Imported", f"{len(rows)} points", ok=True)
 
-        for w in (self.color_by, self.show_normals, self.normal_len, self.point_size):
+        for w in (self.color_by, self.show_normals, self.normal_len, self.point_size, self.show_unreached):
             w.on_update(lambda e: self._draw_points())
         for w in (self.preview_on, self.preview_idx):
             w.on_update(lambda e: self._draw_preview())
@@ -412,8 +416,8 @@ class TargetsTab:
         self.sel_info.content = f"Selected: {n} faces, {area:.1f} cm²" if n else "_Nothing selected._"
 
     def _draw_points(self) -> None:
-        self._drop("points")
-        self._drop("normals")
+        for key in ["points", "normals", *(k for k in self._handles if k.startswith("unreached"))]:
+            self._drop(key)
         ids, P, N, G = tg.as_arrays(self.s.targets)
         names = [g.name for g in self.s.targets.groups]
         counts = {g: G.count(g) for g in names}
@@ -453,6 +457,11 @@ class TargetsTab:
             seg = np.stack([P, P + N * self.normal_len.value / 1000], axis=1)
             self._handles["normals"] = self.server.scene.add_line_segments(
                 f"{PART}/normals", seg, (30, 30, 30), thickness=1.5, thickness_units="screen"
+            )
+        if self.show_unreached.value:  # v6 feedback: make the points the plan misses obvious
+            bad = unreached_ids(ids, sel, self.s.feasibility)
+            self._handles.update(
+                draw_unreached(self.server, PART, ids, P, N, bad, self.point_size.value / 1000)
             )
 
     def _draw_preview(self) -> None:

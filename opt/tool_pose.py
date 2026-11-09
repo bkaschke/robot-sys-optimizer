@@ -28,10 +28,14 @@ def pose_label(v: ExtensionValues, keys=POSE_KEYS) -> str:
     )
 
 
-def optimize_pose(ev, st, samples: list, say: Callable[[str, float], None], cancelled=None):
+def optimize_pose(
+    ev, st, samples: list, say: Callable[[str, float], None], cancelled=None, cands: list | None = None
+):
     """Returns (feasible, values, solution, point results, message). ``ev`` is the tool
     geometry evaluator (opt.tool_geometry._Evaluator); ``samples`` gets one LSample per
-    evaluated candidate (length = connector arc length)."""
+    evaluated candidate (length = connector arc length); ``cands`` gets (values, solution,
+    results, feasible) per candidate (the refined winner replaces its quick plan)."""
+    cands = [] if cands is None else cands
     import cma
 
     from opt.tool_geometry import LSample
@@ -58,6 +62,7 @@ def optimize_pose(ev, st, samples: list, say: Callable[[str, float], None], canc
             LSample(ev.tm.length(v), ok, reached, n_targets, len(sol.stations) if sol else 0, cost)
         )
         key = (0 if ok else 1, cost)
+        cands.append((v, sol, res, ok))
         if key < best["key"]:
             best.update(key=key, v=v, sol=sol, res=res, ok=ok)
         return cost if np.isfinite(cost) else 1e9
@@ -84,6 +89,7 @@ def optimize_pose(ev, st, samples: list, say: Callable[[str, float], None], canc
             ok, sol, res = ev.plan(best["v"], cancelled, refine=True)
             if sol is not None and (0 if ok else 1, sol.cost) <= best["key"]:
                 best.update(sol=sol, res=res, ok=ok)
+                cands[:] = [c for c in cands if c[0] is not best["v"]] + [(best["v"], sol, res, ok)]
     except CancelledError:
         pass
     stopped = cancelled is not None and cancelled()

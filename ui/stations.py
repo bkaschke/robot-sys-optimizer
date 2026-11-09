@@ -17,6 +17,7 @@ from core.robot import Robot
 from core.schema import Optimizer, TargetGroup, length_ref
 from opt.placement import PlannerSettings, Targets, plan_stations
 from opt.reachability import map_for_tool
+from ui.log_panel import log, plan_log
 from ui.session import Session
 from ui.staleness import stamp_for
 from ui.widgets import notify
@@ -208,6 +209,7 @@ class StationsPanel:
                     if best
                     else "_No solution found._"
                 )
+                plan_log(s, best, self._cancel.is_set())
                 if self._cancel.is_set():
                     self.status.content = "**Cancelled.** " + (
                         f"Best so far: **{best.label}**, cost {best.cost:.2f}"
@@ -216,8 +218,10 @@ class StationsPanel:
                     )
             except CancelledError:  # Cancel while the reachability map was being built
                 self.status.content = "**Cancelled** (while building the reachability map)."
+                log("Station planning cancelled (while building the reachability map).", "warn")
             except Exception as err:  # report in the GUI instead of dying silently in a thread
                 self.status.content = f"⚠ planning failed: {err}"
+                log(f"Station planning failed: {err}", "error")
                 raise
             finally:
                 self.run.visible, self.stop.visible, self.progress.visible = True, False, False

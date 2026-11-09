@@ -490,6 +490,7 @@ class Optimizer(_Model):
     max_stations: int = Field(default=4, ge=1, le=40)  # movable bases; static mode plans one base
     weights: Weights = Field(default_factory=Weights)
     margins: Margins = Field(default_factory=Margins)
+    tool_weights: Weights | None = None  # the tool-geometry optimizer's own costs (None: weights)
 
 
 # --- Results -------------------------------------------------------------------

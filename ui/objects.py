@@ -129,7 +129,11 @@ class ObjectsPanel:
         if key == "Part":
             return [c.part_handle] if c is not None and c.part_handle is not None else []
         if key == "Part/Targets":
-            return [tg._handles[k] for k in ("points", "normals") if tg is not None and k in tg._handles]
+            if tg is None:
+                return []
+            return [
+                h for k, h in tg._handles.items() if k in ("points", "normals") or k.startswith("unreached")
+            ]
         if key == "Part/Selection":
             return [tg._handles["sel"]] if tg is not None and "sel" in tg._handles else []
         if key.startswith("Stay-out zones/"):

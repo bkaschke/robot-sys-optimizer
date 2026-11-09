@@ -12,6 +12,7 @@ from core.feasibility import CancelledError
 from core.robot import Robot
 from core.schema import ExtensionValues, Optimizer
 from opt.tool_geometry import GeometryResult, GeometrySettings, optimize_tool
+from ui.log_panel import log
 from ui.session import Session
 from ui.staleness import stamp_for
 from ui.stations import part_footprint, world_targets
@@ -49,6 +50,9 @@ class ToolOptPanel:
                 step=5,
                 hint="candidate tool geometries to try",
             )
+            from ui.costs_ui import CostPanel
+
+            self.costs = CostPanel(server, session, field="tool_weights")  # its own costs (v6)
             self.run = gui.add_button("Optimize tool", color="green")
             self.stop = gui.add_button("Cancel", visible=False)
             self.progress = gui.add_progress_bar(0.0, visible=False)
@@ -61,6 +65,12 @@ class ToolOptPanel:
                 "W P R limits set **Tool → Extension → Type = pose**._",
                 visible=False,
             )
+            self.design = gui.add_dropdown(
+                "Design",
+                ("—",),
+                visible=False,
+                hint="the best designs found (also ones that miss points); each is listed in Results",
+            )
             self.apply = gui.add_button("Apply to tool", disabled=True)
             self.save_name = gui.add_text("Save as tool", "", hint="library name for the optimized tool")
             self.save_lib = gui.add_button("Save optimized tool to library", disabled=True)
@@ -69,9 +79,15 @@ class ToolOptPanel:
 
         @self.apply.on_click
         def _(e) -> None:
-            if self.result is not None and self.result.feasible:
-                self.apply_values(self.result.values)
-                notify(e, "Applied", "the optimized geometry is now the tool's rough placement", ok=True)
+            d = self.chosen()
+            if d is not None:
+                self.apply_values(d.values)
+                notify(
+                    e,
+                    "Applied",
+                    f"design {d.solution.label.split(':')[0]} is now the tool's rough placement",
+                    ok=True,
+                )
 
         @self.save_lib.on_click
         def _(e) -> None:
@@ -86,13 +102,28 @@ class ToolOptPanel:
         library entry (tools/<name>.yaml); the tool in use is not changed."""
         from core.tool import save_tool
 
-        r = self.result
-        if r is None or not r.feasible or self.s.tool is None:
-            raise ValueError("run Find shortest tool first")
+        d = self.chosen()
+        if d is None or self.s.tool is None:
+            raise ValueError("run Optimize tool first")
         name = name.strip() or f"{self.s.tool.name}_opt"
-        x = self.s.tool.extension.model_copy(update={"nominal": r.values})
+        x = self.s.tool.extension.model_copy(update={"nominal": d.values})
         ee = self.s.tool.model_copy(update={"name": name, "extension": x})
         return save_tool(ee, name)
+
+    def chosen(self):
+        """The design picked in the dropdown (opt.tool_geometry.Design), else the result's
+        best feasible geometry, else None."""
+        from opt.tool_geometry import Design
+
+        r = self.result
+        if r is None:
+            return None
+        ds = r.designs
+        if ds:
+            opts = list(self.design.options)
+            k = opts.index(self.design.value) if self.design.value in opts else 0
+            return ds[min(k, len(ds) - 1)]
+        return Design(r.values, r.solution, r.point_results, True) if r.feasible else None
 
     def update_hint(self) -> None:
         """Show the pose-limits hint while the tool is a legacy (L / theta / d) tool."""
@@ -122,11 +153,15 @@ class ToolOptPanel:
             s.T_world_base.copy(),
             world_targets(s),
             part_footprint(s),
-            (s.extra.get("optimizer") or Optimizer()).weights,
+            self.costs.commit(),  # the tool optimizer's own cost weights
             int(self.max_stations.value),
         )
         st = GeometrySettings(L_tol=self.tol.value / 1000, shape_evals=int(self.shape_evals.value))
-        st.planner.zoning = opts["zoning"]
+        req = self.costs.requirements()
+        st.planner.zoning = opts["zoning"] or req["require_one_config"]
+        st.planner.require_all = req["require_all"]
+        st.planner.require_one_config = req["require_one_config"]
+        self._require_all = req["require_all"]
         st.planner.areas = opts.get("areas", True)
         sites = s.sites()
         obstacles = s.obstacle_entries()  # stay-out zones
@@ -158,8 +193,10 @@ class ToolOptPanel:
                 self._show()
             except CancelledError:  # Cancel while a reachability map was being built
                 self.info.content = "**Cancelled** (while building the reachability map)."
+                log("Tool optimization cancelled (while building the reachability map).", "warn")
             except Exception as err:
                 self.info.content = f"⚠ tool optimization failed: {err}"
+                log(f"Tool optimization failed: {err}", "error")
                 raise
             finally:
                 self.run.visible, self.stop.visible, self.progress.visible = True, False, False
@@ -185,18 +222,43 @@ class ToolOptPanel:
             else "| L (mm) | full | reached | stations |\n|---|---|---|---|\n"
         )
         table = head + rows
+        n = len(self.s.targets.points)
+        ds = r.designs
+        if not ds and r.feasible and r.solution is not None:  # older results: just the best
+            from opt.tool_geometry import Design
+
+            ds = r.designs = [Design(r.values, r.solution, r.point_results, True)]
+        if getattr(self, "_require_all", False):  # must be met: only designs reaching every point
+            ds = r.designs = [d for d in ds if d.feasible]
+        names = [
+            f"#{i + 1} {'✔' if d.feasible else '✘'} {n - len(d.solution.unreached)}/{n} pts · "
+            f"cost {d.solution.cost:.2f} · {d.solution.label.split(':')[0]}"
+            for i, d in enumerate(ds)
+        ]
+        self.design.options = tuple(names) if names else ("—",)
+        self.design.value = self.design.options[0]
+        self.design.visible = bool(names)
+        self.apply.disabled = self.save_lib.disabled = not names
+        listing = "  \n".join(names)
         if not r.feasible:
-            self.info.content = f"⚠ {r.message}\n\n{table}"
-            return
-        v = r.values
-        shape = "" if pose else f"θ {v.theta_deg:.1f}°, d {v.d * 1000:.0f} mm, roll {v.roll_deg:.1f}° · "
-        self.info.content = (
-            f"**{r.message}**  \n{shape}cost {r.solution.cost:.2f} · {len(r.solution.stations)} station(s)"
-            "  \nNext: **Apply to tool**, then **Results → Paths & simulation → Build paths**."
-            f"\n\n{table}"
-        )
-        self.apply.disabled = self.save_lib.disabled = False
-        self.s.stamps[r.solution.label] = self._stamp
-        self.s.result_points[r.solution.label] = r.point_results
-        self.s.results = sorted([*self.s.results, r.solution], key=lambda x: x.cost)
-        self.on_solution()
+            pick = f"\n\n**Best designs (they miss points)**, pick one under *Design*:  \n{listing}"
+            self.info.content = f"⚠ {r.message}" + (pick if names else "") + f"\n\n{table}"
+            log(f"Tool optimization finished: {r.message}", "warn")
+        else:
+            v = r.values
+            shape = "" if pose else f"θ {v.theta_deg:.1f}°, d {v.d * 1000:.0f} mm, roll {v.roll_deg:.1f}° · "
+            self.info.content = (
+                f"**{r.message}**  \n{shape}cost {r.solution.cost:.2f} · "
+                f"{len(r.solution.stations)} station(s)"
+                "  \nNext: **Apply to tool**, then **Results → Paths & simulation → Build paths**."
+                f"\n\n**Best designs:**  \n{listing}\n\n{table}"
+            )
+            log(f"Tool optimization finished: {r.message}.", "done")
+        for d in ds:  # every offered design is a result to inspect / build paths for
+            self.s.stamps[d.solution.label] = self._stamp
+            self.s.result_points[d.solution.label] = d.point_results
+        if ds:
+            labels = {d.solution.label for d in ds}
+            keep = [x for x in self.s.results if x.label not in labels]
+            self.s.results = sorted([*keep, *(d.solution for d in ds)], key=lambda x: x.cost)
+            self.on_solution()

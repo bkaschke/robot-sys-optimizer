@@ -16,8 +16,11 @@ import numpy as np
 import viser
 
 from core.feasibility import CancelledError
+from ui.log_panel import log
 from ui.robot_view import quiet_remove
 from ui.session import Session
+from ui.sim_build import carrier_path as sim_carrier_path
+from ui.sim_build import path_checker
 from ui.widgets import Latest, notify
 
 ROOT = "/results/paths"
@@ -100,7 +103,12 @@ class SimPanel:
         )
         self.lift = gui.add_number("Lift height (mm)", 30.0, min=1.0, step=5.0)
         self.home = gui.add_checkbox(
-            "Home between stops", True, hint="arm to home, carrier moves, arm to the next stop"
+            "Home between stops", True, hint="arm to home before the carrier moves, back after"
+        )
+        self.drive = gui.add_checkbox(
+            "Drive carrier between stops",
+            True,
+            hint="plan the mobile base / external axis moves between stops (collision checked)",
         )
         for w in (self.pattern, self.no_cross):
             w.on_update(lambda e: self.show_pattern_fields())
@@ -131,73 +139,16 @@ class SimPanel:
         )
 
     def _carrier_path(self, sol, step: float, checker=None, home=None):
-        """(k_from, k_to) -> carrier poses between two stops, or None (no carrier).
-
-        With a lift, the lift moves at the stop and the carrier drives at one height: the
-        lowest one if the way is clear there (with ``checker`` and ``home``: also for the arm
-        at home), else the first clear one of the two stops' heights and the lift levels."""
-        from core.carrier import lift_levels
-
-        s = self.s
-        sites = s.sites() if s.base.mode == "movable" else None
-        if sites is None or not hasattr(sites, "transit") or not all(st.carrier for st in sol.stations):
+        """ui.sim_build.carrier_path, the arm held at ``home`` unless the call gives arm_q."""
+        path = sim_carrier_path(self.s, sol, step, checker)
+        if path is None:
             return None
-        lifted = "lift" in getattr(sites, "dofs", ())
-
-        def clear(moves) -> bool:
-            if not all(ok for _, _, ok in moves):
-                return False
-            if checker is None or home is None:
-                return True
-            for _, T, _ in moves:
-                checker.set_base(T)
-                if checker.scene.collides(home):
-                    return False
-            return True
-
-        def path(a: int, b: int):
-            A, B = sol.stations[a].carrier, sol.stations[b].carrier
-            if not lifted:
-                moves = sites.transit(A, B, step)
-                return [(d, sites.T(d), ok) for d, ok in moves]
-            lo, hi = sites.bounds[sites.dofs.index("lift")]
-            heights = [lo, *(E["lift"] for E in (A, B) if "lift" in E), *lift_levels(lo, hi)]
-            first = None
-            for h in dict.fromkeys(round(float(h), 6) for h in heights):
-                moves = [(d, sites.T(d), ok) for d, ok in sites.transit_staged(A, B, step, h)]
-                if first is None:
-                    first = moves
-                if clear(moves):
-                    return moves
-            return first  # nothing clear: the lowest height, its problems flagged
-
-        return path
+        return lambda a, b, arm_q=None: path(a, b, home if arm_q is None else arm_q)
 
     # --- build ---------------------------------------------------------------------------------
 
     def _checker(self):
-        from core.collision import CollisionScene
-        from core.feasibility import FeasibilityChecker
-        from core.ik import make_ik
-        from core.robot import Robot
-
-        s = self.s
-        robot = Robot(s.robot.spec)  # private Pinocchio data for the thread
-        sites = s.sites()
-        bb, wb = sites.scene_bodies() if sites is not None else ([], [])
-        scene = CollisionScene(
-            robot,
-            s.tool_model,
-            s.part_mesh(),
-            s.T_world_base,
-            s.part.T_world_part,
-            base_bodies=bb,
-            world_bodies=wb,
-            obstacles=s.obstacle_entries(),  # stay-out zones
-        )
-        return FeasibilityChecker(
-            robot, make_ik(robot), s.tool_model, scene, s.T_world_base, s.part.T_world_part
-        )
+        return path_checker(self.s)  # private Robot / Pinocchio data for the thread
 
     def build(self, event=None, block: bool = False) -> None:
         from core.export import station_pose
@@ -223,9 +174,7 @@ class SimPanel:
         targets_key = s.targets.model_dump_json()  # paths belong to these targets
         home = s.home_q() if self.home.value else None  # the project's home (Robot & cell)
         carrier_path = (
-            self._carrier_path(sol, max(self.step.value / 1000, 0.05), checker, home)
-            if home is not None
-            else None
+            sim_carrier_path(s, sol, max(self.step.value / 1000, 0.05), checker) if self.drive.value else None
         )
         pattern = self.pattern_settings()
         self._cancel.clear()
@@ -250,6 +199,7 @@ class SimPanel:
                     home=home,
                     carrier_path=carrier_path,
                     group_of={p.id: p.group for p in s.targets.points},
+                    park=None if home is not None else s.home_q(),  # clear pose to go via
                 )
                 self.label = sol.label
                 self._targets_key = targets_key
@@ -262,8 +212,10 @@ class SimPanel:
                 self._after_build()
             except CancelledError:
                 self.info.content = "**Cancelled.**"
+                log("Path build cancelled.", "warn")
             except Exception as err:  # report in the GUI instead of dying silently in a thread
                 self.info.content = f"⚠ path build failed: {err}"
+                log(f"Path build failed: {err}", "error")
                 raise
             finally:
                 self.build_btn.visible, self.stop.visible, self.progress.visible = True, False, False
@@ -280,7 +232,8 @@ class SimPanel:
         self.info.content = (
             f"**{len(plan.samples)} samples**, {plan.length():.2f} m of TCP path over "
             f"{len(plan.stations)} stop(s) for _{self.label}_ "
-            f"({self.pattern.value.lower()}{', home between stops' if self.home.value else ''}).  \n"
+            f"({self.pattern.value.lower()}{', home between stops' if self.home.value else ''}"
+            f"{', carrier moves planned' if self.drive.value else ''}).  \n"
             f"Flagged samples: **{problems}**."
             + (
                 "  \n_Reconfigure = the plan switches joint configuration there: plan with Joint "
@@ -297,6 +250,15 @@ class SimPanel:
                 else ""
             )
         )
+        log(
+            f"Paths built for **{self.label}**: {len(plan.samples)} samples, {plan.length():.2f} m; "
+            f"flagged: {problems}.",
+            "done" if problems == "none" else "warn",
+        )
+        if getattr(self, "home_blocked", None):
+            log(
+                "The home pose collides at stop " + ", ".join(f"S{k + 1}" for k in self.home_blocked), "error"
+            )
         n = len(plan.samples)
         self.frame.max = max(1, n - 1)
         self.frame.disabled = self.play.disabled = self.restart.disabled = self.export.disabled = (
@@ -430,8 +392,9 @@ class SimPanel:
         flag = f" · **{p.issue.replace('_', ' ')}**" if p.issue else ""
         ends = ("home" if p.a == 0 else p.a, "home" if p.b == 0 else p.b)
         what = {
-            "carrier": "carrier moving, arm at home",
-            "home": f"{ends[0]} → {ends[1]}",
+            "carrier": "carrier moving, arm parked",
+            "home": f"{ends[0]} → {ends[1]} (joint move)",
+            "retreat": f"backing off point {p.a}",
             "lift": f"point {p.a} → {p.b} (lifted)",
         }.get(p.kind, f"point {p.a} → {p.b}")
         self.status.content = f"Stop S{p.station + 1}{zone}: {what} ({100 * p.s:.0f} %){flag}"

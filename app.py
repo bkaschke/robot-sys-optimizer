@@ -14,6 +14,7 @@ from ui import settings as ui_settings
 from ui.carrier_ui import CarrierPanel
 from ui.cell import CellTab
 from ui.guide import GuideServer, add_guide_panel
+from ui.log_panel import LogPanel, log
 from ui.objects import ObjectsPanel
 from ui.optimize import INSPECT_SOURCES, OptimizeTab
 from ui.placement import PlacementPanel
@@ -21,6 +22,7 @@ from ui.project_panel import ProjectPanel
 from ui.results import ResultsTab
 from ui.session import PartState, Session, last_project
 from ui.simulate import SimPanel
+from ui.staleness import drop_stale_results
 from ui.stations import StationsPanel
 from ui.stayout_ui import StayoutPanel
 from ui.targets_ui import TargetsTab
@@ -108,6 +110,7 @@ def build_app(
         for panel in (state["stations"], state["tool_opt"]):
             panel.max_stations.value = float(min(max(n, 1), 40))
         state["stations"].costs.load()  # the project's cost weights
+        state["tool_opt"].costs.load()  # and the tool optimizer's
         ui_settings.apply(state, session.ui)
         t.refresh()
 
@@ -131,6 +134,7 @@ def build_app(
         objects = ObjectsPanel(server, session)
     tree.dock_left()
     tree.set_width(290)
+    log_panel = LogPanel(server)  # errors, finished runs, setup status, unreached points
     workflow = Workflow(server, session)
     state["workflow"] = workflow
     tabs = server.gui.add_tab_group()
@@ -223,12 +227,33 @@ def build_app(
     objects.targets, objects.results, objects.sim = targets, results, sim
     objects.stayouts = stayouts
     objects.rebuild_tree()
+
+    fresh: set[str] = set()  # result labels seen up to date (ui.staleness)
+
+    def clear_stale() -> None:
+        """v6 feedback: plans and their paths go when the part moves, the tool or the targets
+        change (they no longer apply); a run in progress is left alone."""
+        busy = any(p._thread is not None and p._thread.is_alive() for p in (stations, tool_opt, sim))
+        if busy:
+            return
+        gone = drop_stale_results(session, fresh)
+        if gone:
+            what = sorted({c for v in gone.values() for c in v})
+            results.refresh()
+            log(
+                f"Cleared {len(gone)} result(s): the {', '.join(what)} changed since they were planned.",
+                "warn",
+            )
+        if sim.plan is not None and sim.label not in {r.label for r in session.results}:
+            sim.reset("the plan they belonged to was cleared")
+
     workflow.refresh(force=True)
     objects.apply_gizmo()
     if autosave_thread:  # the real app: keep step status, banners and visibility current
         workflow.hooks.append(objects.apply_visibility)
         workflow.hooks.append(tool_opt.update_hint)  # pose-limits hint follows the tool type
         workflow.hooks.append(sim.check_targets)  # paths are cleared when the targets change
+        workflow.hooks.append(clear_stale)  # and plans when the part, tool or targets change
         workflow.start_watch()
     server.gui.add_markdown(UR_NOTICE)
 
@@ -248,6 +273,8 @@ def build_app(
         project=project,
         dark_toggle=dark_toggle,
         guide=guide,
+        log=log_panel,
+        clear_stale=clear_stale,
     )
     return state
 

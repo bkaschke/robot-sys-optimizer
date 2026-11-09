@@ -110,3 +110,37 @@ def step_state(s, step: str) -> str:
 def confirm_step(s, step: str) -> None:
     now = components(s)
     s.steps[step] = {k: now[k] for k in STEP_COMPONENTS[step]}
+
+
+CLEARS = ("part", "tool", "targets")  # v6 feedback: plans made for another part / tool / targets go
+
+
+def clearing_changes(s, sol) -> list[str]:
+    """The components among ``CLEARS`` that changed since ``sol`` was computed (its plan no
+    longer applies: the part moved, the tool or the targets changed); [] = keep it."""
+    kind = "tool" if getattr(sol, "tool_values", None) is not None else "plan"
+    old, new = s.stamps.get(sol.label), stamp_for(s, kind)
+    if not old:
+        return []
+    return [LABELS[k] for k in CLEARS if k in old and old[k] != new.get(k)]
+
+
+def drop_stale_results(s, fresh: set[str]) -> dict[str, list[str]]:
+    """Remove the results (and their joint solutions and stamps) whose part, tool or targets
+    changed after they were seen up to date. ``fresh`` (kept by the caller between calls)
+    collects the labels seen up to date: results that load already out of date (e.g. saved
+    by an older version) are only flagged, never removed. Returns {label: what changed}."""
+    gone = {}
+    for sol in list(s.results):
+        c = clearing_changes(s, sol)
+        if not c:
+            fresh.add(sol.label)
+        elif sol.label in fresh:
+            gone[sol.label] = c
+    if gone:
+        s.results = [r for r in s.results if r.label not in gone]
+        for label in gone:
+            s.result_points.pop(label, None)
+            s.stamps.pop(label, None)
+            fresh.discard(label)
+    return gone

@@ -55,6 +55,41 @@ class LSample:
 
 
 @dataclass
+class Design:
+    """One evaluated tool geometry with its station plan (v6: the GUI offers the best few,
+    also when none reaches every target)."""
+
+    values: ExtensionValues
+    solution: Solution
+    point_results: dict[int, PointResult]
+    feasible: bool
+
+
+TOP_DESIGNS = 3
+
+
+def top_designs(cands, label, n: int = TOP_DESIGNS) -> list[Design]:
+    """The ``n`` best of (values, solution, results, feasible): every target reached first,
+    then fewest unreached, then cost. Each solution gets ``tool_values`` and the label
+    ``label(values) + ": " + its plan label`` (labels key the GUI's result lists)."""
+    ranked = sorted(
+        (c for c in cands if c[1] is not None),
+        key=lambda c: (not c[3], len(c[1].unreached), c[1].cost),
+    )
+    out: list[Design] = []
+    seen: set[str] = set()
+    for v, sol, res, ok in ranked:
+        name = f"{label(v)}: {sol.label}"
+        if name in seen:
+            continue
+        seen.add(name)
+        out.append(Design(v, sol.model_copy(update={"tool_values": v, "label": name}), res, bool(ok)))
+        if len(out) == n:
+            break
+    return out
+
+
+@dataclass
 class GeometryResult:
     feasible: bool
     values: ExtensionValues
@@ -62,6 +97,7 @@ class GeometryResult:
     point_results: dict[int, PointResult]
     samples: list[LSample]
     message: str = ""
+    designs: list[Design] = field(default_factory=list)  # best few, best first (may miss points)
 
 
 class _Evaluator:
@@ -235,12 +271,15 @@ def optimize_tool(
     ev.obstacles = list(obstacles or [])
     x = ee.extension
     if x.type == "pose":  # v2: head pose x y z rx ry rz, best overall cost (opt.tool_pose)
-        from opt.tool_pose import optimize_pose
+        from opt.tool_pose import POSE_KEYS, optimize_pose, pose_label
 
         samples: list[LSample] = []
-        ok, v, sol, res, msg = optimize_pose(ev, st, samples, say, cancelled)
+        cands: list = []
+        ok, v, sol, res, msg = optimize_pose(ev, st, samples, say, cancelled, cands)
         say("done", 1.0)
-        return GeometryResult(ok, v, sol, res, samples, msg)
+        active = [k for k in POSE_KEYS if getattr(x, k)[1] - getattr(x, k)[0] > 1e-9]
+        designs = top_designs(cands, lambda u: pose_label(u, active))
+        return GeometryResult(ok, v, sol, res, samples, msg, designs)
     base_v = ExtensionValues(
         L=x.nominal.L,
         theta_deg=float(np.clip(0.0, *x.theta_deg)),
@@ -279,7 +318,14 @@ def optimize_tool(
         if at(float(L))[0]:
             first = k
             break
+
+    def L_label(u: ExtensionValues) -> str:
+        return f"L {u.L * 1000:.0f} mm"
+
     if first is None:
+        designs = top_designs(
+            [(base_v.model_copy(update={"L": L}), f[1], f[2], f[0]) for L, f in found.items()], L_label
+        )
         samples.sort(key=lambda s: s.L)
         best = max(samples, key=lambda s: s.reached) if samples else None
         msg = "no tool length in range reaches every target"
@@ -287,7 +333,9 @@ def optimize_tool(
             msg = "cancelled before a tool length reached every target"
         if best:
             msg += f" (best: {best.reached}/{n} at L = {best.L * 1000:.0f} mm)"
-        return GeometryResult(False, base_v, None, {}, samples, msg)
+        if designs:
+            msg += f"; the best {len(designs)} design(s) are listed to choose from"
+        return GeometryResult(False, base_v, None, {}, samples, msg, designs)
     a, b = (grid[first - 1], grid[first]) if first > 0 else (lo, lo)
     while b - a > st.L_tol and not (cancelled is not None and cancelled()):
         mid = (a + b) / 2
@@ -334,7 +382,12 @@ def optimize_tool(
     stopped = cancelled is not None and cancelled()
     say("cancelled" if stopped else "done", 1.0)
     msg = f"minimal L = {L_min * 1000:.1f} mm" + (" (cancelled: best found so far)" if stopped else "")
-    return GeometryResult(True, v_best, sol, res, samples, msg)
+    others = [(base_v.model_copy(update={"L": L}), f[1], f[2], f[0]) for L, f in found.items() if L != L_min]
+    best = Design(v_best, sol, res, True)
+    designs = [best, *[d for d in top_designs(others, L_label) if d.solution.label != sol.label]][
+        :TOP_DESIGNS
+    ]
+    return GeometryResult(True, v_best, sol, res, samples, msg, designs)
 
 
 def _shape_search(ev, st, v_best, sol, active, values, say, best: list) -> None:

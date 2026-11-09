@@ -30,6 +30,7 @@ SAVED: dict[str, tuple[str, ...]] = {
         "show_normals",
         "normal_len",
         "point_size",
+        "show_unreached",
     ),
     "targets.tools": ("row", "col", "row_dir", "radius", "max_angle", "max_edge"),
     "optimize": ("clearance", "joint_margin", "torque", "check_from"),
@@ -37,10 +38,23 @@ SAVED: dict[str, tuple[str, ...]] = {
     "placement": ("res", "grid", "half"),
     "stations": ("max_stations", "step", "refine", "areas", "zoning"),
     "stations.costs": ("require_all", "require_config"),
+    "tool_opt.costs": ("require_all", "require_config"),
     "tool_opt": ("max_stations", "tol", "shape_evals"),
     "results": ("choice", "show_lines", "show_ghosts", "show_areas"),
     "results.export": ("screenshot",),
-    "sim": ("step", "jump", "pattern", "angle", "corner", "row_tol", "inward", "no_cross", "lift", "home"),
+    "sim": (
+        "step",
+        "jump",
+        "pattern",
+        "angle",
+        "corner",
+        "row_tol",
+        "inward",
+        "no_cross",
+        "lift",
+        "home",
+        "drive",
+    ),
 }
 
 

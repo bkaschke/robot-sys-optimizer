@@ -85,6 +85,9 @@ class GizmoStyle:
 
 
 def notify(event, title: str, body: str, ok: bool = False) -> None:
+    from ui.log_panel import log
+
+    log(f"**{title}**: {body}", "done" if ok else "error")  # the log keeps every notification
     client = getattr(event, "client", None)
     if client is not None:
         client.add_notification(title, body, color="green" if ok else "red", auto_close_seconds=6)

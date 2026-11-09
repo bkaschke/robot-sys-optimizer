@@ -7,7 +7,9 @@ is editable, and two rules can be made hard requirements ("must be met"):
 
 With a requirement ticked, the planner keeps adding stops until a plan meets it (up to Max
 stations). Rejected plans stay in the Results list, marked ✗, below the valid ones. The
-weights live in the project (``Project.optimizer.weights``)."""
+weights live in the project (``Project.optimizer.weights``). The tool-geometry panel has its
+own copy (``CostPanel(field="tool_weights")``, ``Project.optimizer.tool_weights``; until edited
+it starts from the planner's weights)."""
 
 from __future__ import annotations
 
@@ -34,8 +36,9 @@ FIELDS = (
 
 
 class CostPanel:
-    def __init__(self, server: viser.ViserServer, session: Session):
+    def __init__(self, server: viser.ViserServer, session: Session, field: str = "weights"):
         self.s = session
+        self.field = field  # Optimizer field holding these weights
         self._busy = False
         gui = server.gui
         self.folder = gui.add_folder("Costs & requirements", expand_by_default=False)
@@ -65,16 +68,17 @@ class CostPanel:
         return self.s.extra.get("optimizer") or Optimizer()
 
     def weights(self) -> Weights:
-        return self._optimizer().weights
+        opt = self._optimizer()
+        return getattr(opt, self.field) or opt.weights
 
     def commit(self) -> Weights:
         """GUI values -> the project's optimizer weights."""
         w = Weights(**{**self.weights().model_dump(), **{k: float(f.value) for k, f in self.fields.items()}})
-        self.s.extra["optimizer"] = self._optimizer().model_copy(update={"weights": w})
+        self.s.extra["optimizer"] = self._optimizer().model_copy(update={self.field: w})
         return w
 
     def set_weights(self, w: Weights) -> None:
-        self.s.extra["optimizer"] = self._optimizer().model_copy(update={"weights": w})
+        self.s.extra["optimizer"] = self._optimizer().model_copy(update={self.field: w})
         self.load()
 
     def load(self) -> None:

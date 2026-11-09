@@ -134,7 +134,7 @@ def test_rail_paths_with_pattern_home_and_carrier_moves(app, rail):
 def test_lifted_moves_leave_the_surface(app, rail, monkeypatch):
     """Every move flagged as crossing (forced here: the rail's rows never cross) is lifted by
     the lift height in its middle and lands exactly on its points."""
-    import core.paths as cp
+    import core.path_order as cp
 
     s, sol, res = rail
     ch = app["sim"]._checker()

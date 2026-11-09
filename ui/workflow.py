@@ -46,6 +46,7 @@ class Workflow:
         self.carrier = None
         self.results = None
         self._last = None
+        self._todo: list[str] | None = None  # unconfirmed steps last reported to the log
         self._lock = threading.Lock()
         self.hooks: list = []  # extra callables run by the watcher (e.g. object visibility)
 
@@ -84,6 +85,9 @@ class Workflow:
         with self._lock:
             s = self.s
             states = {st: step_state(s, st) for st in STEPS}
+            self._log_setup(
+                [f"{i + 1} {TITLES[st]}" for i, st in enumerate(STEPS) if states[st] != "confirmed"]
+            )
             locked = states["External Axis"] != "todo"
             mounted = s.base.mode == "movable"
             sol = self.results.selected() if self.results is not None else None
@@ -138,6 +142,21 @@ class Workflow:
                     if sol_changes
                     else ""
                 )
+
+    def _log_setup(self, todo: list[str]) -> None:
+        """Unconfirmed setup steps: the log panel's status line, and a message when they change."""
+        from ui import log_panel
+
+        if log_panel._panel is not None:
+            log_panel._panel.set_setup(todo)
+        if todo == self._todo:
+            return
+        if self._todo is not None or todo:
+            if todo:
+                log_panel.log(f"Setup steps not confirmed: **{', '.join(todo)}**.", "warn")
+            else:
+                log_panel.log("All setup steps confirmed.", "done")
+        self._todo = todo
 
     def start_watch(self, period: float = 1.0) -> None:
         """Background refresh (real app only): edits anywhere update the step status and the

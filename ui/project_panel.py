@@ -36,6 +36,9 @@ def list_examples() -> list[str]:
 
 
 def _notify(event, title: str, body: str, ok: bool = False) -> None:
+    from ui.log_panel import log
+
+    log(f"**{title}**: {body}", "done" if ok else "error")
     if getattr(event, "client", None) is not None:
         event.client.add_notification(title, body, color="green" if ok else "red", auto_close_seconds=6)
 

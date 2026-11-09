@@ -16,6 +16,7 @@ from core.collision import CollisionScene, Margins
 from core.feasibility import CheckSettings, FeasibilityChecker
 from core.ik import make_ik
 from core.robot import Robot
+from ui.log_panel import log, unreached_report
 from ui.session import Session
 from ui.staleness import stamp_for
 from ui.widgets import notify
@@ -160,6 +161,15 @@ class OptimizeTab:
                     + (" (no plan selected in Results)." if self.check_from.value == CHECK_FROM[0] else ".")
                 )
                 self._finish(len(res), len(targets.points), where)
+                log(f"Feasibility check finished: {len(res)} point(s). {where}", "done")
+                msg = unreached_report(
+                    self.s.feasibility, [p.id for p in targets.points], "Feasibility check"
+                )
+                if msg:
+                    log(msg, "warn")
+            except Exception as err:
+                log(f"Feasibility check failed: {err}", "error")
+                raise
             finally:
                 self.run.visible, self.stop.visible, self.progress.visible = True, False, False
 
