@@ -28,7 +28,8 @@ v4 plan items 2 and 4: the points of each group are ordered by a path pattern
   carrier_blocked   a carrier pose on the way hits a keep-out, the part standoff or a
                     stay-out zone
 
-Reconfiguration moves are not planned. Pure geometry + core.feasibility: no viser.
+Joint moves (to / from home, configuration changes) are planned collision-free
+(``_Tracer.joint_move``, core.joint_plan). Pure geometry + core.feasibility: no viser.
 """
 
 from __future__ import annotations
@@ -46,6 +47,7 @@ from core.patterns import CORNERS, PatternSettings, crossing_lifts, order_points
 
 ISSUES = ("unreachable", "config_flip", "jump", "collision", "reconfigure", "carrier_blocked")
 HOME_STEP = np.radians(3.0)  # joint step of the moves to / from home
+RETREAT = 0.15  # m the tool backs off the surface before a planned joint move
 
 
 @dataclass
@@ -185,16 +187,79 @@ class _Tracer:
         ch = self.ch
         return np.linalg.inv(ch.T_base_part) @ ch.robot.fk(np.asarray(q, float)) @ ch.T_flange_tcp[tcp]
 
-    def joint_move(self, k, zone, qa, qb, tcp: str, a: int, b: int) -> list[PathSample]:
-        """Straight joint move qa -> qb (to / from home), collision-checked per sample."""
+    def joint_move(
+        self, k, zone, qa, qb, tcp: str, a: int, b: int, at_point=(True, True)
+    ) -> list[PathSample]:
+        """Collision-free joint move qa -> qb (to / from home, configuration changes), point
+        ids a / b (0 = home; ``at_point``: which end is on the surface). Straight or one joint
+        group at a time when clear; else the tool first backs off the surface along its axis
+        (``RETREAT``, same configuration) at a point end and the arm goes around the part,
+        floor, stay-out zones and carrier bodies (core.joint_plan). When no way is found:
+        the straight move, its collisions flagged."""
+        from core.joint_plan import densify, plan_joint_path
+
         qa, qb = np.asarray(qa, float), np.asarray(qb, float)
-        n = max(1, int(np.ceil(np.max(np.abs(qb - qa)) / HOME_STEP)))
+        ch = self.ch
+
+        def hit(q) -> bool:
+            return ch.scene.collides(q, tcp)
+
+        out_a, in_b, way = [], [], None
+        if not hit(qb):
+            way = plan_joint_path(hit, qa, qb, ch.lo, ch.hi, HOME_STEP, iters=0)
+            if way is None:
+                out_a = self.retreat(qa, tcp) if at_point[0] else []
+                in_b = self.retreat(qb, tcp) if at_point[1] else []
+                qa2, qb2 = (out_a or [qa])[-1], (in_b or [qb])[-1]
+                way = plan_joint_path(hit, qa2, qb2, ch.lo, ch.hi, HOME_STEP)
+        if way is None:
+            out_a, in_b = [], []
+        qs = out_a + densify(way if way is not None else [qa, qb], HOME_STEP)
+        if in_b:
+            qs += in_b[-2::-1] + [qb]
         out = []
-        for s in np.arange(1, n + 1) / n:
-            q = qa + s * (qb - qa)
-            issue = "collision" if self.ch.scene.collides(q, tcp) else ""
+        for i, q in enumerate(qs):
+            issue = "collision" if way is None and hit(q) else ""
+            s = (i + 1) / len(qs)
             out.append(PathSample(k, zone, a, b, float(s), self.fk_pose(q, tcp), tcp, q, issue, kind="home"))
         return out
+
+    def nearest_copy(self, q, ref) -> np.ndarray:
+        """The 2*pi copy of q (same arm pose) nearest ``ref`` per joint, inside the limits."""
+        q, ref = np.asarray(q, float), np.asarray(ref, float)
+        c = q + 2 * np.pi * np.round((ref - q) / (2 * np.pi))
+        lo, hi = self.ch.lo, self.ch.hi
+        c = np.where(c < lo - 1e-9, c + 2 * np.pi, c)
+        c = np.where(c > hi + 1e-9, c - 2 * np.pi, c)
+        return np.where((c < lo - 1e-9) | (c > hi + 1e-9), q, c)
+
+    def retreat(self, q, tcp: str, dist: float | None = None) -> list[np.ndarray]:
+        """Joints backing the tool off the surface along its axis from q (q excluded), in q's
+        configuration, up to ``dist`` (default ``RETREAT``) or the first sample with a problem."""
+        dist = RETREAT if dist is None else dist
+        q = np.asarray(q, float)
+        T0 = self.fk_pose(q, tcp)
+        label = config_label(self.ch.ik, q)
+        n = max(3, int(np.ceil(dist / self.step)))
+        out, prev = [], q
+        for s in np.arange(1, n + 1) / n:
+            T = T0.copy()
+            T[:3, 3] = T0[:3, 3] - s * dist * T0[:3, 2]  # tcp z points into the part
+            qs, issue = self.solve(T, tcp, prev, label)
+            if issue:
+                break
+            out.append(qs)
+            prev = qs
+        return out
+
+    def change_move(self, k, zone, qa, qb, tcp: str, a: int, b: int, home=None) -> list[PathSample]:
+        """Joint move between two points of a stop. A configuration change goes through home
+        (when there is one) so the arm does not flip next to the part."""
+        qa, qb = np.asarray(qa, float), np.asarray(qb, float)
+        if home is None or config_label(self.ch.ik, qa) == config_label(self.ch.ik, qb):
+            return self.joint_move(k, zone, qa, qb, tcp, a, b)
+        out = self.joint_move(k, zone, qa, home, tcp, a, 0, (True, False))
+        return out + self.joint_move(k, zone, home, qb, tcp, 0, b, (False, True))
 
     def solve(self, T_part_tcp: np.ndarray, tcp: str, prev: np.ndarray, label: str):
         """(q, issue) for one sample: keep ``label``, nearest 2*pi copy to ``prev``."""
@@ -307,11 +372,15 @@ def trace(
             if cancelled is not None and cancelled():
                 raise CancelledError
             r0 = results[pids[0]]
-            q = np.asarray(r0.q, float)
+            ref = home if (home is not None and j == 0) or q is None else q
+            q_prev, q = q, tr.nearest_copy(r0.q, r0.q if ref is None else ref)  # short joint moves
             label = config_label(checker.ik, q)
             first = "reconfigure" if j > 0 else ""
             if home is not None and j == 0:  # from home to the stop's first point
-                sp.samples += tr.joint_move(k, zone, home, q, r0.tcp, 0, pids[0])
+                sp.samples += tr.joint_move(k, zone, home, q, r0.tcp, 0, pids[0], (False, True))
+            elif q_prev is not None:  # the next zone at this stop: a planned joint move
+                last = sp.samples[-1]
+                sp.samples += tr.change_move(k, zone, q_prev, q, r0.tcp, last.b, pids[0], home)
             sp.samples.append(PathSample(k, zone, pids[0], pids[0], 0.0, tr.tcp_pose(r0), r0.tcp, q, first))
             for m, (a, b) in enumerate(zip(pids[:-1], pids[1:], strict=True)):
                 if cancelled is not None and cancelled():
@@ -319,7 +388,9 @@ def trace(
                 rb = results[b]
                 lab_b = config_label(checker.ik, np.asarray(rb.q, float))
                 if lab_b != label:  # the plan uses another configuration for b: the arm
-                    q, label = np.asarray(rb.q, float), lab_b  # reconfigures (not traced)
+                    qb = tr.nearest_copy(rb.q, q)  # reconfigures by a planned joint move
+                    sp.samples += tr.change_move(k, zone, q, qb, rb.tcp, a, b, home)
+                    q, label = qb, lab_b
                     sp.samples.append(
                         PathSample(k, zone, a, b, 1.0, tr.tcp_pose(rb), rb.tcp, q, "reconfigure")
                     )
@@ -334,7 +405,7 @@ def trace(
                 progress(done / n_seq)
         if home is not None and q is not None:  # back home before the carrier moves on
             last = sp.samples[-1]
-            sp.samples += tr.joint_move(k, last.zone, q, home, last.tcp, last.b, 0)
+            sp.samples += tr.joint_move(k, last.zone, q, home, last.tcp, last.b, 0, (True, False))
         plan.stations.append(sp)
     return plan
 

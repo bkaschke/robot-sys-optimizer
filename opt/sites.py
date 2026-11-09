@@ -210,6 +210,26 @@ class CarrierSites:
             out.append((v, self.transit_ok(v, (A, B))))
         return self._or_route(A, B, out, step)
 
+    def transit_staged(self, a: dict, b: dict, step: float, travel_lift: float | None = None):
+        """Like ``transit``, but with a lift the carrier drives at one ``travel_lift`` height:
+        the lift moves there at stop a first, the carrier drives, then the lift moves to b's
+        height (the arm waits at home throughout). None = ``transit`` (lift moves en route)."""
+        if travel_lift is None or "lift" not in self.dofs:
+            return self.transit(a, b, step)
+        A, B = self.full(a), self.full(b)
+        L = float(travel_lift)
+
+        def lift_move(v: dict, h0: float, h1: float) -> list[tuple[dict, bool]]:
+            n = int(np.ceil(abs(h1 - h0) / step - 1e-9))
+            out = []
+            for s in np.arange(1, n + 1) / max(n, 1):
+                f = self.full({**v, "lift": float(h0 + s * (h1 - h0))})
+                out.append((f, self.transit_ok(f, (A, B))))
+            return out
+
+        drive = self.transit({**a, "lift": L}, {**b, "lift": L}, step)
+        return lift_move(a, A["lift"], L) + drive + lift_move(b, L, B["lift"])
+
     def _or_route(self, A: dict, B: dict, moves: list, step: float) -> list[tuple[dict, bool]]:
         if self.kind != "mobile" or all(ok for _, ok in moves):
             return moves

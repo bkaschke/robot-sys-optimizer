@@ -73,6 +73,7 @@ class SimPanel:
             self.frame = gui.add_slider("Sample", 0, 1, 1, 0, disabled=True)
             self.status = gui.add_markdown("")
             self.export = gui.add_button("Export path CSV", disabled=True)
+            self.clear_btn = gui.add_button("Clear paths", disabled=True, hint="remove the built paths")
         self.build_btn.on_click(lambda e: self.build(e))
         self.stop.on_click(lambda e: self._cancel.set())
         self.show.on_update(lambda e: self.draw())
@@ -80,6 +81,7 @@ class SimPanel:
         self._goto = Latest(self.go_to)
         self.frame.on_update(lambda e: self._goto(int(self.frame.value)))
         self.export.on_click(lambda e: self.export_csv(e))
+        self.clear_btn.on_click(lambda e: self.clear_paths())
 
     def _pattern_fields(self, gui) -> None:
         from core.patterns import CORNERS, PATTERNS
@@ -124,16 +126,46 @@ class SimPanel:
             self.no_cross.value,
         )
 
-    def _carrier_path(self, sol, step: float):
-        """(k_from, k_to) -> carrier poses between two stops, or None (no carrier)."""
+    def _carrier_path(self, sol, step: float, checker=None, home=None):
+        """(k_from, k_to) -> carrier poses between two stops, or None (no carrier).
+
+        With a lift, the lift moves at the stop and the carrier drives at one height: the
+        lowest one if the way is clear there (with ``checker`` and ``home``: also for the arm
+        at home), else the first clear one of the two stops' heights and the lift levels."""
+        from core.carrier import lift_levels
+
         s = self.s
         sites = s.sites() if s.base.mode == "movable" else None
         if sites is None or not hasattr(sites, "transit") or not all(st.carrier for st in sol.stations):
             return None
+        lifted = "lift" in getattr(sites, "dofs", ())
+
+        def clear(moves) -> bool:
+            if not all(ok for _, _, ok in moves):
+                return False
+            if checker is None or home is None:
+                return True
+            for _, T, _ in moves:
+                checker.set_base(T)
+                if checker.scene.collides(home):
+                    return False
+            return True
 
         def path(a: int, b: int):
-            moves = sites.transit(sol.stations[a].carrier, sol.stations[b].carrier, step)
-            return [(d, sites.T(d), ok) for d, ok in moves]
+            A, B = sol.stations[a].carrier, sol.stations[b].carrier
+            if not lifted:
+                moves = sites.transit(A, B, step)
+                return [(d, sites.T(d), ok) for d, ok in moves]
+            lo, hi = sites.bounds[sites.dofs.index("lift")]
+            heights = [lo, *(E["lift"] for E in (A, B) if "lift" in E), *lift_levels(lo, hi)]
+            first = None
+            for h in dict.fromkeys(round(float(h), 6) for h in heights):
+                moves = [(d, sites.T(d), ok) for d, ok in sites.transit_staged(A, B, step, h)]
+                if first is None:
+                    first = moves
+                if clear(moves):
+                    return moves
+            return first  # nothing clear: the lowest height, its problems flagged
 
         return path
 
@@ -187,7 +219,9 @@ class SimPanel:
         targets_key = s.targets.model_dump_json()  # paths belong to these targets
         home = s.home_q() if self.home.value else None  # the project's home (Robot & cell)
         carrier_path = (
-            self._carrier_path(sol, max(self.step.value / 1000, 0.05)) if home is not None else None
+            self._carrier_path(sol, max(self.step.value / 1000, 0.05), checker, home)
+            if home is not None
+            else None
         )
         pattern = self.pattern_settings()
         self._cancel.clear()
@@ -246,7 +280,7 @@ class SimPanel:
         )
         n = len(plan.samples)
         self.frame.max = max(1, n - 1)
-        self.frame.disabled = self.play.disabled = self.export.disabled = n == 0
+        self.frame.disabled = self.play.disabled = self.export.disabled = self.clear_btn.disabled = n == 0
         self._station = None
         self.draw()
         if n:
@@ -260,9 +294,13 @@ class SimPanel:
         self.pause()
         self.plan, self.label, self._targets_key = None, None, None
         self.clear()
-        self.frame.disabled = self.play.disabled = self.export.disabled = True
+        self.frame.disabled = self.play.disabled = self.export.disabled = self.clear_btn.disabled = True
         self.status.content = ""
         self.info.content = f"_Paths cleared{': ' + why if why else ''}. **Build paths** again._"
+
+    def clear_paths(self) -> None:
+        """Clear paths button: drop the built paths (Build paths makes them again)."""
+        self.reset("by request")
 
     def check_targets(self) -> None:
         """Clear the paths when the targets changed since they were built (watcher, 1 s)."""
@@ -278,7 +316,7 @@ class SimPanel:
         self.pause()
         self.plan, self.label = None, None
         self.clear()
-        self.frame.disabled = self.play.disabled = self.export.disabled = True
+        self.frame.disabled = self.play.disabled = self.export.disabled = self.clear_btn.disabled = True
         self.status.content = ""
         self.info.content = f"_Paths were for another plan: **Build paths** for {sol.label}._"
 
