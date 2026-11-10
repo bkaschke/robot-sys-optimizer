@@ -177,10 +177,16 @@ class FeasibilityChecker:
         return self._check_point(pid, p, n, group, max_poses, clearance)
 
     def _check_point(self, pid, p, n, group, max_poses, clearance) -> PointResult:
-        stage = [0]
-        for r in self._feasible(pid, p, n, group, max_poses, stage, clearance=clearance):
+        stage, hit = [0], []
+        for r in self._feasible(pid, p, n, group, max_poses, stage, clearance=clearance, hit=hit):
             return r
-        return PointResult(pid, "unreachable", STAGES[stage[0]])
+        out = PointResult(pid, "unreachable", STAGES[stage[0]])
+        if out.reason == "collision" and hit:  # what the best-ranked arm pose runs into
+            from core.collision import describe_hits
+
+            note = describe_hits(self.scene.colliding_pairs(*hit[0]))
+            out.notes = [note] if note else []
+        return out
 
     def check_point_configs(
         self, pid: int, p, n, group: TargetGroup, max_poses: int | None = 40
@@ -257,11 +263,13 @@ class FeasibilityChecker:
         all_branches: bool = False,
         clearance: bool = True,
         skip: Callable[[np.ndarray], bool] | None = None,
+        hit: list | None = None,
     ):
         """Yield feasible PointResults: candidate poses in preference order; per pose, the
         branches best first (only the best one unless ``all_branches``). ``stage[0]`` is
         set to the furthest check stage any candidate passed. Branches with ``skip(q)`` true
-        are dropped before the collision check."""
+        are dropped before the collision check. ``hit`` (a list) gets the first colliding
+        (q, tcp)."""
         tcps = group.tcps or list(self.T_flange_tcp)
         poses = (
             (tcp, spin, tilt, so, self.T_base_part @ T_part_tcp @ self._T_tcp_flange[tcp])
@@ -300,6 +308,8 @@ class FeasibilityChecker:
                 if skip is not None and skip(q):
                     continue
                 if self.scene.collides(q, tcp):
+                    if hit is not None and not hit:
+                        hit.append((q.copy(), tcp))
                     continue
                 clear = self.scene.part_clearance(q, tcp) if clearance else float("inf")
                 yield PointResult(

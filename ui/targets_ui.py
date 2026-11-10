@@ -22,7 +22,7 @@ from ui.session import Session
 from ui.surface_select_ui import SurfaceTools
 from ui.target_preview import draw_preview, target_tcp_pose  # noqa: F401 (re-export)
 from ui.target_tools_ui import PointTools
-from ui.unreached_view import draw_unreached, unreached_ids
+from ui.unreached_view import LEGEND, draw_unreached, unreached_ids
 from ui.widgets import MAX_UPLOAD, notify
 
 PART = "/cell/part"
@@ -137,7 +137,9 @@ class TargetsTab:
             self.normal_len = gui.add_number("Normal length (mm)", 20.0, min=1.0, step=1.0)
             self.point_size = gui.add_number("Point size (mm)", 4.0, min=0.5, step=0.5)
             self.show_unreached = gui.add_checkbox(
-                "Highlight unreachable points", True, hint="red dot, cross and id (selected plan or check)"
+                "Highlight unreachable points",
+                True,
+                hint="dot, cross, id and why (selected plan or check); " + LEGEND,
             )
             self.preview_on = gui.add_checkbox("Preview tool at point", False)
             self.preview_idx = gui.add_slider("Point #", 0, 1, 1, 0)
@@ -482,7 +484,7 @@ class TargetsTab:
             feas = self.s.feasibility if self.s.feasibility and not feasibility_changes(self.s) else {}
             bad = unreached_ids(ids, sel, feas)
             self._handles.update(
-                draw_unreached(self.server, PART, ids, P, N, bad, self.point_size.value / 1000)
+                draw_unreached(self.server, PART, ids, P, N, bad, self.point_size.value / 1000, sel or feas)
             )
 
     def _draw_preview(self) -> None:

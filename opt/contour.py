@@ -12,6 +12,10 @@ far the base outline reaches from its centre towards the facing side. At each pa
 heading turns the facing side towards the nearest part point, and a short 1-D correction
 along that direction makes the gap exactly d (corners and wide bases). The path is sampled
 once (``step``, default 2 cm) and stations interpolate between samples.
+
+Standoff range (``Base.max_standoff_m``): the gap may be anything from d up to that; a second
+DOF ``gap`` moves the base out along the path's outward direction (heading kept, the nearest
+part point stays the same), so a stop is (t, gap).
 """
 
 from __future__ import annotations
@@ -37,6 +41,7 @@ class ContourSites(CarrierSites):
         if self.zones.part is None:
             raise ValueError("contour stops need a part")
         self.d = float(b.fixed_standoff_m)
+        self.d_max = max(self.d, float(b.max_standoff_m if b.max_standoff_m is not None else self.d))
         self.zones.min = max(self.d - 0.002, 0.0)  # 2 mm for the interpolation between samples
         self.zones.pref = self.zones.min  # one fixed standoff: no preferred-distance penalty
         self.part_sides = set(b.part_sides)
@@ -51,10 +56,13 @@ class ContourSites(CarrierSites):
             tb = self._build(reach, step, float(np.arctan2(side[1], side[0])))
             tb[:, 0] += t0
             t0 = float(tb[-1, 0]) + 1e-6  # segments end to end (no interpolation across them)
-            tables.append(np.column_stack([tb, np.full(len(tb), k)]))
-        self.table = np.vstack(tables)  # t, x, y, yaw, allowed, segment
+            tables.append(np.column_stack([tb[:, :5], np.full(len(tb), k), tb[:, 5:]]))
+        self.table = np.vstack(tables)  # t, x, y, yaw, allowed, segment, out x, out y
         self.dofs = ["t"]
         self.bounds = np.array([[0.0, float(self.table[-1, 0])]])
+        if self.d_max > self.d + 1e-4:  # a standoff range: the gap is planned per stop
+            self.dofs.append("gap")
+            self.bounds = np.vstack([self.bounds, [self.d, self.d_max]])
         if "lift" in carrier.dofs:  # v6: the lift height is planned per stop too
             self.dofs.append("lift")
             self.bounds = np.vstack([self.bounds, carrier.bounds[carrier.dofs.index("lift")]])
@@ -79,7 +87,8 @@ class ContourSites(CarrierSites):
         return "+y" if n[1] > 0 else "-y"
 
     def _build(self, reach: float, step: float, side_angle: float) -> np.ndarray:
-        """Rows (t, x, y, yaw, allowed) along one side's path, closed (last row = first)."""
+        """Rows (t, x, y, yaw, allowed, out x, out y) along one side's path, closed (last row
+        = first); out = the outward floor direction (away from the nearest part point)."""
         part = self.zones.part
         ring = part.buffer(self.d + reach, quad_segs=16).exterior
         n = max(16, int(np.ceil(ring.length / step)))
@@ -96,7 +105,7 @@ class ContourSites(CarrierSites):
                 c = c + err * out
                 v = self._pose(c, near, side_angle)
             ok = not self.part_sides or self._part_side(out) in self.part_sides
-            rows.append((v["x"], v["y"], v["yaw"], 1.0 if ok else 0.0))
+            rows.append((v["x"], v["y"], v["yaw"], 1.0 if ok else 0.0, out[0], out[1]))
         P = np.array(rows + rows[:1])
         seg = np.linalg.norm(np.diff(P[:, :2], axis=0), axis=1)
         t = np.concatenate([[0.0], np.cumsum(seg)])
@@ -116,13 +125,14 @@ class ContourSites(CarrierSites):
         j = i + 1 if tb[i + 1, 5] == tb[i, 5] else i  # never interpolate across two sides
         w = (t - tb[i, 0]) / max(tb[j, 0] - tb[i, 0], 1e-12) if j != i else 0.0
         dyaw = (tb[j, 3] - tb[i, 3] + np.pi) % (2 * np.pi) - np.pi
-        return {
-            "t": t,
-            "x": float(tb[i, 1] + w * (tb[j, 1] - tb[i, 1])),
-            "y": float(tb[i, 2] + w * (tb[j, 2] - tb[i, 2])),
-            "yaw": float(tb[i, 3] + w * dyaw),
-            **lift,
-        }
+        out = {"t": t}
+        xy = tb[i, 1:3] + w * (tb[j, 1:3] - tb[i, 1:3])
+        if "gap" in self.dofs:  # further out along the outward direction, same heading
+            g = float(np.clip(v.get("gap", self.d), self.d, self.d_max))
+            o = tb[i, 6:8] + w * (tb[j, 6:8] - tb[i, 6:8])
+            xy = xy + (g - self.d) * o / max(float(np.linalg.norm(o)), 1e-12)
+            out["gap"] = g
+        return {**out, "x": float(xy[0]), "y": float(xy[1]), "yaw": float(tb[i, 3] + w * dyaw), **lift}
 
     def side_at(self, v: dict) -> str:
         """Robot side facing the part at stop v."""
@@ -137,10 +147,24 @@ class ContourSites(CarrierSites):
         L = self.bounds[0, 1]
         n = max(4, int(np.ceil(L / step)))
         ts = np.linspace(0.0, L, n, endpoint=False)
-        if "lift" not in self.dofs:
-            return _accepted(self, ({"t": float(t)} for t in ts), cancelled)
-        lifts = lift_levels(*self.bounds[1])
-        return _accepted(self, ({"t": float(t), "lift": float(h)} for t in ts for h in lifts), cancelled)
+        gaps = [None]
+        if "gap" in self.dofs:  # every 0.1 m of the range, 2..4 levels
+            k = int(np.clip(np.ceil((self.d_max - self.d) / 0.1) + 1, 2, 4))
+            gaps = [float(g) for g in np.linspace(self.d, self.d_max, k)]
+        lifts = lift_levels(*self.bounds[self.dofs.index("lift")]) if "lift" in self.dofs else [None]
+
+        def gen():
+            for t in ts:
+                for g in gaps:
+                    for h in lifts:
+                        v = {"t": float(t)}
+                        if g is not None:
+                            v["gap"] = g
+                        if h is not None:
+                            v["lift"] = float(h)
+                        yield v
+
+        return _accepted(self, gen(), cancelled)
 
     def accept(self, v: dict) -> tuple[bool, float]:
         """Allowed part side, keep-outs, stay-out zones and the standoff (exact on the path)."""
@@ -149,6 +173,8 @@ class ContourSites(CarrierSites):
         f = self.full(v)
         fp = self.c.footprint(f)
         zc = self.zones.check(fp)
+        if zc.ok and "gap" in self.dofs and self._gap(f) > self.d_max + 0.002:
+            return False, 1.0  # further from the part than the range allows
         return zc.ok and self.clear_of_obstacles(f), 0.0
 
     def travel(self, a: dict, b: dict) -> float:
@@ -162,13 +188,14 @@ class ContourSites(CarrierSites):
             n = max(1, int(np.ceil(abs(B["t"] - A["t"]) / step)))
             s = np.arange(1, n + 1) / n
             steps = [{"t": float(A["t"] + (B["t"] - A["t"]) * u)} for u in s]
-            if "lift" in A and "lift" in B:
-                for d, u in zip(steps, s, strict=True):
-                    d["lift"] = float(A["lift"] + (B["lift"] - A["lift"]) * u)
+            for key in ("lift", "gap"):
+                if key in A and key in B:
+                    for d, u in zip(steps, s, strict=True):
+                        d[key] = float(A[key] + (B[key] - A[key]) * u)
             moves = [(f, self.transit_ok(f, (A, B))) for f in map(self.full, steps)]
             return self._or_route(A, B, moves, step)  # a zone on the contour: drive around it
-        A = {k: v for k, v in A.items() if k != "t"}
-        B = {k: v for k, v in B.items() if k != "t"}
+        A = {k: v for k, v in A.items() if k not in ("t", "gap")}
+        B = {k: v for k, v in B.items() if k not in ("t", "gap")}
         return super().transit(A, B, step)
 
     def _move_ok(self, f: dict, clearance: float) -> bool:

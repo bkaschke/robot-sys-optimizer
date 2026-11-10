@@ -182,6 +182,9 @@ class Base(_Model):
     # part with the heading given (opt.contour); either None: free x, y, yaw search (v1).
     facing: Literal["front", "back", "left", "right"] | None = None
     fixed_standoff_m: float | None = Field(default=None, ge=0)
+    # contour standoff range (2026-11-10): the gap may be anything from ``fixed_standoff_m`` up
+    # to this (the planner picks it per stop, DOF ``gap``); None = the fixed standoff only
+    max_standoff_m: float | None = Field(default=None, ge=0)
     # v3 feedback: several robot sides may face the part (the planner picks per stop; empty:
     # ``facing``), the part sides (part frame) the mobile base may work from (empty: all), and
     # a rail / gantry track kept along the part's long axis
@@ -213,6 +216,9 @@ class Base(_Model):
             raise ValueError("movable base needs carrier: rail, gantry, mobile or positioner")
         if self.mode == "movable" and self.carrier == "positioner":
             raise ValueError("part positioners are not supported yet")
+        lo, hi = self.fixed_standoff_m, self.max_standoff_m
+        if hi is not None and lo is not None and hi < lo:
+            raise ValueError("the largest standoff must be >= the smallest")
         j = self.joints
         need = {"rail": ("x",), "gantry": ("x", "y"), "mobile": ("x", "y")}.get(self.carrier or "", ())
         if self.mode == "movable":

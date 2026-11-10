@@ -110,6 +110,14 @@ def reason_text(code: str) -> str:
     return REASONS.get(code, code.replace("_", " "))
 
 
+def _hit_objects(r) -> list[str]:
+    """What the arm hits at an unreachable point ("part", "floor", ...), from its notes."""
+    from ui.unreached_view import why
+
+    w = why(r) if r is not None and getattr(r, "reason", "") == "collision" else ""
+    return w.split(": ", 1)[1].split(", ") if ": " in w else []
+
+
 def unreached_report(results: dict, ids, what: str) -> str | None:
     """One message on the points of ``ids`` that are unreachable in ``results`` (point id ->
     PointResult), grouped by reason with up to 12 point ids each; None when all are reached."""
@@ -121,7 +129,9 @@ def unreached_report(results: dict, ids, what: str) -> str | None:
     for code, n in why.most_common():
         pts = [i for i in bad if (getattr(results.get(i), "reason", "") or "") == code]
         more = f" … +{len(pts) - 12}" if len(pts) > 12 else ""
-        parts.append(f"{n} × {reason_text(code)} (points {', '.join(map(str, pts[:12]))}{more})")
+        hits = Counter(o for i in pts for o in _hit_objects(results.get(i)))
+        what_hit = f", hitting {', '.join(f'{o} ({c})' for o, c in hits.most_common())}" if hits else ""
+        parts.append(f"{n} × {reason_text(code)}{what_hit} (points {', '.join(map(str, pts[:12]))}{more})")
     return f"{what}: **{len(bad)} point(s) unreachable**: " + "; ".join(parts)
 
 

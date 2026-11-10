@@ -103,6 +103,7 @@ def verify(
     assignment: dict[int, int] = {}
     results: dict[int, PointResult] = {}
     why: dict[int, str] = {}
+    notes: dict[int, list[str]] = {}  # what the arm hits, with the "collision" reason
 
     def attempt(i: int, k: int) -> bool:
         r = checker.check_point(int(t.ids[i]), t.P_part[i], t.N_part[i], t.groups[i])
@@ -110,6 +111,7 @@ def verify(
             prev = why.get(i)
             if prev is None or (prev in STAGES and STAGES.index(r.reason) > STAGES.index(prev)):
                 why[i] = r.reason
+                notes[i] = list(r.notes)
         else:
             ok, reason = _robust(checker, t, i, r, stations[k], sites)
             if ok:
@@ -130,7 +132,7 @@ def verify(
         failed = [i for i in failed if preferred[i] == k or not attempt(i, k)]
     for i in failed:
         pid = int(t.ids[i])
-        results[pid] = PointResult(pid, "unreachable", why.get(i, "no station"))
+        results[pid] = PointResult(pid, "unreachable", why.get(i, "no station"), notes=notes.get(i, []))
     return assignment, results
 
 
