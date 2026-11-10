@@ -45,6 +45,9 @@ class ToolSetupTab:
             self.upload = gui.add_upload_button("Upload tool URDF (.zip)", mime_type="application/zip")
             self.name = gui.add_text("Name", "")
             self.save = gui.add_button("Save to library")
+        from ui.tool_mesh_ui import ToolMeshPanel
+
+        self.mesh_panel = ToolMeshPanel(server, self)  # a tool from one STL / STEP file
         with gui.add_folder("Process"):
             self.process = gui.add_dropdown("Type", tuple(PRESETS), initial_value="custom")
             self.notes = gui.add_markdown("")

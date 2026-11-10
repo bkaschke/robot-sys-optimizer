@@ -322,6 +322,10 @@ $PY scripts/make_portable.py          # -&gt; dist/robot-sys-optimizer-portable-
 <td><em>Tool</em> picks a saved tool (<code>tools/*.yaml</code>). <strong>Upload tool URDF (.zip)</strong> imports a URDF plus meshes; <code>package://</code> paths are resolved. <strong>Save to library</strong> stores the tool and copies its geometry into <code>assets/tools/&lt;name&gt;/</code>.</td>
 </tr>
 <tr>
+<td><strong>Mesh / STEP tool</strong></td>
+<td>A tool from <strong>one file</strong>: <strong>Upload tool mesh (STL/OBJ/PLY/STEP)</strong> (<em>Mesh units</em> for STL / OBJ / PLY, mm by default; a STEP file carries its own unit and is meshed with CadQuery). The whole file becomes the tool head, sitting directly on the flange mount (a <em>pose</em> tool with every extension range at 0; widen the ranges if the tool optimizer may add a connector). A tool more than 10 m across is refused (a unit mistake). <strong>STEP coordinate systems:</strong> the model's <strong>named coordinate systems</strong> (datum CSYS features, e.g. <em>CSYS_TCP</em>) are listed. <em>TCP datum</em> + <strong>Set TCP to datum</strong> puts the TCP chosen in the TCPs folder on it (<em>Flip TCP z</em> turns it 180° about x: the TCP z must point <strong>out of the tool, toward the part</strong>); faces within <em>Contact faces within (mm)</em> of the TCP (default 5; 0 = none, for a non-contact tool), grown over the flat or smooth surface around them, become that TCP's <strong>contact faces</strong> (the probe's end face may touch the part). <em>Flange datum</em> + <strong>Mount datum on flange</strong> makes that coordinate system coincide with the robot flange (<em>Flip flange z</em> when its z points into the robot). Only named coordinate systems are listed; for a datum inside a sub-part of an assembly the sub-part's own placement is not applied (export single-part tools).</td>
+</tr>
+<tr>
 <td><strong>Process</strong></td>
 <td><em>Type</em> applies a preset: scanning, sanding, grinding, gripping, spraying or custom. You can then edit the force, tilt cone, standoff and spin. Contact-free processes (scanning, spraying) clear all contact areas.</td>
 </tr>
@@ -592,7 +596,7 @@ $PY scripts/make_portable.py          # -&gt; dist/robot-sys-optimizer-portable-
 <h3 id="example-d-your-own-robot-cell">Example D: your own robot cell</h3>
 <ol>
 <li><strong>Part</strong>: Cell → <strong>Upload mesh</strong>, choose <em>Units</em> <code>mm</code> if your CAD exports in mm.</li>
-<li><strong>Tool</strong>: Tool Setup → <strong>Upload tool URDF (.zip)</strong> (URDF + meshes). Set the Process, place the TCP(s), pick the contact faces, set the extension ranges → <strong>Save to library</strong>.</li>
+<li><strong>Tool</strong>: Tool Setup → <strong>Upload tool URDF (.zip)</strong> (URDF + meshes), or <strong>Upload tool mesh (STL/OBJ/PLY/STEP)</strong> (one file; a STEP file's coordinate systems can place the TCP and the mount). Set the Process, place the TCP(s), pick the contact faces, set the extension ranges → <strong>Save to library</strong>.</li>
 <li><strong>Targets</strong>: if the STL has long thin triangles, <strong>Tessellate part mesh</strong> first. Then click-select the faces to process and generate, brush the areas you want with <em>brush points</em>, add single points, or <strong>Import CSV</strong> from a CAD/CAM tool (<code>x,y,z,nx,ny,nz[,group]</code>).</li>
 <li><strong>Carrier</strong> (optional): External Axis → build the rail or mobile robot from shapes or an STL and snap the robot onto it.</li>
 <li>Then the same steps as Example A. Save the project so it can be reloaded later.</li>
