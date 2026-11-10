@@ -1,13 +1,14 @@
 """Cable dress and safety (v8 T18).
 
-- Optimize -> Cable & safety: *Hose pack clearance* (extra clearance around the arm from the
-  upper arm on, against the part and stay-out zones: core.collision.DRESS_M) and *Joint 6 turn
-  limit* (per stop; beyond it the cost term *Cost per 90° of joint-6 wrap* applies).
+- Optimize -> Cable & safety: *Hose pack* = none, a clearance margin around the arm from the
+  upper arm on (core.collision.DRESS_M) or the hose as a shape on the arm (core.hose,
+  core.collision.HOSE), and *Joint 6 turn limit* (per stop; beyond it the cost term *Cost per
+  90° of joint-6 wrap* applies).
 - Results -> Safety: the reach envelope of each stop of the selected plan (a sphere around the
   shoulder: the robot's reach plus the tool) and a suggested fence: the envelopes' floor
   footprint grown by *Fence distance*, drawn on the floor and listed as corner coordinates.
-- ``reduced_speed_fn``: stay-out zones with a speed (%) are reduced-speed zones; the cycle time
-  of built paths stretches the moves that end inside one.
+- ``reduced_speed_fn``: the reduced-speed zones (core.speed_zones); the cycle time of built
+  paths stretches the moves that end inside one.
 """
 
 from __future__ import annotations
@@ -18,17 +19,35 @@ import viser
 ROOT = "/results/safety"
 
 
+HOSE_MODES = ("none", "clearance margin", "hose along the arm")
+
+
 class CablePanel:
-    def __init__(self, server: viser.ViserServer, session):
+    """Optimize -> Cable & safety: the hose / dress pack and the joint-6 turn limit.
+
+    *Hose pack*: **none**; **clearance margin** (v8 T18: extra clearance around the arm from the
+    upper arm on, core.collision.DRESS_M); **hose along the arm** (a hose of the given diameter
+    riding ``offset`` from the arm's joint line on the chosen side, core.hose: checked as a
+    shape against the part, stay-out zones, floor and carrier, drawn on the robot)."""
+
+    def __init__(self, server: viser.ViserServer, session, cell=None):
         from core import collision
 
-        self.s = session
+        self.s, self.server, self.cell = session, server, cell
+        self._handles: list = []
+        self._view = None  # the robot view the hose was drawn on
         gui = server.gui
         with gui.add_folder("Cable & safety", expand_by_default=False):
             gui.add_markdown(
                 "_Hose / dress pack on the arm and the cable wrap at joint 6. Reduced-speed zones are "
-                "stay-out zones with a speed (Robot & cell → Stay-out zones); the reach envelope "
-                "and a fence line are under Results → Safety._"
+                "under Robot & cell → Reduced-speed zones; the reach envelope and a fence line are "
+                "under Results → Safety._"
+            )
+            self.mode = gui.add_dropdown(
+                "Hose pack",
+                HOSE_MODES,
+                initial_value=HOSE_MODES[1] if collision.DRESS_M > 0 else HOSE_MODES[0],
+                hint="a clearance margin around the arm, or the hose as a shape on the arm",
             )
             self.dress = gui.add_number(
                 "Hose pack clearance (mm)",
@@ -38,6 +57,19 @@ class CablePanel:
                 step=5.0,
                 hint="extra clearance around the upper arm, forearm and wrist (part, stay-out zones)",
             )
+            self.diameter = gui.add_number("Hose diameter (mm)", 60.0, min=5.0, max=300.0, step=5.0)
+            self.offset = gui.add_number(
+                "Hose offset from the arm (mm)",
+                150.0,
+                min=0.0,
+                max=600.0,
+                step=10.0,
+                hint="from the line through the joints to the hose axis",
+            )
+            self.side = gui.add_dropdown(
+                "Hose side", ("+", "−"), hint="which side of the arm the hose runs on (see it on the robot)"
+            )
+            self.show = gui.add_checkbox("Show hose on the robot", True)
             self.wrap = gui.add_number(
                 "Joint 6 turn limit (deg)",
                 360.0,
@@ -46,13 +78,75 @@ class CablePanel:
                 step=30.0,
                 hint="per stop; beyond it the cost term 'Cost per 90° of joint-6 wrap' applies",
             )
-        self.dress.on_update(lambda _e: self.commit())
+        for w in (self.mode, self.dress, self.diameter, self.offset, self.side, self.show):
+            w.on_update(lambda _e: self.commit())
         self.commit()
+
+    def hose(self):
+        """core.hose.Hose of the fields, or None (mode is not *hose along the arm*)."""
+        if self.mode.value != HOSE_MODES[2]:
+            return None
+        from core.hose import Hose
+
+        return Hose(
+            radius=float(self.diameter.value) / 2000,
+            offset=float(self.offset.value) / 1000,
+            side=1.0 if self.side.value == "+" else -1.0,
+        )
 
     def commit(self) -> None:
         from core import collision
 
-        collision.DRESS_M = float(self.dress.value) / 1000
+        margin = self.mode.value == HOSE_MODES[1]
+        hose = self.mode.value == HOSE_MODES[2]
+        self.dress.visible = margin
+        for w in (self.diameter, self.offset, self.side, self.show):
+            w.visible = hose
+        collision.DRESS_M = float(self.dress.value) / 1000 if margin else 0.0
+        collision.HOSE = self.hose()
+        self.draw()
+
+    def draw(self) -> None:
+        """The hose capsules as children of the robot's joint frames (they move with the arm)."""
+        for h in self._handles:
+            try:
+                h.remove()
+            except Exception:  # already gone with a removed robot view
+                pass
+        self._handles = []
+        view = getattr(self.cell, "view", None) if self.cell is not None else None
+        self._view = view
+        hose = self.hose()
+        if hose is None or not self.show.value or view is None or self.s.robot is None:
+            return
+        import trimesh
+
+        from core.hose import segments
+        from core.transforms import matrix_to_wxyz
+
+        names = self.s.robot.model.names
+        for k, (j, T, L) in enumerate(segments(self.s.robot, hose)):
+            frame = view.joint_frame(names[j])
+            if frame is None:
+                continue
+            m = trimesh.creation.capsule(height=L, radius=hose.radius)
+            self._handles.append(
+                self.server.scene.add_mesh_simple(
+                    f"{frame.name}/hose_{k}",
+                    m.vertices,
+                    m.faces,
+                    color=(40, 40, 40),
+                    opacity=0.85,
+                    wxyz=matrix_to_wxyz(T[:3, :3]),
+                    position=T[:3, 3],
+                )
+            )
+
+    def follow_robot(self) -> None:
+        """Watcher hook: redraw after the robot view was rebuilt (another robot, a reload)."""
+        view = getattr(self.cell, "view", None) if self.cell is not None else None
+        if view is not self._view:
+            self.draw()
 
 
 def reach_spheres(s, sol) -> list[tuple[np.ndarray, float]]:
@@ -127,26 +221,16 @@ class SafetyView:
 
 
 def reduced_speed_fn(s, plan):
-    """fn(sample) -> speed share for the cycle time, or None when there are no slow zones."""
-    zones = [z for z in s.stayouts if z.speed_pct is not None]
+    """fn(sample) -> speed share for the cycle time, or None when there are no slow zones
+    (core.speed_zones: the TCP's world position)."""
+    from core.speed_zones import share_at, speed_zones
+
+    zones = speed_zones(s.stayouts, s.resolve)
     if not zones or s.part is None:
         return None
-    from core.carrier import primitive_mesh
-    from core.transforms import pose_to_matrix
-
-    meshes = []
-    for z in zones:
-        m = primitive_mesh(z, s.resolve).copy()
-        m.apply_transform(pose_to_matrix(z.pose))
-        meshes.append((m, z.speed_pct / 100.0))
     Tp = s.part.T_world_part
 
     def share(sample) -> float:
-        p = (Tp @ sample.T_part_tcp)[:3, 3]
-        f = 1.0
-        for m, k in meshes:
-            if m.contains(p[None])[0]:
-                f = min(f, k)
-        return f
+        return float(share_at(zones, (Tp @ sample.T_part_tcp)[:3, 3])[0])
 
     return share

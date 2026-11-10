@@ -50,6 +50,7 @@ class CheckerSpec:
     world_bodies: list = field(default_factory=list)
     obstacles: list = field(default_factory=list)
     dress: float = 0.0  # v8 T18: core.collision.DRESS_M of the parent
+    hose: object = None  # core.collision.HOSE of the parent (core.hose.Hose)
 
     def build(self):
         from core import collision
@@ -59,6 +60,7 @@ class CheckerSpec:
         from core.robot import Robot
 
         collision.DRESS_M = self.dress
+        collision.HOSE = self.hose
         robot = Robot(self.robot_spec)
         scene = CollisionScene(
             robot,

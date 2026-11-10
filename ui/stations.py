@@ -219,6 +219,7 @@ class StationsPanel:
 
         spec = {"settings": settings, "weights": weights, "rules": None, "workers": jobs.CHECK_WORKERS}
         spec["dress_m"] = collision.DRESS_M  # v8 T18: the worker has its own copy
+        spec["hose"] = collision.HOSE
         if not quick and not rules:  # v8 T11 / T12: the Objective dropdown (Cost based mode)
             spec["objective"] = self.objective_m.key
             spec["pareto_keys"] = tuple(k for k, cb in self.pareto_keys.items() if cb.value)

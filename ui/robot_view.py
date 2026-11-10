@@ -52,6 +52,16 @@ class RobotView:
             )
         }
 
+    def joint_frame(self, joint: str):
+        """The scene frame of URDF joint ``joint`` (its child link's frame, moves with q)."""
+        n_joints = len(self.urdf._urdf.joint_map)
+        for j, h in zip(
+            self.urdf._joint_map_values[:n_joints], self.urdf._joint_frames[:n_joints], strict=True
+        ):
+            if j.name == joint:
+                return h
+        return None
+
     def set_q(self, q: np.ndarray) -> None:
         cfg = np.zeros(len(self._viser_names))
         cfg[self._order] = q

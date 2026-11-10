@@ -7,6 +7,8 @@ Pair categories and the margin each must keep (``Margins``):
     robot_self              >= 0                (adjacent / always-touching pairs excluded)
     floor                   >= 0                (base and shoulder excluded)
     carrier                 >= self_clearance   (arm from upper_arm on + tool vs carrier bodies)
+    hose                    part / stay-outs >= clearance, floor >= 0, carrier >= self_clearance
+                            (core.hose: the hose pack as capsules on the arm, when ``HOSE`` is set)
 
 Contact geometry: a head link listed in a TCP's ``contact_links`` is skipped whole for
 that TCP. Picked ``contact_faces`` are skipped together with every face sharing a vertex
@@ -38,6 +40,8 @@ class Margins:
 # v8 T18: extra clearance around the arm from the upper arm on (hose / dress pack), against the
 # part and stay-out zones; set from Optimize -> Cable & safety and by the planner jobs
 DRESS_M = 0.0
+# the hose pack as a shape on the arm (core.hose.Hose), or None; set like DRESS_M
+HOSE = None
 
 
 def _bvh(mesh: trimesh.Trimesh) -> coal.BVHModelOBBRSS:
@@ -85,9 +89,11 @@ class CollisionScene:
         base_bodies: list | None = None,
         world_bodies: list | None = None,
         obstacles: list | None = None,
+        hose=-1,
     ):
         """``obstacles``: stay-out zones, (name, mesh, T_world_body): world-fixed geometry the arm
-        (from the shoulder on) and the tool must keep ``margins.clearance`` from."""
+        (from the shoulder on) and the tool must keep ``margins.clearance`` from. ``hose``:
+        core.hose.Hose capsules on the arm (default: the module's ``HOSE``; None = no hose)."""
         self.robot = robot
         self.margins = margins or Margins()
         model = robot.model
@@ -138,6 +144,15 @@ class CollisionScene:
                     self.tool_ids.append(gid)
                     self.tool_contact[gid] = set(sig)
 
+        self.hose_ids: list[int] = []
+        hose = HOSE if hose == -1 else hose
+        if hose is not None:
+            from core.hose import segments
+
+            for k, (j, T, L) in enumerate(segments(robot, hose)):
+                go = pin.GeometryObject(f"hose_{k}", j, _se3(T), coal.Capsule(hose.radius, L))
+                self.hose_ids.append(self.gm.addGeometryObject(go))
+
         self.part_id = None
         if part_mesh is not None and T_world_part is not None:
             go = pin.GeometryObject("part", 0, _se3(self.T_univ_world @ T_world_part), _bvh(part_mesh))
@@ -183,7 +198,7 @@ class CollisionScene:
             bucket.append(len(self.gm.collisionPairs) - 1)
 
         if self.part_id is not None:
-            for i in self.robot_ids:
+            for i in [*self.robot_ids, *self.hose_ids]:
                 add(i, self.part_id, P.robot_part)
             for i in self.tool_ids:
                 add(i, self.part_id, P.tool_part)
@@ -199,13 +214,13 @@ class CollisionScene:
         shoulder_on = [i for i in self.robot_ids if joint_of[i] >= 1]
         upper_arm_on = [i for i in self.robot_ids if joint_of[i] >= 2]
         if self.floor_id is not None:
-            for i in [*upper_arm_on, *self.tool_ids]:
+            for i in [*upper_arm_on, *self.tool_ids, *self.hose_ids]:
                 add(i, self.floor_id, P.floor)
         for o in self.obstacle_ids:  # stay-out zones: arm from the shoulder on, and the tool
-            for i in [*shoulder_on, *self.tool_ids]:
+            for i in [*shoulder_on, *self.tool_ids, *self.hose_ids]:
                 add(i, o, P.obstacle)
         for c in self.carrier_ids:  # arm beyond the shoulder and the tool vs the carrier
-            for i in [*upper_arm_on, *self.tool_ids]:
+            for i in [*upper_arm_on, *self.tool_ids, *self.hose_ids]:
                 add(i, c, P.carrier)
 
         self.gd = pin.GeometryData(self.gm)
@@ -214,7 +229,8 @@ class CollisionScene:
             margin_of[k] = self.margins.clearance
         if self.margins.dress > 0:  # v8 T18: the hose pack rides on the arm from the upper arm on
             for k in P.robot_part + P.obstacle:
-                if joint_of[self.gm.collisionPairs[k].first] >= 2:
+                g = self.gm.collisionPairs[k].first
+                if g < len(joint_of) and joint_of[g] >= 2:
                     margin_of[k] = self.margins.clearance + self.margins.dress
         for k in P.tool_robot + P.carrier:
             margin_of[k] = self.margins.self_clearance

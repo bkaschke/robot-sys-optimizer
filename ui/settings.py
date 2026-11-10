@@ -66,7 +66,7 @@ SAVED: dict[str, tuple[str, ...]] = {
         "bend_step",
     ),
     "tolerance": ("part_mm", "part_deg", "station_mm", "samples", "seed"),
-    "cable": ("dress", "wrap"),  # v8 T18
+    "cable": ("mode", "dress", "diameter", "offset", "side", "show", "wrap"),  # v8 T18
     "safety": ("show", "distance"),
     "cycle": (
         "joint_speed",
