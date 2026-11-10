@@ -206,6 +206,7 @@ def test_areas_without_zones_get_one_group_per_configuration():
 def test_tcp_position_is_locked_by_default(app):
     tool, s = app["tool"], app["session"]
     assert app["project"].load_example("rail_long_part")
+    tool.tcp_pose.show.value = True  # an earlier test confirmed step 3, which hides the gizmo
     tool.refresh()
     assert tool.tcp_lock.value and tool.tcp_pose.xyz.disabled and tool.tcp_pose.gizmo.disable_axes
     before = s.tool.tcps[0].T_head_tcp.xyz

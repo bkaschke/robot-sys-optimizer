@@ -27,6 +27,7 @@ ROOT = "/results/paths"
 ZONE_COLORS = [(250, 120, 30), (30, 160, 230), (200, 60, 200), (40, 200, 120), (230, 200, 40), (120, 90, 220)]
 ISSUE_COLOR = (230, 30, 30)
 MOVE_COLOR = (150, 150, 150)  # lifts, home and carrier moves
+BETWEEN_LABELS = {"Collision-free joint path": "direct", "Via home": "home"}
 PLANNER_ORDER = "Planner order"
 
 
@@ -43,12 +44,8 @@ class SimPanel:
         order: float | None = None,
     ):
         self.server, self.s = server, session
-        self.selected, self.move_carrier, self.set_base, self.show_q = (
-            selected,
-            move_carrier,
-            set_base,
-            show_q,
-        )
+        self.selected, self.move_carrier = selected, move_carrier
+        self.set_base, self.show_q = set_base, show_q
         self.set_q = set_q or show_q  # syncs the joint sliders (scrubbing, end of playback)
         self.plan = None
         self.label = None  # solution the paths belong to
@@ -105,6 +102,9 @@ class SimPanel:
         self.lift = gui.add_number("Lift height (mm)", 30.0, min=1.0, step=5.0)
         self.home = gui.add_checkbox(
             "Home between stops", True, hint="arm to home before the carrier moves, back after"
+        )
+        self.between = gui.add_dropdown(  # keys of core.paths.BETWEEN
+            "Between groups", tuple(BETWEEN_LABELS), hint="to the next group / configuration at a stop"
         )
         self.drive = gui.add_checkbox(
             "Drive carrier between stops",
@@ -212,6 +212,7 @@ class SimPanel:
                     park=None if home is not None else s.home_q(),  # clear pose to go via
                     order=self.order.key,
                     cycle=s.cycle,
+                    between=BETWEEN_LABELS[self.between.value],
                 )
                 if self.motion.value:  # v8 T7: the arm sweeps between clear samples
                     from core.motion_check import check_moves

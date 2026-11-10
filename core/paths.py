@@ -52,6 +52,7 @@ ISSUES = ("unreachable", "config_flip", "jump", "collision", "reconfigure", "car
 HOME_STEP = np.radians(3.0)  # joint step of the moves to / from home
 RETREAT = 0.15  # m the tool backs off the surface before a planned joint move
 COPIES = 6  # other 2*pi copies of a joint move's end tried when no way is found
+BETWEEN = ("direct", "home")  # moves between groups at a stop: planned joint path / via home
 
 
 @dataclass
@@ -113,6 +114,7 @@ class _Tracer:
         self.jump = np.radians(jump_deg)
         self.batch = getattr(checker.ik, "batch", False)
         self.park = None  # a clear arm pose (home) to go via when a direct joint move collides
+        self.via_home = False  # between groups at a stop: always via home (``park``)
 
     def tcp_pose(self, r: PointResult) -> np.ndarray:
         """Planned TCP pose in the part frame (from the planned joints, exact)."""
@@ -223,16 +225,16 @@ class _Tracer:
         return out
 
     def change_move(
-        self, k, zone, qa, qb, tcp: str, a: int, b: int, home=None, at_point=(True, True)
+        self, k, zone, qa, qb, tcp: str, a: int, b: int, home=None, at_point=(True, True), group=False
     ) -> list[PathSample]:
-        """Joint move between two poses of a stop. A configuration change goes through home
-        (when there is one) so the arm does not flip next to the part; a direct move that
-        cannot avoid a collision goes via home, or without one via ``park``, when that is
-        better."""
+        """Joint move between two poses of a stop: a planned collision-free joint path (also
+        for a configuration change); when it cannot avoid a collision it goes via home, or
+        without one via ``park``, if that is better. ``group`` (a move between groups or a
+        configuration change) with ``via_home``: always via home / ``park``."""
         qa, qb = np.asarray(qa, float), np.asarray(qb, float)
         via = home if home is not None else self.park
         out = None
-        if home is None or config_label(self.ch.ik, qa) == config_label(self.ch.ik, qb):
+        if not (group and self.via_home and via is not None):
             out = self.joint_move(k, zone, qa, qb, tcp, a, b, at_point)
             if via is None or not _hits(out):
                 return out
@@ -331,6 +333,7 @@ def trace(
     park: np.ndarray | None = None,
     order: str = "pattern",
     cycle=None,
+    between: str = "direct",
 ) -> PathPlan:
     """Paths of solution ``sol``. ``points``: point id -> (p, n) in the part frame;
     ``base_poses``: world base pose per station (core.export.station_pose). ``pattern``
@@ -342,9 +345,15 @@ def trace(
     the arm goes via when a joint move or the backed-off pose on a carrier move collides.
     ``order`` = "gtsp" chooses the point order and each point's joint solution (any valid
     IK branch; zones keep theirs) for least joint motion (core.path_order_branches;
-    ``cycle``: CycleSettings of the joint move times)."""
+    ``cycle``: CycleSettings of the joint move times). ``between`` (``BETWEEN``): from one
+    group (zone, face, joint configuration) to the next at a stop, "direct" = a planned
+    collision-free joint path (via home only when no clear way is found), "home" = always via
+    home (``park`` without one). Stops always start and end at home when ``home`` is given."""
+    if between not in BETWEEN:
+        raise ValueError(f"between must be one of {BETWEEN}")
     tr = _Tracer(checker, part_mesh, step, jump_deg)
     tr.park = home if home is not None else park
+    tr.via_home = between == "home"
     seqs = ordered_sequences(  # unzoned stops: one group per joint configuration
         sol, results, points, pattern, lambda r: config_label(checker.ik, np.asarray(r.q, float)), group_of
     )
@@ -402,7 +411,7 @@ def trace(
                 sp.samples += tr.change_move(k, zone, q_arm, q, r0.tcp, last_b, pids[0], None, (False, True))
             elif q_prev is not None:  # the next zone at this stop: a planned joint move
                 last = sp.samples[-1]
-                sp.samples += tr.change_move(k, zone, q_prev, q, r0.tcp, last.b, pids[0], home)
+                sp.samples += tr.change_move(k, zone, q_prev, q, r0.tcp, last.b, pids[0], home, group=True)
             if sp.samples and sp.samples[-1].kind == "home":  # arrived at another 2*pi copy?
                 q = np.asarray(sp.samples[-1].q, float)
             sp.samples.append(PathSample(k, zone, pids[0], pids[0], 0.0, tr.tcp_pose(r0), r0.tcp, q, first))
@@ -413,7 +422,7 @@ def trace(
                 lab_b = config_label(checker.ik, np.asarray(rb.q, float))
                 if lab_b != label:  # the plan uses another configuration for b: the arm
                     qb = tr.nearest_copy(rb.q, q)  # reconfigures by a planned joint move
-                    sp.samples += tr.change_move(k, zone, q, qb, rb.tcp, a, b, home)
+                    sp.samples += tr.change_move(k, zone, q, qb, rb.tcp, a, b, home, group=True)
                     q, label = np.asarray(sp.samples[-1].q, float), lab_b
                     sp.samples.append(
                         PathSample(k, zone, a, b, 1.0, tr.tcp_pose(rb), rb.tcp, q, "reconfigure")
