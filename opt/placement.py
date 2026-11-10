@@ -25,7 +25,7 @@ import numpy as np
 
 from core.feasibility import CancelledError, FeasibilityChecker, PointResult
 from core.schema import Solution, Station, TargetGroup, Weights
-from opt.cost import cost_breakdown, cycle_estimate, path_length
+from opt.cost import cost_breakdown, cycle_estimate, path_length, wrap_excess
 from opt.reachability import coverage_matrix
 from opt.set_cover import _solve, greedy_cover, min_stations, set_cover  # noqa: F401
 from opt.station_checks import CheckMemo, _nn, _robust, order_by, path_travel, sites_start, verify  # noqa: F401
@@ -56,6 +56,7 @@ class PlannerSettings:
     first_k: int = 1  # v7 round 2 (rules planner): smallest station count tried
     skip_below_min: bool = False  # no plan when the map says max_stations stops cannot cover it
     cycle: object = None  # v8 T6: core.cycle_time.CycleSettings (None = defaults)
+    wrap_limit_deg: float = 360.0  # v8 T18: joint-6 turn per stop before the wrap cost starts
     refine_method: str = "cmaes"  # v8 T10: "cmaes" | "tpe" | "gp" (opt.methods station_refine)
     exclude: tuple = ()  # station value dicts the set cover may not use (alternative covers)
     # coarse to fine (opt.sampling): set cover and refinement on a spread-out subsample of the
@@ -271,6 +272,7 @@ def plan_stations(
                 wrist_flips=flips,
                 motion=arm_motion(seqs, results),
                 cycle_s=cyc,
+                wrap=wrap_excess(seqs, results, st.wrap_limit_deg),
             )
             full = getattr(sites, "full", lambda v: v)
             plural = "s" if len(stations) > 1 else ""

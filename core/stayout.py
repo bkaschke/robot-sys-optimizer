@@ -33,6 +33,8 @@ def obstacles(zones: list[Primitive], resolve=None) -> list[Obstacle]:
     out = []
     names: set[str] = set()
     for i, p in enumerate(zones):
+        if p.speed_pct is not None:  # v8 T18: a reduced-speed zone is not an obstacle
+            continue
         m = primitive_mesh(p, resolve)
         T = pose_to_matrix(p.pose)
         V = m.vertices @ T[:3, :3].T + T[:3, 3]

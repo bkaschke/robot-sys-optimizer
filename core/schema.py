@@ -253,6 +253,7 @@ class Weights(_Model):
     motion: float = Field(default=1.0, ge=0)  # mean largest joint move between neighbouring points / 90 deg
     wrist_flip: float = Field(default=1.0, ge=0)  # per joint 4 / 6 jump > 180 deg inside a group
     cycle: float = Field(default=0.0, ge=0)  # v8 T6: per minute of estimated cycle time
+    wrap: float = Field(default=1.0, ge=0)  # v8 T18: per 90 deg of joint-6 turn beyond the limit
 
     @model_validator(mode="before")
     @classmethod

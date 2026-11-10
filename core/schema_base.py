@@ -95,6 +95,9 @@ class Primitive(_Model):
     pose: Pose = Field(default_factory=Pose)
     mesh: str | None = None  # mesh path, relative to the project folder or the repo
     units: Literal["m", "mm", "in"] = "m"
+    # v8 T18 (stay-out zones only): a speed in % makes it a reduced-speed zone (the arm may
+    # enter, slowed to this share of its speed: cycle time) instead of a hard stay-out
+    speed_pct: float | None = Field(default=None, gt=0, le=100)
     # v7 round 2 (T13): this body follows an axis length (Base.axis_length_m): a box gets that
     # size along the axis, a cylinder lying along it that height; "" = fixed size
     stretch: Literal["", "x", "y"] = ""

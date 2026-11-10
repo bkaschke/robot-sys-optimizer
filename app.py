@@ -219,6 +219,8 @@ def build_app(
             optimize.refresh_inspect(INSPECT_SOURCES[1])
             if "pareto" in state:
                 state["pareto"].refresh()
+            if "safety" in state:
+                state["safety"].refresh()
 
         stations = StationsPanel(server, session, on_solution=new_results)
 
@@ -230,6 +232,10 @@ def build_app(
         from ui.cycle_ui import CyclePanel
 
         cycle = CyclePanel(server, session)  # v8 T6
+        from ui.safety_ui import CablePanel
+
+        cable = CablePanel(server, session)  # v8 T18
+        stations.cable = tool_opt.cable = cable
         from ui.compare import ComparePanel
 
         compare = ComparePanel(  # v8 T9
@@ -254,6 +260,9 @@ def build_app(
         tolerance = TolerancePanel(server, session, results.selected)  # v8 T5
         tolerance.on_done = lambda: targets.heat.draw()  # v8 T8: Colour part by -> tolerance
         stations.tolerance_settings = tolerance.settings  # v8 T12: robust objective
+        from ui.safety_ui import SafetyView
+
+        safety = SafetyView(server, session, results.selected)  # v8 T18
         tool_opt.tolerance_settings = tolerance.settings
         from ui.pareto_ui import ParetoView
 
@@ -297,6 +306,7 @@ def build_app(
         optimize.refresh_inspect()  # the inspector follows the Results selection
         workflow.refresh()  # out-of-date banner of the selected result
         sim.on_selection()  # paths belong to one plan
+        safety.refresh()  # v8 T18: envelope of the selected plan
 
     results.choice.on_update(on_selection)
     results.tool_opt = tool_opt
@@ -361,6 +371,8 @@ def build_app(
         cycle=cycle,
         compare=compare,
         pareto=pareto,
+        cable=cable,
+        safety=safety,
         project=project,
         dark_toggle=dark_toggle,
         guide=guide,

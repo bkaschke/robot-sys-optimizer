@@ -80,10 +80,13 @@ def plan_estimate(
     return {"joint": joint, "carrier": carrier, "settle": settle, "total": joint + carrier + settle}
 
 
-def path_time(plan, cs: CycleSettings, v_limits=None) -> dict[str, float]:
+def path_time(plan, cs: CycleSettings, v_limits=None, slow=None) -> dict[str, float]:
     """Cycle time of built paths (core.paths.PathPlan). Returns seconds per kind of motion:
-    {"process", "approach", "joint", "carrier", "settle", "total"}."""
+    {"process", "approach", "joint", "carrier", "settle", ["reduced",] "total"}. ``slow(sample)``
+    (v8 T18) -> speed share (1 = full) for a move ending at that sample: inside a reduced-speed
+    zone a move takes 1 / share as long (the extra time is reported as "reduced")."""
     out = dict.fromkeys(("process", "approach", "joint", "carrier", "settle"), 0.0)
+    extra = 0.0
     for st in plan.stations:
         if st.samples:
             out["settle"] += cs.settle_s
@@ -121,6 +124,15 @@ def path_time(plan, cs: CycleSettings, v_limits=None) -> dict[str, float]:
         if kind != run_kind:
             close()
             run_kind, run = kind, ({} if kind == "carrier" else (np.zeros(6) if kind == "joint" else 0.0))
+        if slow is not None and kind != "carrier":
+            f = float(slow(b))
+            if f < 1.0:  # this move at full speed, then stretched by the zone's share
+                if kind == "joint" and a.q is not None and b.q is not None:
+                    t = joint_move_time(np.asarray(b.q, float) - np.asarray(a.q, float), cs, v_limits)
+                else:
+                    d = float(np.linalg.norm(b.T_part_tcp[:3, 3] - a.T_part_tcp[:3, 3]))
+                    t = d / (cs.process_speed if kind == "process" else cs.approach_speed)
+                extra += t * (1.0 / max(f, 1e-3) - 1.0)
         if kind == "carrier":
             for k in set(ca or {}) | set(cb or {}):
                 d = abs(float((cb or {}).get(k, 0.0)) - float((ca or {}).get(k, 0.0)))
@@ -132,5 +144,7 @@ def path_time(plan, cs: CycleSettings, v_limits=None) -> dict[str, float]:
         else:
             run += float(np.linalg.norm(b.T_part_tcp[:3, 3] - a.T_part_tcp[:3, 3]))
     close()
+    if extra > 0:
+        out["reduced"] = extra
     out["total"] = float(sum(out.values()))
     return out

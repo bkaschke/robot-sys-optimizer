@@ -36,6 +36,17 @@ def cycle_estimate(seqs, results, stations: list[dict], sites, robot, cs=None) -
     return plan_estimate(seqs, results, moves, cs or CycleSettings(), robot.model.velocityLimit)
 
 
+def wrap_excess(seqs, results, limit_deg: float = 360.0, joint: int = 5) -> float:
+    """v8 T18: per stop, how far joint 6 turns over the stop's points (max - min of its planned
+    values, the cable / hose wraps that much) beyond ``limit_deg``; summed, in units of 90 deg."""
+    total = 0.0
+    for groups in seqs.values():
+        q = [float(results[p].q[joint]) for members in groups for p in members if results[p].q is not None]
+        if q:
+            total += max(0.0, np.degrees(max(q) - min(q)) - limit_deg) / 90.0
+    return total
+
+
 def cost_breakdown(
     point_results: list,
     n_unreached: int,
@@ -50,6 +61,7 @@ def cost_breakdown(
     wrist_flips: int = 0,
     motion: float = 0.0,
     cycle_s: float = 0.0,
+    wrap: float = 0.0,
 ) -> tuple[float, dict[str, float]]:
     ok = [r for r in point_results if r.status != "unreachable"]
     mu = np.array([r.manipulability / max_manip for r in ok]) if ok else np.zeros(0)
@@ -68,6 +80,7 @@ def cost_breakdown(
         "wrist_flip": float(wrist_flips),
         "motion": float(motion),
         "cycle": float(cycle_s) / 60.0,  # v8 T6: per minute
+        "wrap": float(wrap),  # v8 T18: joint-6 turn beyond the limit, per 90 deg
     }
     w = weights.model_dump()
     weighted = {k: w[k] * v for k, v in terms.items()}

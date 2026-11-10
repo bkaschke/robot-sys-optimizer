@@ -32,6 +32,12 @@ from core.tool import ToolModel
 class Margins:
     clearance: float = 0.01
     self_clearance: float = 0.005
+    dress: float = field(default_factory=lambda: DRESS_M)  # v8 T18: hose pack on the arm (m)
+
+
+# v8 T18: extra clearance around the arm from the upper arm on (hose / dress pack), against the
+# part and stay-out zones; set from Optimize -> Cable & safety and by the planner jobs
+DRESS_M = 0.0
 
 
 def _bvh(mesh: trimesh.Trimesh) -> coal.BVHModelOBBRSS:
@@ -206,6 +212,10 @@ class CollisionScene:
         margin_of = {}
         for k in P.robot_part + P.tool_part + P.obstacle:
             margin_of[k] = self.margins.clearance
+        if self.margins.dress > 0:  # v8 T18: the hose pack rides on the arm from the upper arm on
+            for k in P.robot_part + P.obstacle:
+                if joint_of[self.gm.collisionPairs[k].first] >= 2:
+                    margin_of[k] = self.margins.clearance + self.margins.dress
         for k in P.tool_robot + P.carrier:
             margin_of[k] = self.margins.self_clearance
         for k, req in enumerate(self.gd.collisionRequests):

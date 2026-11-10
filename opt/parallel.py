@@ -49,13 +49,16 @@ class CheckerSpec:
     base_bodies: list = field(default_factory=list)
     world_bodies: list = field(default_factory=list)
     obstacles: list = field(default_factory=list)
+    dress: float = 0.0  # v8 T18: core.collision.DRESS_M of the parent
 
     def build(self):
+        from core import collision
         from core.collision import CollisionScene
         from core.feasibility import FeasibilityChecker
         from core.ik import make_ik
         from core.robot import Robot
 
+        collision.DRESS_M = self.dress
         robot = Robot(self.robot_spec)
         scene = CollisionScene(
             robot,

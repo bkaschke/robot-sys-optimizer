@@ -22,6 +22,11 @@ from ui.session import Session
 FIELDS = (
     ("stations", "Cost per stop", "each base / carrier position beyond the first (fewer base changes)"),
     ("group", "Cost per group", "each extra joint configuration at a stop (a configuration change)"),
+    (
+        "wrap",
+        "Cost per 90° of joint-6 wrap",
+        "joint 6 turning beyond the limit (Cable & safety) per stop (v8)",
+    ),
     ("cycle", "Cost per minute of cycle time", "estimated: arm moves, carrier moves, settle per stop (v8)"),
     ("motion", "Cost of arm motion", "mean largest joint move between neighbouring points, per 90°"),
     ("wrist_flip", "Cost per wrist flip", "a joint 4 / joint 6 jump > 180° inside a group's path (zoning)"),

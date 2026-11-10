@@ -251,11 +251,11 @@ class SimPanel:
     def _cycle_line(self, plan) -> str:
         """v8 T6: cycle time of the built paths (Optimize -> Cycle time speeds)."""
         from core.cycle_time import CycleSettings, path_time
+        from ui.safety_ui import reduced_speed_fn
 
-        robot = self.s.robot
-        self.cycle = c = path_time(
-            plan, self.s.cycle or CycleSettings(), robot.model.velocityLimit if robot else None
-        )
+        vlim = self.s.robot.model.velocityLimit if self.s.robot else None
+        slow = reduced_speed_fn(self.s, plan)  # v8 T18: reduced-speed zones
+        self.cycle = c = path_time(plan, self.s.cycle or CycleSettings(), vlim, slow)
         parts = ", ".join(f"{k} {v:.0f} s" for k, v in c.items() if k != "total" and v > 0.05)
         return f"  \nCycle time: **{c['total']:.0f} s** ({parts})."
 

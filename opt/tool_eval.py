@@ -18,7 +18,7 @@ from core.ik import make_ik
 from core.robot import Robot
 from core.schema import EndEffector, ExtensionValues, Solution, Weights, length_ref
 from core.tool import ToolModel
-from opt.cost import cost_breakdown
+from opt.cost import cost_breakdown, wrap_excess
 from opt.placement import PlannerSettings, Targets, plan_stations, verify
 from opt.sites import FloorSites
 
@@ -167,6 +167,7 @@ class _Evaluator:
             wrist_flips=zone_counts(zones)[1],
             motion=arm_motion(seqs, res),
             cycle_s=cyc,
+            wrap=wrap_excess(seqs, res, self.st.planner.wrap_limit_deg),
         )
         new = sol.model_copy(
             update={

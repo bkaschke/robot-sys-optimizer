@@ -22,6 +22,7 @@ from ui.widgets import MAX_UPLOAD, GizmoStyle, Latest, notify, safe_name
 ROOT = "/cell/stayout"
 NONE = "(none)"
 COLOR, PICKED = (230, 50, 50), (255, 120, 60)
+SLOW = (240, 190, 40)  # v8 T18: reduced-speed zone
 
 
 class StayoutPanel:
@@ -49,6 +50,14 @@ class StayoutPanel:
             self.cyl = gui.add_vector2("Cylinder radius / height (mm)", (250.0, 1000.0), step=10.0)
             self.xyz = gui.add_vector3("Position (mm)", (0.0, 0.0, 0.0), step=10.0)
             self.rpy = gui.add_vector3("Rotation rpy (deg)", (0.0, 0.0, 0.0), step=5.0)
+            self.speed = gui.add_number(  # v8 T18
+                "Reduced speed (%)",
+                0.0,
+                min=0.0,
+                max=100.0,
+                step=5.0,
+                hint="0 = a stay-out zone; 1 to 100 = the arm may enter at this share of its speed",
+            )
             self.drag = gui.add_checkbox("Drag with gizmo", False)
             self.remove = gui.add_button("Remove zone", color="red")
             self.info = gui.add_markdown("")
@@ -59,7 +68,7 @@ class StayoutPanel:
         )
         self.remove.on_click(lambda e: self.remove_zone(e))
         self.pick.on_update(lambda e: None if self._busy else self.sync())
-        for w in (self.name, self.box, self.cyl, self.xyz, self.rpy):
+        for w in (self.name, self.box, self.cyl, self.xyz, self.rpy, self.speed):
             w.on_update(lambda e: None if self._busy else self._edit(e))
         self.drag.on_update(lambda e: self.place_gizmo())
         self.refresh()
@@ -146,6 +155,7 @@ class StayoutPanel:
         upd = {
             "name": self.name.value.strip() or z.name,
             "pose": Pose(xyz=tuple(v / 1000 for v in self.xyz.value), rpy=tuple(np.radians(self.rpy.value))),
+            "speed_pct": float(self.speed.value) if self.speed.value > 0 else None,
         }
         if z.shape == "box":
             upd["size"] = tuple(max(v, 1.0) / 1000 for v in self.box.value)
@@ -187,6 +197,7 @@ class StayoutPanel:
                     self.cyl.value = (z.radius * 1000, z.height * 1000)
                 self.xyz.value = tuple(v * 1000 for v in z.pose.xyz)
                 self.rpy.value = tuple(float(v) for v in np.degrees(z.pose.rpy))
+                self.speed.value = float(z.speed_pct or 0.0)
         finally:
             self._busy = False
         n = len(self.zones)
@@ -209,7 +220,7 @@ class StayoutPanel:
                 f"{ROOT}/{z.name}",
                 m.vertices,
                 m.faces,
-                color=PICKED if k == i else COLOR,
+                color=PICKED if k == i else (SLOW if z.speed_pct is not None else COLOR),
                 opacity=0.35,
                 side="double",
                 wxyz=matrix_to_wxyz(T[:3, :3]),

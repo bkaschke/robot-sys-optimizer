@@ -95,6 +95,7 @@ class StationsPanel:
                 hint="tolerance samples per candidate",
             )
             self.tolerance_settings = None  # app.py: the Results -> Tolerance check offsets
+            self.cable = None  # app.py: Optimize -> Cable & safety (v8 T18)
             self.objective_m.dropdown.on_update(lambda _e: self._objective_fields())
             self.areas = gui.add_checkbox(
                 "Connected station areas", True, hint="each stop's points one area on the part (no overlap)"
@@ -189,6 +190,7 @@ class StationsPanel:
             require_all=self.options()["require_all"],
             require_one_config=self.options()["require_one_config"],
             cycle=getattr(s, "cycle", None),  # v8 T6
+            wrap_limit_deg=float(self.cable.wrap.value) if self.cable else 360.0,  # v8 T18
         )
         if quick:
             settings = PlannerSettings(
@@ -200,6 +202,7 @@ class StationsPanel:
                 patience=1,
                 quick_first=True,
                 cycle=settings.cycle,
+                wrap_limit_deg=settings.wrap_limit_deg,
             )
         run, stop, progress, status = (
             (self.quick_run, self.quick_stop, self.quick_progress, self.quick_status)
@@ -211,9 +214,11 @@ class StationsPanel:
         rules = not quick and rules_ui.rules_mode(self)
         what = "Quick station plan" if quick else ("Rules-only station plan" if rules else "Station planning")
         weights = self.costs.commit()
+        from core import collision
         from ui import jobs
 
         spec = {"settings": settings, "weights": weights, "rules": None, "workers": jobs.CHECK_WORKERS}
+        spec["dress_m"] = collision.DRESS_M  # v8 T18: the worker has its own copy
         if not quick and not rules:  # v8 T11 / T12: the Objective dropdown (Cost based mode)
             spec["objective"] = self.objective_m.key
             spec["pareto_keys"] = tuple(k for k, cb in self.pareto_keys.items() if cb.value)

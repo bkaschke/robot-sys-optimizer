@@ -208,11 +208,16 @@ class ToolOptPanel:
         self._require_all = req["require_all"]
         st.planner.areas = opts.get("areas", True)
         st.planner.cycle = getattr(s, "cycle", None)  # v8 T6
+        if getattr(self, "cable", None) is not None:  # v8 T18
+            st.planner.wrap_limit_deg = float(self.cable.wrap.value)
+        from core import collision
+
         spec = {
             "weights": self.costs.commit(),  # the tool optimizer's own cost weights
             "max_stations": int(self.max_stations.value),
             "st": st,
             "tube_od_mm": self.tube_od(),
+            "dress_m": collision.DRESS_M,  # v8 T18
             "family_dirs": [d.strip() for d in self.family.value.split(";") if d.strip()],
         }
         st.family_cost = self.family_cost.value
