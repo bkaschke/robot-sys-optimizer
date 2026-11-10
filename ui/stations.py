@@ -175,7 +175,9 @@ class StationsPanel:
         rules = not quick and rules_ui.rules_mode(self)
         what = "Quick station plan" if quick else ("Rules-only station plan" if rules else "Station planning")
         weights = self.costs.commit()
-        spec = {"settings": settings, "weights": weights, "rules": None}
+        from ui import jobs
+
+        spec = {"settings": settings, "weights": weights, "rules": None, "workers": jobs.CHECK_WORKERS}
         if rules:
             spec["rules"] = {"objective": self.objective.value, "sing_pct": float(self.sing_pct.value)}
         self._cancel.clear()
@@ -215,6 +217,8 @@ class StationsPanel:
                 streamed(*data)
             elif kind == "max_manip":
                 s.max_manip = float(data)
+            elif kind == "warn":
+                log(f"{what}: {data}.", "warn")
 
         from ui import jobs
         from ui.plan_job import payload_for

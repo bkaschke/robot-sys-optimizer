@@ -105,6 +105,15 @@ def station_job(payload: dict, emit, cancelled) -> dict:
         obstacles=s.obstacle_entries(),  # stay-out zones
     )
     checker = FeasibilityChecker(robot, make_ik(robot), s.tool_model, scene, T_base0, T_part)
+    workers = int(spec.get("workers", 1))
+    if workers > 1:  # v8 T2: exact checks in a process pool (kept for the next plan)
+        from opt.parallel import CheckerSpec, pool_for
+
+        say(f"starting {workers} check workers", 0.0)
+        checker.pool = pool_for(
+            CheckerSpec(robot.spec, s.tool_model, mesh, T_base0, T_part, bb, wb, s.obstacle_entries()),
+            workers,
+        )
     emit("max_manip", float(rmap.max_manip))  # the Results card: manipulability in % (not saved)
     args = dict(t=t, T_base0=T_base0, fp=fp, weights=spec["weights"], settings=settings, L=L, L_ref=L_ref)
     rules = spec.get("rules")

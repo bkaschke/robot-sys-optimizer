@@ -166,6 +166,20 @@ def lift_levels(lo: float, hi: float, step: float = 0.25) -> np.ndarray:
     return np.linspace(lo, hi, n)
 
 
+class AxisFollow:
+    """fn(T_world_base) -> T_base_body for a body on a gantry's X axis (a class, not a
+    closure, so collision scenes can be rebuilt in worker processes: v8 T2)."""
+
+    def __init__(self, T_mount: np.ndarray, T_frame: np.ndarray, T_axis_body: np.ndarray):
+        self.M_inv, self.F_inv = np.linalg.inv(T_mount), np.linalg.inv(T_frame)
+        self.T_frame, self.T_ab = T_frame, T_axis_body
+
+    def __call__(self, T_world_base: np.ndarray) -> np.ndarray:
+        x = float((self.F_inv @ T_world_base @ self.M_inv)[0, 3])
+        T_axis = self.T_frame @ make_T(p=(x, 0, 0))
+        return np.linalg.inv(T_world_base) @ T_axis @ self.T_ab
+
+
 class Carrier:
     def __init__(
         self, base: Base, T_world_base_static: np.ndarray | None = None, resolve: Resolver | None = None
@@ -265,14 +279,7 @@ class Carrier:
     def axis_follow(self, T_axis_body: np.ndarray):
         """fn(T_world_base) -> T_base_body for a body on the X axis (core.collision re-places
         it per base pose: the bridge stays put in y while the carriage moves along it)."""
-        M_inv, F_inv = np.linalg.inv(self.T_mount), np.linalg.inv(self.T_frame)
-
-        def follow(T_world_base: np.ndarray) -> np.ndarray:
-            x = float((F_inv @ T_world_base @ M_inv)[0, 3])
-            T_axis = self.T_frame @ make_T(p=(x, 0, 0))
-            return np.linalg.inv(T_world_base) @ T_axis @ T_axis_body
-
-        return follow
+        return AxisFollow(self.T_mount, self.T_frame, T_axis_body)
 
     def local_footprint(self) -> Polygon | None:
         """Carriage-frame outline of the carriage and lift-stage bodies (the lift moves along

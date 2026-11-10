@@ -69,11 +69,37 @@ def _robust(checker, t: Targets, i: int, r: PointResult, v: dict, sites) -> tupl
     return result
 
 
+def _call(T, t: Targets, i: int, clearance: bool = True) -> tuple:
+    return (T, "point", int(t.ids[i]), t.P_part[i], t.N_part[i], t.groups[i], None, clearance)
+
+
+def _prefetch_point(checker, t: Targets, pairs: list[tuple[int, dict]], sites) -> None:
+    """v8 T2: compute ``check_point`` for (point index, stop) pairs in the checker's pool, then
+    the localization re-checks of the points that passed (no-op without a pool)."""
+    if getattr(checker, "pool", None) is None or checker.memo is None:
+        return
+    from opt.parallel import prefetch
+
+    prefetch(checker, [_call(sites.T(v), t, i) for i, v in pairs])
+    memo, extra = checker.memo, []
+    for i, v in pairs:
+        r = memo.data.get((memo.key(sites.T(v)), "point", int(t.ids[i]), None, True))
+        if r is not None and r.status != "unreachable":
+            extra += [_call(sites.T(vp), t, i, clearance=False) for vp in sites.perturbations(v)]
+    prefetch(checker, extra)
+
+
 def verify(
     checker: FeasibilityChecker, t: Targets, stations: list[dict], sites, preferred: np.ndarray
 ) -> tuple[dict[int, int], dict[int, PointResult]]:
     """Exact check of every target. Pass 1: each target from its preferred station.
     Pass 2: targets that failed there are tried from every other station."""
+    _prefetch_point(
+        checker,
+        t,
+        [(int(i), stations[int(k)]) for i, k in enumerate(preferred) if 0 <= k < len(stations)],
+        sites,
+    )
     assignment: dict[int, int] = {}
     results: dict[int, PointResult] = {}
     why: dict[int, str] = {}
@@ -99,6 +125,7 @@ def verify(
     for k in range(len(stations)):
         if not failed:
             break
+        _prefetch_point(checker, t, [(i, stations[k]) for i in failed if preferred[i] != k], sites)
         checker.set_base(sites.T(stations[k]))
         failed = [i for i in failed if preferred[i] == k or not attempt(i, k)]
     for i in failed:

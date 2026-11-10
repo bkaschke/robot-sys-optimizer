@@ -20,6 +20,7 @@ from __future__ import annotations
 import importlib
 import itertools
 import multiprocessing as mp
+import os
 import queue
 import threading
 import time
@@ -28,6 +29,7 @@ from collections.abc import Callable
 from typing import Any
 
 USE_WORKER = False
+CHECK_WORKERS = 1  # v8 T2: processes for the planner's exact checks (1 = serial; app.main: default)
 CANCEL_GRACE_S = 2.0
 IDLE_S = 300.0
 
@@ -44,6 +46,13 @@ def _resolve(target: str) -> Callable:
 
 
 def _worker_main(inbox, outbox, cancel) -> None:  # pragma: no cover - runs in the child
+    def watch_parent() -> None:  # end with the app, even when it is killed
+        parent = mp.parent_process()
+        if parent is not None:
+            parent.join()
+            os._exit(0)
+
+    threading.Thread(target=watch_parent, daemon=True).start()
     while True:
         msg = inbox.get()
         if msg is None:
@@ -70,6 +79,7 @@ class Runner:
         self.waiting = 0  # jobs waiting for the running one (shown in the status line)
         self._last = 0.0  # end of the last job (idle timer)
         self._timer: threading.Timer | None = None
+        self._atexit = False
 
     @property
     def pid(self) -> int | None:
@@ -80,9 +90,14 @@ class Runner:
             return
         self._inbox, self._outbox, self._cancel = _CTX.Queue(), _CTX.Queue(), _CTX.Event()
         self._proc = _CTX.Process(
-            target=_worker_main, args=(self._inbox, self._outbox, self._cancel), daemon=True
-        )
+            target=_worker_main, args=(self._inbox, self._outbox, self._cancel), daemon=False
+        )  # not a daemon: it may start a check pool (opt.parallel); ended at exit instead
         self._proc.start()
+        if not self._atexit:
+            import atexit
+
+            atexit.register(self.kill)
+            self._atexit = True
 
     def kill(self) -> None:
         p, self._proc = self._proc, None

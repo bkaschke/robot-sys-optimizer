@@ -134,6 +134,7 @@ class FeasibilityChecker:
     batch_ik = True  # vectorized IK for UR arms (False: the scalar path, for comparisons)
     cancelled = None  # optional () -> bool, polled once per candidate pose (Cancel within ~ms)
     memo = None  # per-plan cache of exact checks (opt.station_checks.CheckMemo), else None
+    pool = None  # v8 T2: opt.parallel.CheckPool that fills the memo ahead of serial loops
 
     def __init__(
         self,

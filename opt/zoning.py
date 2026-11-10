@@ -28,6 +28,19 @@ def _quality(r: PointResult) -> float:
     return float(r.manipulability) + 0.01 * float(r.limit_margin_deg)
 
 
+def _prefetch_configs(checker, t, index: dict, T, pids: list[int], max_poses) -> None:
+    """v8 T2: ``check_point_configs`` of these points at this stop in the checker's pool."""
+    if getattr(checker, "pool", None) is None:
+        return
+    from opt.parallel import prefetch
+
+    calls = [
+        (T, "configs", pid, t.P_part[index[pid]], t.N_part[index[pid]], t.groups[index[pid]], max_poses, True)
+        for pid in pids
+    ]
+    prefetch(checker, calls)
+
+
 def zone_solution(
     checker: FeasibilityChecker,
     t,
@@ -62,10 +75,15 @@ def zone_solution(
         # others are searched. If they can all join it, one zone is optimal; else search all.
         labels = [results[p].config for p in pids]
         major = max(set(labels), key=labels.count)
+        _prefetch_configs(
+            checker, t, index, sites.T(v), [p for p in pids if results[p].config != major], max_poses
+        )
         options: dict[int, dict[str, PointResult]] = {
             pid: {major: results[pid]} if results[pid].config == major else search(pid) for pid in pids
         }
         if not all(major in o for o in options.values()):
+            again = [pid for pid, o in options.items() if len(o) == 1 and major in o]
+            _prefetch_configs(checker, t, index, sites.T(v), again, max_poses)
             options = {pid: search(pid) if len(o) == 1 and major in o else o for pid, o in options.items()}
         chosen = min_zones({pid: {c: _quality(r) for c, r in o.items()} for pid, o in options.items()})
         final: dict[str, list[int]] = {}

@@ -196,12 +196,30 @@ def refine_station(
         s, _ = exact_station_score(checker, t, idx, sites.T(v), st.screen_poses, max_manip)
         return -s + 0.1 * w_standoff * pen
 
+    def pre(us) -> None:  # v8 T2: a batch of candidates' checks in the checker's pool
+        if getattr(checker, "pool", None) is None:
+            return
+        from opt.parallel import prefetch
+
+        calls = []
+        for u in us:
+            u = np.atleast_1d(np.asarray(u, float))[: len(names)]
+            if np.linalg.norm(u[lin_mask]) > st.refine_radius or not sites.accept(vals(u))[0]:
+                continue
+            T = sites.T(vals(u))
+            calls += [
+                (T, "point", int(t.ids[i]), t.P_part[i], t.N_part[i], t.groups[i], st.screen_poses, False)
+                for i in idx
+            ]
+        prefetch(checker, calls)
+
     if len(names) == 1:  # rail s / mobile contour t: a 1-D grid, then a finer one around the best
         r = st.refine_radius
         best_u, best_f = 0.0, f(np.zeros(1))
         for us in (np.linspace(-r, r, 9), None):
             if us is None:
                 us = best_u + np.array([-1.0, 1.0]) * r / 8
+            pre([np.array([u]) for u in us])
             for u in us:
                 if abs(u) <= r + 1e-12 and u != 0.0:
                     fu = f(np.array([u]))
@@ -216,6 +234,7 @@ def refine_station(
     best_u, best_f = np.zeros(dim), f(np.zeros(dim))
     while not es.stop():
         us = es.ask()
+        pre(us)
         fs = [f(u) for u in us]
         es.tell(us, fs)
         k = int(np.argmin(fs))

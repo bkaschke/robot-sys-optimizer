@@ -183,6 +183,16 @@ def make_areas(
     if _pieces(label0, adj) == len(np.unique(label0[label0 >= 0])):  # already one area per stop
         return dict(assignment), dict(results), []
     reach = _Reach(checker, t, stations, sites, assignment, results, hint)
+    if getattr(checker, "pool", None) is not None:  # v8 T2: every pair the growth may ask for
+        from opt.station_checks import _prefetch_point
+
+        pairs = [
+            (i, stations[k])
+            for k in range(len(stations))
+            for i in range(len(ids))
+            if (i, k) not in reach.cache and (hint is None or hint[k, i])
+        ]
+        _prefetch_point(checker, t, pairs, sites)
     base_pos = np.array([sites.T(v)[:3, 3] for v in stations])
     label = grow(reach, t.P_world, base_pos, label0, adj)
     tried: set[tuple[int, int]] = set()

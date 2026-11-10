@@ -100,6 +100,20 @@ def build_app(
             jobs.USE_WORKER = bool(worker_box.value)
 
         worker_box.on_update(set_worker)
+        workers_num = server.gui.add_number(
+            "Check worker processes",
+            jobs.CHECK_WORKERS,
+            min=1,
+            max=16,
+            step=1,
+            hint="exact checks of the station planner in parallel (1 = off); each holds a robot + scene "
+            "(~300 MB)",
+        )
+
+        def set_workers(_e=None) -> None:
+            jobs.CHECK_WORKERS = int(workers_num.value)
+
+        workers_num.on_update(set_workers)
         guide = add_guide_panel(server, guide_port)
     dark_toggle.on_update(lambda e: apply_theme(server, dark_toggle.value))
     state["worker_box"] = worker_box
@@ -335,6 +349,9 @@ def main() -> None:
     from ui import jobs
 
     jobs.USE_WORKER = True  # v8 T1: planners run in a worker process in the real app
+    from opt.parallel import default_workers
+
+    jobs.CHECK_WORKERS = default_workers()  # v8 T2
     server = viser.ViserServer(host=args.host, port=args.port, label="Robot Cell Optimizer")
     guide = None
     try:
@@ -374,6 +391,9 @@ def main() -> None:
             time.sleep(1.0)
     except KeyboardInterrupt:
         jobs.runner().stop()
+        from opt.parallel import shutdown_all
+
+        shutdown_all()
         server.stop()
         if guide is not None:
             guide.stop()
