@@ -52,7 +52,13 @@ def test_pareto_objective_on_the_rail():
         v_ref = vector(ref_m, keys)
         assert any(dominates(v, v_ref) or np.allclose(v, v_ref) for v in vs)  # the front covers it
         view = app["pareto"]
-        assert view.folder.visible and view.image is not None and "on the front" in view.note.content
+        assert view.folder.visible and "<svg" in view.chart.content and "on the front" in view.note.content
+        assert view.chart.content.count("data-plan=") == len(plans)
+        assert view.buttons is not None and len(view.buttons.options) == len(plans)
+        last = plans[-1]
+        assert view.pick(view.number(last))  # a click on that dot
+        assert app["results"].selected() is last
+        assert 'r="7"' in view.chart.content  # the selected dot is drawn larger
         st.objective_m.value = "Weighted cost"
     finally:
         server.stop()

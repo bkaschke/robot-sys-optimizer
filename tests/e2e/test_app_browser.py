@@ -147,3 +147,50 @@ def test_dark_mode_log_colours(live):
     html = b.eval("document.body.innerHTML")
     assert COLORS["error"][1] in html.lower() or COLORS["error"][1].upper() in html
     app["dark_toggle"].value = False
+
+
+def test_pareto_dot_click_selects_plan(live):
+    """A real mouse click on a dot of the Results -> Pareto front chart selects that plan."""
+    app, _server, _client, b, _canvas = live
+    from core.schema import Solution, Station
+
+    s, results, view = app["session"], app["results"], app["pareto"]
+    old = list(s.results)
+    s.results = [
+        Solution(
+            label=f"Pareto {i}/3: test",
+            stations=[Station(xyz=(0.0, -1.0, 0.0))] * i,
+            cycle_s=100.0 - 20 * i,
+            cost=float(i),
+        )
+        for i in (1, 2, 3)
+    ]
+    try:
+        results.refresh()
+        view.refresh()
+        assert results.selected() is s.results[0]
+        tab = b.eval(  # viser's tabs switch on a real mouse press, not element.click()
+            "(()=>{const t=[...document.querySelectorAll('[role=tab]')].find(e=>/Results$/.test("
+            "e.textContent.trim()));const r=t.getBoundingClientRect();"
+            "return [r.left+r.width/2,r.top+r.height/2]})()"
+        )
+        b.click(tab[0], tab[1])
+        settle(2.0)
+        r = b.eval(
+            "(()=>{const g=document.querySelector('g[data-plan=\"3\"]');if(!g)return null;"
+            "g.scrollIntoView({block:'center'});const c=g.querySelector('circle').getBoundingClientRect();"
+            "return [c.left+c.width/2,c.top+c.height/2]})()"
+        )
+        assert r is not None, "Pareto chart not rendered"
+        settle(0.5)
+        r = b.eval(
+            "(()=>{const c=document.querySelector('g[data-plan=\"3\"] circle').getBoundingClientRect();"
+            "return [c.left+c.width/2,c.top+c.height/2]})()"
+        )
+        b.click(r[0], r[1])
+        settle(2.0)
+        assert results.selected() is s.results[2]
+    finally:
+        s.results = old
+        results.refresh()
+        view.refresh()

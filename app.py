@@ -274,7 +274,10 @@ def build_app(
                 if sol.tool_values is not None and session.tool_model is not None
                 else None
             ),
+            select=results.select_solution,  # a click on a dot selects the plan
+            picked=results.selected,
         )
+        results.chosen_listeners.append(pareto.refresh)
     state["results"] = results
     tool_opt.planner_options = stations.options
     workflow.gate(stations.run, stations.gate_md)  # optimizers need a confirmed setup (T5)

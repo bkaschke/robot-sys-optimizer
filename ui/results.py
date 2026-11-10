@@ -42,6 +42,7 @@ class ResultsTab:
         self._used: set[int] = set()
         self._areas: list = []  # station areas painted on the part
         self._busy = False
+        self.chosen_listeners: list = []  # () -> None after the user picks another plan
         gui = server.gui
         self.card = gui.add_markdown("")  # v7 round 2 (T17): summary card of the selected plan
         self.choice = gui.add_dropdown("Solution", ("(none)",))
@@ -92,9 +93,21 @@ class ResultsTab:
         i = int(np.clip(labels.index(self.choice.value) + delta, 0, len(labels) - 1))
         self.choice.value = labels[i]  # fires _chosen
 
+    def select_solution(self, sol) -> bool:
+        """Make ``sol`` the selected plan (as if picked in the list; Pareto chart clicks)."""
+        if sol not in self.s.results:
+            return False
+        label = self._label(self.s.results.index(sol), sol)
+        if self.choice.value == label:
+            return True
+        self.choice.value = label  # fires _chosen
+        return True
+
     def _chosen(self) -> None:
         """The user picked another plan: draw it, optionally move the robot to its first stop."""
         self.draw()
+        for fn in self.chosen_listeners:
+            fn()
         sol = self.selected()
         if sol is not None and self.follow.value:
             self.go_to_station(sol, 0)
