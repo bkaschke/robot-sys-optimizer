@@ -33,6 +33,7 @@ SAVED: dict[str, tuple[str, ...]] = {
         "point_size",
         "show_unreached",
     ),
+    "targets.heat": ("choice",),  # v8 T8
     "targets.tools": ("row", "col", "row_dir", "radius", "max_angle", "max_edge"),
     "optimize": ("clearance", "joint_margin", "check_from"),
     "objects": ("gizmo_size", "gizmo_top"),
@@ -56,6 +57,7 @@ SAVED: dict[str, tuple[str, ...]] = {
     "results": ("choice", "show_lines", "show_ghosts", "show_areas"),
     "results.export": ("screenshot",),
     "sim": (
+        "motion",
         "step",
         "jump",
         "pattern",

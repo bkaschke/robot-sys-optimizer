@@ -130,6 +130,9 @@ class TargetsTab:
             self.color_by = gui.add_dropdown(
                 "Color points by", ("group", "feasibility", "zone", "configuration")
             )
+            from ui.part_heatmap import HeatmapLayer
+
+            self.heat = HeatmapLayer(gui, self)  # v8 T8: Colour part by
             self.show_normals = gui.add_checkbox("Show normals", True)
             self.normal_len = gui.add_number("Normal length (mm)", 20.0, min=1.0, step=1.0)
             self.point_size = gui.add_number("Point size (mm)", 4.0, min=0.5, step=0.5)
@@ -428,6 +431,7 @@ class TargetsTab:
         self.sel_info.content = f"Selected: {n} faces, {area:.1f} cm²" if n else "_Nothing selected._"
 
     def _draw_points(self) -> None:
+        self.heat.draw()  # v8 T8: the part's colours follow the selected plan too
         for key in ["points", "normals", *(k for k in self._handles if k.startswith("unreached"))]:
             self._drop(key)
         ids, P, N, G = tg.as_arrays(self.s.targets)

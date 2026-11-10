@@ -329,8 +329,8 @@ including what was not verified in a browser.
 | T4 | done | `opt/methods.py`, `ui/method_picker.py`; guide search (headless Edge test finds CMA-ES, filters the sidebar, Enter / Esc, `?q=`); app *Search the guide* box + link |
 | T5 | done | `opt/tolerance.py`, `ui/tolerance_ui.py` (**in the Results tab**, not Optimize: it needs a selected plan), `plan_job.tolerance_job` (worker + pool; pool calls carry the sample's part pose). Margin = nominal clearance / joint margin / manipulability + per point *fails from* (displacement of the smallest failing sample) instead of a distance to the map's workspace boundary. The rail example keeps every point at ±150 mm / 8° (it fails from ~1 m): the test uses larger offsets through the job |
 | T6 | done | `core/cycle_time.py` (trapezoids, synchronized joint moves capped by URDF velocity limits, `plan_estimate`, `path_time`), `opt.cost.cycle_estimate`, `Weights.cycle` (per minute, default 0), `Solution.cycle_s`, Optimize → *Cycle time* speeds (`ui/cycle_ui.py`, `s.cycle`, saved), card row, path build line. No carrier speed fields in the schema (panel settings instead); the reduced-speed zones of T18 are not part of it yet |
-| T7 | todo | |
-| T8 | todo | |
+| T7 | done | `core/motion_check.py` (joint interpolation every 2°, issue `motion` on the move's end sample; carrier moves stay with the carrier planner), Results → *Check moves between points* (default on). Surface moves are checked in joint space too (samples a few mm apart): no Cartesian re-interpolation. Examples: see below |
+| T8 | done | `ui/part_heatmap.py` in Targets → Display (*Colour part by*): clearance, manipulability, joint-limit margin, tolerance reach rate; 10 colour bins, legend. *Configurations found* replaced by *Joint-limit margin* (counting configurations needs an extra search per point) |
 | T9 | todo | |
 | T10 | todo | |
 | T11 | todo | |

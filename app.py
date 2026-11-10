@@ -245,6 +245,7 @@ def build_app(
         from ui.tolerance_ui import TolerancePanel
 
         tolerance = TolerancePanel(server, session, results.selected)  # v8 T5
+        tolerance.on_done = lambda: targets.heat.draw()  # v8 T8: Colour part by -> tolerance
     state["results"] = results
     tool_opt.planner_options = stations.options
     workflow.gate(stations.run, stations.gate_md)  # optimizers need a confirmed setup (T5)
