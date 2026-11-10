@@ -326,7 +326,7 @@ including what was not verified in a browser.
 | T1 | done | `ui/jobs.py` (one persistent spawn worker, Cancel event + kill after 2 s, idle 5 min), `ui/plan_job.py` (station plan incl. quick / rules, tool optimizer). Worker plan = in-process plan on rail_long_part (test). Feasibility check / heatmap / paths stay in their threads (short runs; T5 / T9 studies use the worker) |
 | T2 | done | `opt/parallel.py`: pool fills the plan's `CheckMemo` (`prefetch`) before verify, localization, zoning, refinement batches, station areas: identical plans on rail_long_part (test). gantry_overhead 113.8 s serial -> 87.6 s (pool start included) -> 77.4 s with the pool reused; rail / mobile (25 pts) gain nothing (pool start ~10 s). The 2x zoning target holds only on big point sets; CP-SAT (24 s on the gantry) stays serial. Default 4 workers (16 GB PC). `Carrier.axis_follow` -> `AxisFollow` class (closures don't pickle) |
 | T3 | **dropped (measured)** | CoACD convex parts: same reach on all 5 examples (their parts are 12-face boxes, 1 piece), but on dense meshes **slower**: curved_panel 55k faces -> 14 pieces, 175 s to decompose, 0.82 vs 0.67 ms per `collides`; deep_hole 207k -> 39 pieces, 295 s, 1.17 vs 0.59 ms. Coal's BVH already handles dense parts; robot self / carrier pairs dominate. SDF clearance not done: `part_clearance` is ~7 % of plan time and an SDF needs dense robot sampling to stay within 1 mm. `coacd` removed from the env again |
-| T4 | todo | |
+| T4 | done | `opt/methods.py`, `ui/method_picker.py`; guide search (headless Edge test finds CMA-ES, filters the sidebar, Enter / Esc, `?q=`); app *Search the guide* box + link |
 | T5 | todo | |
 | T6 | todo | |
 | T7 | todo | |

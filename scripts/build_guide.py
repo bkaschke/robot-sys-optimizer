@@ -3,8 +3,9 @@
     python scripts/build_guide.py          # writes docs/USER_GUIDE.html
     python scripts/build_guide.py --check  # exit 1 if the HTML is out of date
 
-The page is self-contained (inline CSS + a few lines of JS for the theme button), with a
-sidebar of sections, GitHub-style heading anchors (so the guide's own contents links
+The page is self-contained (inline CSS + a few lines of JS for the theme button and the search
+box: v8 T4, filters the sidebar, highlights matches, Enter / Shift+Enter jump, Esc clears,
+``/`` focuses it, ``?q=word`` searches on load), with a sidebar of sections, GitHub-style heading anchors (so the guide's own contents links
 work), light/dark styling that follows the system with a manual toggle, and print styles.
 The app serves it on --port + 1 and links to it from the top of the panel.
 """
@@ -49,6 +50,44 @@ blockquote{margin:12px 0;padding:4px 14px;border-left:3px solid var(--accent);co
 @media (max-width:860px){nav{position:static;width:auto;border-right:0;border-bottom:1px solid var(--line)}
 main{margin-left:0;padding:16px}}
 @media print{nav{display:none}main{margin:0;max-width:none}a{color:inherit}}
+#search{width:100%;font:inherit;padding:6px 9px;margin:0 0 6px;border:1px solid var(--line);border-radius:6px;
+background:var(--bg);color:var(--fg)}#search:focus{outline:2px solid var(--accent);outline-offset:-1px}
+#hits{color:var(--muted);font-size:12px;min-height:16px;margin-bottom:8px}
+mark.hit{background:#ffe066;color:#1d1f23;border-radius:2px;padding:0 1px}mark.hit.cur{background:#ff9f1c}
+nav a.hide{display:none}
+@media print{mark.hit{background:none;color:inherit}}
+"""
+
+SEARCH_JS = """
+(function(){var box=document.getElementById('search'),out=document.getElementById('hits'),
+main=document.querySelector('main'),links=[].slice.call(document.querySelectorAll('nav a[href^="#"]')),
+heads=[].slice.call(main.querySelectorAll('h1,h2,h3')),marks=[],cur=-1,timer=null;
+function clear(){var parents=[];marks.forEach(function(m){var p=m.parentNode;p.replaceChild(document.createTextNode(m.textContent),m);
+if(parents.indexOf(p)<0)parents.push(p)});parents.forEach(function(p){p.normalize()});marks=[];cur=-1;
+links.forEach(function(a){a.classList.remove('hide')});out.textContent=''}
+function sectionOf(node){var h=null;for(var i=0;i<heads.length;i++){
+if(heads[i].compareDocumentPosition(node)&Node.DOCUMENT_POSITION_FOLLOWING)h=heads[i];else break}return h}
+function run(q){clear();q=(q||'').trim();if(q.length<2)return;var lq=q.toLowerCase(),nodes=[],
+w=document.createTreeWalker(main,NodeFilter.SHOW_TEXT,null);
+while(w.nextNode())nodes.push(w.currentNode);
+nodes.forEach(function(n){var t=n.nodeValue,lt=t.toLowerCase(),i=lt.indexOf(lq);if(i<0)return;
+var frag=document.createDocumentFragment(),last=0;while(i>=0){frag.appendChild(document.createTextNode(t.slice(last,i)));
+var m=document.createElement('mark');m.className='hit';m.textContent=t.slice(i,i+q.length);frag.appendChild(m);marks.push(m);
+last=i+q.length;i=lt.indexOf(lq,last)}frag.appendChild(document.createTextNode(t.slice(last)));n.parentNode.replaceChild(frag,n)});
+var ids={};marks.forEach(function(m){var h=m.closest('h1,h2,h3')||sectionOf(m);if(h&&h.id){ids[h.id]=1;
+var k=heads.indexOf(h);if(h.tagName==='H3')for(var j=k;j>=0;j--)if(heads[j].tagName==='H2'){ids[heads[j].id]=1;break}}});
+links.forEach(function(a){if(!ids[a.getAttribute('href').slice(1)])a.classList.add('hide')});
+out.textContent=marks.length?'':'no matches';if(marks.length)go(0)}
+function go(k){if(!marks.length)return;if(cur>=0)marks[cur].classList.remove('cur');cur=(k+marks.length)%marks.length;
+marks[cur].classList.add('cur');marks[cur].scrollIntoView({block:'center'});
+out.textContent=(cur+1)+' / '+marks.length+' · Enter = next, Shift+Enter = previous, Esc = clear'}
+box.addEventListener('input',function(){clearTimeout(timer);timer=setTimeout(function(){run(box.value)},150)});
+box.addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();if(!marks.length)run(box.value);
+else go(cur+(e.shiftKey?-1:1))}else if(e.key==='Escape'){box.value='';clear()}});
+document.addEventListener('keydown',function(e){if(e.key==='/'&&document.activeElement!==box){e.preventDefault();box.focus()}});
+var q=new URLSearchParams(location.search).get('q');if(q){box.value=q;run(q)}
+window.rsoGuideSearch=function(q){run(q);return marks.length};
+})();
 """
 
 JS = """
@@ -96,10 +135,13 @@ def render(md_text: str) -> str:
         "<!doctype html>\n<html lang='en'><head><meta charset='utf-8'>"
         "<meta name='viewport' content='width=device-width,initial-scale=1'>"
         f"<title>{html.escape(title)}</title><style>{CSS}</style></head><body>\n"
-        f"<nav><div class='title'>{html.escape(title)}</div>{nav}"
+        f"<nav><div class='title'>{html.escape(title)}</div>"
+        "<input id='search' type='search' placeholder='Search the guide  ( / )' aria-label='Search the guide'"
+        " autocomplete='off'><div id='hits'></div>"
+        f"{nav}"
         "<button id='theme' type='button'>Dark mode</button></nav>\n"
         f"<main>\n{body}\n<p class='footer'>Generated from docs/USER_GUIDE.md by scripts/build_guide.py.</p>"
-        f"</main>\n<script>{JS}</script>\n</body></html>\n"
+        f"</main>\n<script>{JS}{SEARCH_JS}</script>\n</body></html>\n"
     )
 
 

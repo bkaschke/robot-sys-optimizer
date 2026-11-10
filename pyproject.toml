@@ -6,7 +6,10 @@ requires-python = ">=3.11,<3.14"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
-markers = ["slow: full plans, tool optimization, path builds (skipped by test_batches.py --fast)"]
+markers = [
+    "slow: full plans, tool optimization, path builds (skipped by test_batches.py --fast)",
+    "e2e: headless Edge browser tests (tests/e2e; test_batches.py --e2e)",
+]
 
 [tool.ruff]
 line-length = 110

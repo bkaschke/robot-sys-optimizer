@@ -77,12 +77,18 @@ class GuideServer:
         self.httpd.server_close()
 
 
-def link_html(port: int) -> str:
-    fallback = f"http://localhost:{port}/"
-    js = f"this.href=location.protocol+'//'+location.hostname+':{port}/'"
+def link_html(port: int, query: str = "") -> str:
+    """Link to the guide; with ``query`` it opens the guide searching for it (v8 T4)."""
+    from html import escape
+    from urllib.parse import quote
+
+    q = f"?q={quote(query)}" if query else ""
+    fallback = f"http://localhost:{port}/{q}"
+    js = f"this.href=location.protocol+'//'+location.hostname+':{port}/{q}'"
+    label = f"🔎 Search the guide for “{escape(query)}”" if query else "📖 Open user guide"
     return (
         f'<div style="padding:2px 0 6px"><a href="{fallback}" target="_blank" rel="noopener" '
-        f'onclick="{js}" style="font-weight:600">📖 Open user guide</a> '
+        f'onclick="{js}" style="font-weight:600">{label}</a> '
         f'<span style="opacity:.6;font-size:12px">(new tab, port {port})</span></div>'
     )
 
@@ -94,6 +100,18 @@ def add_guide_panel(server: viser.ViserServer, port: int | None) -> dict:
     with server.gui.add_folder("User guide", expand_by_default=False):
         if port is not None:
             out["link"] = server.gui.add_html(link_html(port))
+            out["search"] = box = server.gui.add_text(
+                "Search the guide",
+                "",
+                hint="type a word, then open the link below (Enter in the guide = next)",
+            )
+            out["search_link"] = link = server.gui.add_html("")
+
+            @box.on_update
+            def _(_e) -> None:
+                q = box.value.strip()
+                link.content = link_html(port, q) if q else ""
+
         out["download"] = btn = server.gui.add_button("Download user guide (HTML)")
 
     @btn.on_click

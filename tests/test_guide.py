@@ -26,7 +26,7 @@ def test_every_internal_link_has_a_target():
     ids = set(re.findall(r' id="([^"]+)"', page))
     hrefs = set(re.findall(r'href="#([^"]+)"', page))
     assert hrefs and hrefs <= ids, hrefs - ids
-    assert "<script>" in page and page.count("<script") == 1  # only the theme toggle
+    assert "<script>" in page and page.count("<script") == 1  # theme toggle + search (v8 T4), one tag
     assert "src=" not in page and "<link" not in page  # self-contained
 
 
