@@ -220,6 +220,33 @@ class ObjectsPanel:
         if self.slowzones is not None:
             self.slowzones.drag.value = g == "Reduced-speed zone" and self.slowzones.index() is not None
 
+    def step_confirmed(self, step: str) -> None:
+        """A setup step was confirmed (ui.workflow ``on_confirmed``): its objects' drag gizmos go
+        off, so nothing confirmed moves by accident; *Drag gizmo on* (or Move…) turns one back on
+        deliberately."""
+        from ui.workflow import STEP_GIZMOS, STEPS
+
+        off = False
+        if self.gizmo.value in STEP_GIZMOS.get(step, ()):
+            self.gizmo.value = "none"  # apply_gizmo: base, part, zone, mount handles off
+            off = True
+        if step == "Cell":
+            for p in (self.stayouts, self.slowzones):
+                if p is not None:
+                    off |= bool(p.drag.value)
+                    p.drag.value = False
+        if step == "Tool Setup" and self.tool is not None:
+            off |= bool(self.tool.mount.show.value or self.tool.tcp_pose.show.value)
+            self.tool.mount.show.value = False
+            self.tool.tcp_pose.show.value = False
+        if off:
+            from ui.log_panel import log
+
+            log(
+                f"Step {STEPS.index(step) + 1} confirmed: its drag gizmos are off "
+                "(Objects → Drag gizmo on turns one back on)."
+            )
+
     # --- jog -----------------------------------------------------------------------------------------
 
     def jog(self, axis: str, sign: float) -> str:

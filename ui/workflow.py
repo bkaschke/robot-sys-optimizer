@@ -22,6 +22,12 @@ from ui.session import Session
 from ui.staleness import STEP_COMPONENTS, confirm_step, feasibility_changes, solution_changes, step_state
 
 STEPS = tuple(STEP_COMPONENTS)  # setup steps, in tab order
+# the drag gizmos (Objects -> Drag gizmo on) of each setup step: off once the step is confirmed
+STEP_GIZMOS = {
+    "Cell": ("Robot base", "Part", "Stay-out zone", "Reduced-speed zone"),
+    "External Axis": ("Carrier body",),
+    "Tool Setup": ("Tool mount",),
+}
 TITLES = {
     "Cell": "Robot & cell",
     "External Axis": "External axis",
@@ -107,6 +113,8 @@ class Workflow:
         self.hooks: list = []  # extra callables run by the watcher (e.g. object visibility)
         self.gates: list[tuple] = []  # (run button, reason markdown): disabled until setup is confirmed
         self.listeners: list = []  # () -> None after every refresh (e.g. Tool geometry's Confirm tool)
+        self.on_confirmed: list = []  # (step) -> None when a step becomes confirmed (gizmos off)
+        self._states: dict = {}  # step -> state at the last refresh
 
     # --- widgets (created inside each tab, before its panel) ------------------------------------
 
@@ -165,6 +173,20 @@ class Workflow:
     # --- state -> widgets ---------------------------------------------------------------------
 
     def refresh(self, force: bool = False) -> None:
+        with self._lock:
+            states = {st: step_state(self.s, st) for st in STEPS}
+            became = [st for st in STEPS if states[st] == "confirmed" and self._states.get(st) != "confirmed"]
+            self._states = states
+        for st in became:  # outside the lock: the hooks change widgets
+            for fn in self.on_confirmed:
+                fn(st)
+        self._refresh(force)
+
+    def forget_states(self) -> None:
+        """After a project load: its confirmed steps count as newly confirmed (gizmos off)."""
+        self._states = {}
+
+    def _refresh(self, force: bool = False) -> None:
         with self._lock:
             s = self.s
             states = {st: step_state(s, st) for st in STEPS}

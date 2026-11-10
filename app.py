@@ -48,17 +48,16 @@ def apply_theme(server: viser.ViserServer, dark: bool) -> None:
     from ui import log_panel
 
     log_panel.set_dark(dark)  # the log's row colours follow the theme
-    # grid lines: light on a dark background, grey on a light one
-    cell, section = ((80, 84, 92), (120, 126, 138)) if dark else ((200, 200, 200), (140, 140, 140))
-    server.scene.add_grid(
-        "/world/grid",
-        width=10.0,
-        height=10.0,
-        cell_size=0.1,
-        section_size=1.0,
-        cell_color=cell,
-        section_color=section,
-    )
+    floor_grid(server).draw(dark)  # grid lines: light on a dark background, grey on a light one
+
+
+def floor_grid(server: viser.ViserServer):
+    """The server's floor grid (ui.floor.FloorGrid: sized to the cell)."""
+    from ui.floor import FloorGrid
+
+    if getattr(server, "_rso_floor", None) is None:
+        server._rso_floor = FloorGrid(server)
+    return server._rso_floor
 
 
 def build_app(
@@ -128,10 +127,12 @@ def build_app(
         state["carrier"].refresh()
         state["results"].refresh()
         restore_work()
+        state["workflow"].forget_states()  # the loaded project's confirmed steps: gizmos off
         state["workflow"].refresh(force=True)
         state["sim"].reset("another project was opened")
         state["tool_opt"].update_hint()
         state["cable"].follow_robot()  # the robot view was rebuilt: redraw the hose on it
+        state["floor"].update(session)  # the floor fits the new cell
 
     def restore_work() -> None:
         """Bring back where the user left off: selection, then panel settings."""
@@ -330,6 +331,8 @@ def build_app(
     tool_opt.confirm_tool = lambda: workflow.confirm("Tool Setup")
     tool_opt.tool_state = lambda: step_state(session, "Tool Setup")
     workflow.listeners.append(tool_opt.update_confirm)  # its Confirm tool follows the step's state
+
+    workflow.on_confirmed.append(objects.step_confirmed)  # its drag gizmos go off
     objects.cell, objects.carrier, objects.tool = cell, carrier, tool
     objects.targets, objects.results, objects.sim = targets, results, sim
     objects.stayouts, objects.slowzones = stayouts, slowzones
@@ -368,6 +371,7 @@ def build_app(
         workflow.hooks.append(sim.check_targets)  # paths are cleared when the targets change
         workflow.hooks.append(clear_stale)  # and plans when the part, tool or targets change
         workflow.hooks.append(cable.follow_robot)  # the hose follows a robot change
+        workflow.hooks.append(lambda: floor_grid(server).update(session))  # floor fits the cell
         workflow.start_watch()
     server.gui.add_markdown(UR_NOTICE)
 
@@ -391,6 +395,7 @@ def build_app(
         pareto=pareto,
         cable=cable,
         tool_ext_copy=tool_ext_copy,
+        floor=floor_grid(server),
         safety=safety,
         project=project,
         dark_toggle=dark_toggle,
