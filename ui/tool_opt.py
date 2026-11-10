@@ -54,6 +54,12 @@ class ToolOptPanel:
 
             self.shape = MethodPicker(gui, "tool_shape", "Shape search")  # v8 T10
             self.start_shape = MethodPicker(gui, "tool_start", "Start shape")  # v8 T15
+            self.family = gui.add_text(  # v8 T16
+                "Part family (folders)",
+                "",
+                hint="other project folders, separated by ;  the tool must work on their parts too",
+            )
+            self.family_cost = gui.add_dropdown("Family cost", ("sum", "worst"), hint="over all the parts")
             self.loop = MethodPicker(gui, "tool_loop", "Tool and stations")  # v8 T13
             self.tolerance_settings = None  # app.py: Results -> Tolerance check offsets (T12)
             self.objective = MethodPicker(gui, "tool_objective", "Objective")  # v8 T11 / T12
@@ -189,7 +195,9 @@ class ToolOptPanel:
             "weights": self.costs.commit(),  # the tool optimizer's own cost weights
             "max_stations": int(self.max_stations.value),
             "st": st,
+            "family_dirs": [d.strip() for d in self.family.value.split(";") if d.strip()],
         }
+        st.family_cost = self.family_cost.value
         if self.on_start is not None:
             self.on_start()
         self._cancel.clear()

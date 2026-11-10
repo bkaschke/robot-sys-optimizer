@@ -22,18 +22,12 @@ from pathlib import Path
 import numpy as np
 import trimesh
 
-from core.collision import CollisionScene
-from core.feasibility import CancelledError, CheckSettings, FeasibilityChecker, PointResult
-from core.ik import make_ik
+from core.feasibility import CancelledError, PointResult
 from core.robot import Robot
-from core.schema import EndEffector, ExtensionValues, Solution, Weights, length_ref
-from core.tool import ToolModel
-from opt.cost import cost_breakdown
-from opt.placement import PlannerSettings, Targets, plan_stations, verify
-from opt.reachability import map_for_tool
-from opt.sites import FloorSites
+from core.schema import EndEffector, ExtensionValues, Solution, Weights
+from opt.placement import PlannerSettings, Targets
 
-SHAPE_VARS = ("theta_deg", "d", "roll_deg")
+SHAPE_VARS = ("theta_deg", "d", "roll_deg", "theta2_deg", "d2")
 
 
 @dataclass
@@ -46,8 +40,25 @@ class GeometrySettings:
     pareto_keys: tuple = ("length", "stations", "cycle")
     loop: str = "fixed"  # v8 T13: "fixed" | "alternate" (opt.methods tool_loop)
     start: str = "nominal"  # v8 T15: "nominal" | "cones" (opt.methods tool_start)
+    family: list = field(default_factory=list)  # v8 T16: FamilyPart of the other parts
+    family_cost: str = "sum"  # "sum" | "worst" over the parts
     robust: dict | None = None  # v8 T12: {"tolerance": ToleranceSettings, "measure": str}
     planner: PlannerSettings = field(default_factory=lambda: PlannerSettings(refine_evals=12))
+
+
+@dataclass
+class FamilyPart:
+    """Another part the tool must also work on (v8 T16, part family): its cell, in the frames of
+    its own project."""
+
+    part: trimesh.Trimesh
+    T_part: np.ndarray
+    T_base0: np.ndarray
+    t: Targets
+    fp: np.ndarray | None
+    sites: object = None
+    obstacles: list = field(default_factory=list)
+    label: str = ""
 
 
 @dataclass
@@ -106,146 +117,7 @@ class GeometryResult:
     designs: list[Design] = field(default_factory=list)  # best few, best first (may miss points)
 
 
-class _Evaluator:
-    """Builds per-geometry scenes; the head meshes are loaded once and the ee swapped."""
-
-    seen: list = []  # (values, solution, results, feasible, tool length) of every evaluation
-
-    def __init__(
-        self,
-        robot: Robot,
-        ee: EndEffector,
-        urdf: Path | None,
-        part: trimesh.Trimesh,
-        T_world_part: np.ndarray,
-        T_world_base0: np.ndarray,
-        targets: Targets,
-        footprint: np.ndarray | None,
-        weights: Weights,
-        max_stations: int,
-        st: GeometrySettings,
-        sites=None,
-    ):
-        self.robot, self.ee, self.part = robot, ee, part
-        self.sites = sites  # None = free floor (opt.sites.FloorSites)
-        self.T_part, self.T_base0 = T_world_part, T_world_base0
-        self.t, self.fp, self.w = targets, footprint, weights
-        self.max_stations, self.st = max_stations, st
-        self.tm = ToolModel(ee, urdf)
-        self.ik = make_ik(robot)
-        self.tcp = ee.tcps[0].name
-        self.L_ref = length_ref(ee.extension)
-        self.max_manip = 1.0  # set from the reachability map on the first plan
-        self.cancelled: Callable[[], bool] | None = None  # polled by every exact check
-        self.obstacles: list = []  # stay-out zones (name, mesh, T_world)
-
-    def tool(self, v: ExtensionValues) -> ToolModel:
-        self.tm.ee = self.ee.model_copy(
-            update={"extension": self.ee.extension.model_copy(update={"nominal": v})}
-        )
-        return self.tm
-
-    def checker(self, v: ExtensionValues) -> FeasibilityChecker:
-        tm = self.tool(v)
-        bb, wb = self.sites.scene_bodies() if hasattr(self.sites, "scene_bodies") else ([], [])
-        scene = CollisionScene(
-            self.robot,
-            tm,
-            self.part,
-            self.T_base0,
-            self.T_part,
-            base_bodies=bb,
-            world_bodies=wb,
-            obstacles=self.obstacles,
-        )
-        checker = FeasibilityChecker(
-            self.robot, self.ik, tm, scene, self.T_base0, self.T_part, CheckSettings()
-        )
-        checker.cancelled = self.cancelled
-        return checker
-
-    def plan(self, v: ExtensionValues, cancelled=None, refine: bool | None = None):
-        checker = self.checker(v)
-        pose = self.ee.extension.type == "pose"  # any TCP offset: shared flange map, no build
-        rmap = map_for_tool(self.robot, self.tm.T_flange_tcp(self.tcp), cancelled=cancelled, any_offset=pose)
-        self.max_manip = rmap.max_manip
-        extra = {} if refine is None else {"refine": refine}
-        ps = PlannerSettings(**{**self.st.planner.__dict__, "max_stations": self.max_stations, **extra})
-        out = plan_stations(
-            rmap,
-            checker,
-            self.t,
-            self.T_base0,
-            self.fp,
-            self.w,
-            ps,
-            self.tm.length(v),
-            self.L_ref,
-            cancelled=cancelled,
-            sites=self.sites,
-        )
-        full = [(s, r) for s, r in out if not s.unreached and len(s.stations) <= self.max_stations]
-        for s_, r_ in out:  # v8 T11: every plan is a candidate for a Pareto front
-            self.seen.append((v, s_, r_, not s_.unreached, self.tm.length(v)))
-        if full:
-            return True, *min(full, key=lambda sr: sr[0].cost)
-        if out:
-            return False, *min(out, key=lambda sr: (len(sr[0].unreached), sr[0].cost))
-        return False, None, {}
-
-    def cost_at_stations(self, v: ExtensionValues, sol: Solution) -> tuple[float, Solution, dict]:
-        checker = self.checker(v)
-        xy = np.array([s.xyz[:2] for s in sol.stations])
-        sites = self.sites or FloorSites(self.T_base0, self.fp, self.st.planner.footprint_margin, 0.0)
-        if sites.kind == "floor":
-            stations = [{"x": s.xyz[0], "y": s.xyz[1]} for s in sol.stations]
-        else:
-            stations = [{d: s.carrier[d] for d in sites.dofs if d in s.carrier} for s in sol.stations]
-        pref = np.array([sol.assignment.get(int(i), 0) for i in self.t.ids])
-        assignment, res = verify(checker, self.t, stations, sites, pref)
-        zones, changes = [], 0
-        from opt.zoning import zone_counts
-
-        if self.st.planner.zoning:
-            from opt.zoning import zone_solution
-
-            zones, changes = zone_solution(
-                checker, self.t, stations, sites, assignment, res, self.st.planner.zoning_poses
-            )
-        unreached = sorted(p for p, r in res.items() if r.status == "unreachable")
-        from opt.zoning import arm_motion, config_changes, stop_sequences
-
-        seqs = stop_sequences(checker, self.t, assignment, res, zones)
-        groups = zone_counts(zones)[0] if zones else config_changes(seqs)
-        from opt.cost import cycle_estimate
-
-        cyc = cycle_estimate(seqs, res, stations, sites, checker.robot, self.st.planner.cycle)["total"]
-        cost, terms = cost_breakdown(
-            list(res.values()),
-            len(unreached),
-            xy,
-            self.w,
-            self.tm.length(v),
-            self.L_ref,
-            self.max_manip,
-            groups=groups,
-            wrist_flips=zone_counts(zones)[1],
-            motion=arm_motion(seqs, res),
-            cycle_s=cyc,
-        )
-        new = sol.model_copy(
-            update={
-                "assignment": assignment,
-                "unreached": unreached,
-                "cost": cost,
-                "breakdown": terms,
-                "tool_values": v,
-                "zones": zones,
-                "cycle_s": round(cyc, 1),
-            }
-        )
-        self.seen.append((v, new, res, not new.unreached, self.tm.length(v)))
-        return cost, new, res
+from opt.tool_eval import _Evaluator  # noqa: E402, F401  (v8: split out)
 
 
 def optimize_tool(*args, **kw) -> GeometryResult:
@@ -325,6 +197,13 @@ def _optimize_tool(
     ev.seen = seen if seen is not None else []  # v8 T11: every evaluated design
     if holder is not None:
         holder["ev"] = ev
+    ev.family = []
+    for f in st.family:  # v8 T16: the same tool on other parts (their own cell and targets)
+        other = _Evaluator(
+            robot, ee, urdf, f.part, f.T_part, f.T_base0, f.t, f.fp, weights, max_stations, st, sites=f.sites
+        )
+        other.cancelled, other.obstacles, other.seen, other.family = cancelled, list(f.obstacles), [], []
+        ev.family.append(other)
     x = ee.extension
     if x.type == "pose":  # v2: head pose x y z rx ry rz, best overall cost (opt.tool_pose)
         from opt.tool_pose import POSE_KEYS, optimize_pose, pose_label
@@ -340,6 +219,8 @@ def _optimize_tool(
         L=x.nominal.L,
         theta_deg=float(np.clip(0.0, *x.theta_deg)),
         d=float(np.clip(0.0, *x.d)),
+        theta2_deg=float(np.clip(0.0, *x.theta2_deg)),
+        d2=float(np.clip(0.0, *x.d2)),
         roll_deg=x.nominal.roll_deg,
     )
     n = len(targets.ids)
@@ -409,7 +290,12 @@ def _optimize_tool(
     active = [
         k
         for k in SHAPE_VARS
-        if getattr(x, k)[1] - getattr(x, k)[0] > 1e-9 and (k == "roll_deg" or x.type == "bent")
+        if getattr(x, k)[1] - getattr(x, k)[0] > 1e-9
+        and (
+            k == "roll_deg"
+            or (x.type in ("bent", "bent2") and k in ("theta_deg", "d"))
+            or (x.type == "bent2" and k in ("theta2_deg", "d2"))
+        )
     ]
     if active and st.shape_evals > 0 and not (cancelled is not None and cancelled()):
         bounds = np.array([getattr(x, k) for k in active], float)

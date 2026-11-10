@@ -10,9 +10,9 @@ from __future__ import annotations
 
 import numpy as np
 
-from core.schema import LEGACY_KEYS, POSE_KEYS
+from core.schema import BENT2_KEYS, LEGACY_KEYS, POSE_KEYS
 
-TYPES = ("pose", "straight", "bent")
+TYPES = ("pose", "straight", "bent", "bent2")
 # key: (label, GUI unit per SI unit)
 FIELDS = {
     "L": ("L", 1000.0),
@@ -25,6 +25,8 @@ FIELDS = {
     "rx_deg": ("rx / W", 1.0),
     "ry_deg": ("ry / P", 1.0),
     "rz_deg": ("rz / R", 1.0),
+    "theta2_deg": ("θ2", 1.0),
+    "d2": ("d2", 1000.0),
 }
 
 
@@ -57,7 +59,7 @@ def widgets(tab) -> tuple:
 
 
 def keys_for(kind: str) -> tuple[str, ...]:
-    return POSE_KEYS if kind == "pose" else LEGACY_KEYS
+    return POSE_KEYS if kind == "pose" else BENT2_KEYS if kind == "bent2" else LEGACY_KEYS
 
 
 def commit(tab, d: dict) -> None:
@@ -70,8 +72,10 @@ def commit(tab, d: dict) -> None:
     else:
         for key in keys_for(kind):
             x[key] = tuple(v / FIELDS[key][1] for v in tab.ext_ranges[key].value)
-    if kind != "bent":
+    if kind not in ("bent", "bent2"):
         x["theta_deg"], x["d"] = (0.0, 0.0), (0.0, 0.0)
+    if kind != "bent2":
+        x["theta2_deg"], x["d2"] = (0.0, 0.0), (0.0, 0.0)
     x["radius"] = tab.radius.value / 1000
     n = x["nominal"]
     for key in keys_for(kind):

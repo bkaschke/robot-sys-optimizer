@@ -89,7 +89,7 @@ class PlacementPanel:
         settings = MapSettings(res=self.res.value / 1000)
         self.show.disabled, self.progress.visible = True, True
         try:
-            if s.tool.extension.type == "pose":  # any TCP offset: the shared flange map, no build
+            if s.tool.extension.type in ("pose", "bent2"):  # any TCP offset: the shared flange map
                 self.rmap = map_for_tool(robot, T_ft, settings, progress=self._progress, any_offset=True)
             else:
                 self.rmap = ReachMap.load_or_build(robot, T_ft, settings, progress=self._progress)

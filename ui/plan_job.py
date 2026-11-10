@@ -90,7 +90,7 @@ def station_job(payload: dict, emit, cancelled) -> dict:
     from core.robot import Robot
     from core.schema import length_ref
     from opt.placement import plan_stations
-    from opt.reachability import map_for_tool
+    from opt.reachability import map_for_tcps
     from opt.tolerance import ToleranceSettings
     from ui.stations import part_footprint, world_targets
 
@@ -98,7 +98,6 @@ def station_job(payload: dict, emit, cancelled) -> dict:
     spec = payload["spec"]
     settings = spec["settings"]
     robot = Robot(s.robot.spec)
-    tcp = s.tool.tcps[0].name
     t = world_targets(s)
     fp = part_footprint(s)
     sites = s.sites()
@@ -113,11 +112,12 @@ def station_job(payload: dict, emit, cancelled) -> dict:
         emit("solution", (sol, res))
 
     say("loading reachability map (first time per tool length: ~1 min)", 0.0)
-    rmap = map_for_tool(
+    rmap = map_for_tcps(  # v8 T16: every TCP of the tool (two tips: either may reach a point)
         robot,
-        s.tool_model.T_flange_tcp(tcp),
+        s.tool_model,
+        [c.name for c in s.tool.tcps],
         cancelled=cancelled,
-        any_offset=s.tool.extension.type == "pose",  # pose tools: shared flange map
+        any_offset=s.tool.extension.type in ("pose", "bent2"),  # shared flange map (pose, two bends)
     )
     checker = build_checker(s, robot, sites, int(spec.get("workers", 1)), say, emit)
     emit("max_manip", float(rmap.max_manip))  # the Results card: manipulability in % (not saved)
@@ -221,6 +221,7 @@ def tool_job(payload: dict, emit, cancelled):
 
     s = session_from(payload)
     spec = payload["spec"]
+    spec["st"].family = family_parts(spec.get("family_dirs") or [])  # v8 T16
     ee = s.tool
     sites = s.sites()
     return optimize_tool(
@@ -240,6 +241,33 @@ def tool_job(payload: dict, emit, cancelled):
         sites=sites,
         obstacles=s.obstacle_entries(),  # stay-out zones
     )
+
+
+def family_parts(dirs: list[str]) -> list:
+    """opt.tool_geometry.FamilyPart for each project folder (its part, targets and cell)."""
+    from opt.tool_geometry import FamilyPart
+    from ui.session import Session, load_project
+    from ui.stations import part_footprint, world_targets
+
+    out = []
+    for d in dirs:
+        s = Session()
+        load_project(s, Path(d))
+        if s.part is None or not s.targets.points:
+            raise ValueError(f"part family: {d} has no part or no targets")
+        out.append(
+            FamilyPart(
+                s.part_mesh(),
+                s.part.T_world_part.copy(),
+                s.T_world_base.copy(),
+                world_targets(s),
+                part_footprint(s),
+                s.sites(),
+                s.obstacle_entries(),
+                Path(d).name,
+            )
+        )
+    return out
 
 
 def tolerance_job(payload: dict, emit, cancelled):

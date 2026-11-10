@@ -73,10 +73,13 @@ class ExtensionValues(_Model):
     rx_deg: float = 0.0
     ry_deg: float = 0.0
     rz_deg: float = 0.0
+    theta2_deg: float = 0.0  # v8 T16: two-bend tools
+    d2: float = 0.0
 
 
 POSE_KEYS = ("x", "y", "z", "rx_deg", "ry_deg", "rz_deg")
 LEGACY_KEYS = ("L", "theta_deg", "d", "roll_deg")
+BENT2_KEYS = (*LEGACY_KEYS, "theta2_deg", "d2")  # v8 T16
 
 
 class Extension(_Model):
@@ -84,12 +87,13 @@ class Extension(_Model):
 
     Geometry (see core/tool.py). ``pose`` (v2): T_mount_head = translation (x, y, z) and
     roll-pitch-yaw (rx, ry, rz), each within its range; the connector is a smooth spline
-    from the mount to the head. Legacy ``straight`` / ``bent``: T_mount_head = Rz(roll) Tz(L)
-    Rx(theta) Ty(d) (a straight extension forces theta = d = 0).
+    from the mount to the head (the spline tool). Legacy ``straight`` / ``bent``:
+    T_mount_head = Rz(roll) Tz(L) Rx(theta) Ty(d) (a straight extension forces theta = d = 0).
+    ``bent2`` (v8 T16) adds a second bend and leg: ... Rx(theta) Ty(d) Rx(theta2) Ty(d2).
     Ranges bound the optimizer (min = max fixes a value); ``nominal`` is the rough placement.
     """
 
-    type: Literal["straight", "bent", "pose"] = "straight"
+    type: Literal["straight", "bent", "pose", "bent2"] = "straight"
     L: Range = (0.0, 0.5)
     theta_deg: Range = (0.0, 0.0)
     d: Range = (0.0, 0.0)
@@ -100,19 +104,21 @@ class Extension(_Model):
     rx_deg: Range = (0.0, 0.0)
     ry_deg: Range = (0.0, 0.0)
     rz_deg: Range = (0.0, 0.0)
+    theta2_deg: Range = (0.0, 0.0)  # v8 T16 (bent2)
+    d2: Range = (0.0, 0.0)
     radius: float = Field(default=0.04, gt=0)
     nominal: ExtensionValues = Field(default_factory=ExtensionValues)
 
     @model_validator(mode="after")
     def _ranges(self) -> Extension:
-        for name in (*LEGACY_KEYS, *POSE_KEYS):
+        for name in (*BENT2_KEYS, *POSE_KEYS):
             _check_range(getattr(self, name), name)
         if self.L[0] < 0:
             raise ValueError("extension length must be >= 0")
         if self.type == "straight" and (self.theta_deg != (0.0, 0.0) or self.d != (0.0, 0.0)):
             raise ValueError("a straight extension has theta and d fixed at 0")
         n = self.nominal
-        for name in POSE_KEYS if self.type == "pose" else LEGACY_KEYS:
+        for name in POSE_KEYS if self.type == "pose" else BENT2_KEYS if self.type == "bent2" else LEGACY_KEYS:
             lo, hi = getattr(self, name)
             v = getattr(n, name)
             if not lo - 1e-9 <= v <= hi + 1e-9:

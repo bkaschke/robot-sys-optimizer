@@ -115,7 +115,7 @@ def shape_seeds(ev, v0, k: int = 3) -> list:
         keys = [kk for kk in ("rx_deg", "ry_deg") if getattr(x, kk)[1] - getattr(x, kk)[0] > 1e-9]
         key = max(keys, key=lambda kk: getattr(x, kk)[1] - getattr(x, kk)[0]) if keys else None
     else:
-        key = "theta_deg" if x.type == "bent" and x.theta_deg[1] - x.theta_deg[0] > 1e-9 else None
+        key = "theta_deg" if x.type in ("bent", "bent2") and x.theta_deg[1] - x.theta_deg[0] > 1e-9 else None
     if key is None:
         return []
     T = np.linalg.inv(ev.T_part) @ ev.T_base0  # the robot base in the part frame

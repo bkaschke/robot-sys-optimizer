@@ -112,7 +112,10 @@ class ToolModel:
         if self.ee.extension.type == "pose":
             R = rpy_to_matrix(np.radians([v.rx_deg, v.ry_deg, v.rz_deg]))
             return make_T(R, (v.x, v.y, v.z))
-        return _rz(np.radians(v.roll_deg)) @ _tr(z=v.L) @ _rx(np.radians(v.theta_deg)) @ _tr(y=v.d)
+        T = _rz(np.radians(v.roll_deg)) @ _tr(z=v.L) @ _rx(np.radians(v.theta_deg)) @ _tr(y=v.d)
+        if self.ee.extension.type == "bent2":  # v8 T16: second bend + leg
+            T = T @ _rx(np.radians(v.theta2_deg)) @ _tr(y=v.d2)
+        return T
 
     def T_flange_head(self, v: ExtensionValues | None = None) -> np.ndarray:
         return self.T_flange_mount @ self.T_mount_head(v)
@@ -142,7 +145,10 @@ class ToolModel:
             return [(a, b) for a, b in zip(P[:-1], P[1:], strict=True) if np.linalg.norm(b - a) > 1e-9]
         T_fm = self.T_flange_mount @ _rz(np.radians(v.roll_deg))
         bend = T_fm @ _tr(z=v.L)
-        pts = [T_fm[:3, 3], bend[:3, 3], (bend @ _rx(np.radians(v.theta_deg)) @ _tr(y=v.d))[:3, 3]]
+        leg = bend @ _rx(np.radians(v.theta_deg)) @ _tr(y=v.d)
+        pts = [T_fm[:3, 3], bend[:3, 3], leg[:3, 3]]
+        if self.ee.extension.type == "bent2":  # v8 T16
+            pts.append((leg @ _rx(np.radians(v.theta2_deg)) @ _tr(y=v.d2))[:3, 3])
         return [(a, b) for a, b in zip(pts[:-1], pts[1:], strict=True) if np.linalg.norm(b - a) > 1e-9]
 
     def extension_mesh(self, v: ExtensionValues | None = None) -> trimesh.Trimesh | None:

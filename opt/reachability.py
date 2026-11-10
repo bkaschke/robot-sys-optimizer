@@ -408,3 +408,26 @@ def coverage_matrix(
             score[s : s + len(b), cols] = sc.reshape(len(b), -1)
             mu[s : s + len(b), cols] = m.reshape(len(b), -1)
     return score, mu
+
+
+class MultiMap:
+    """Several TCPs on one tool (v8 T16, "two tips"): a point counts as covered when any TCP's
+    map covers it; scores and manipulability are the best over the maps. The exact check then
+    picks the TCP per point (each group's allowed TCP list)."""
+
+    def __init__(self, maps: list):
+        self.maps = list(maps)
+        self.max_manip = max(float(m.max_manip) for m in self.maps)
+
+    def lookup(self, p, a, cone):
+        out = [m.lookup(p, a, cone) for m in self.maps]
+        return np.max([o[0] for o in out], axis=0), np.max([o[1] for o in out], axis=0)
+
+
+def map_for_tcps(robot, tool_model, tcps: list[str], cancelled=None, any_offset: bool = False):
+    """One map per TCP (opt.reachability.map_for_tool), combined when there are several."""
+    maps = [
+        map_for_tool(robot, tool_model.T_flange_tcp(t), cancelled=cancelled, any_offset=any_offset)
+        for t in tcps
+    ]
+    return maps[0] if len(maps) == 1 else MultiMap(maps)
