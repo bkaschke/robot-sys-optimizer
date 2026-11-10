@@ -53,6 +53,7 @@ class ToolOptPanel:
             from ui.method_picker import MethodPicker
 
             self.shape = MethodPicker(gui, "tool_shape", "Shape search")  # v8 T10
+            self.start_shape = MethodPicker(gui, "tool_start", "Start shape")  # v8 T15
             self.loop = MethodPicker(gui, "tool_loop", "Tool and stations")  # v8 T13
             self.tolerance_settings = None  # app.py: Results -> Tolerance check offsets (T12)
             self.objective = MethodPicker(gui, "tool_objective", "Objective")  # v8 T11 / T12
@@ -171,6 +172,7 @@ class ToolOptPanel:
         )
         st.objective = self.objective.key
         st.loop = self.loop.key
+        st.start = self.start_shape.key
         if self.tolerance_settings is not None:  # v8 T12: robust objective (Results tolerance offsets)
             from dataclasses import replace
 

@@ -45,6 +45,7 @@ class GeometrySettings:
     objective: str = "weighted"  # v8 T11: "weighted" | "pareto" (opt.methods tool_objective)
     pareto_keys: tuple = ("length", "stations", "cycle")
     loop: str = "fixed"  # v8 T13: "fixed" | "alternate" (opt.methods tool_loop)
+    start: str = "nominal"  # v8 T15: "nominal" | "cones" (opt.methods tool_start)
     robust: dict | None = None  # v8 T12: {"tolerance": ToleranceSettings, "measure": str}
     planner: PlannerSettings = field(default_factory=lambda: PlannerSettings(refine_evals=12))
 
@@ -106,8 +107,9 @@ class GeometryResult:
 
 
 class _Evaluator:
-    seen: list = []  # (values, solution, results, feasible, tool length) of every evaluation
     """Builds per-geometry scenes; the head meshes are loaded once and the ee swapped."""
+
+    seen: list = []  # (values, solution, results, feasible, tool length) of every evaluation
 
     def __init__(
         self,
@@ -422,8 +424,18 @@ def _optimize_tool(
             )
 
         best = [float("inf"), sol, res]  # cost, solution, results: updated as the search runs
+        v_start = v_best
+        if st.start == "cones":  # v8 T15: try the approach-cone bends first, search from the best
+            from opt.approach_cones import shape_seeds
+
+            say("approach cones", 0.6)
+            for v in shape_seeds(ev, v_best):
+                c, s_new, r_new = ev.cost_at_stations(v, sol)
+                if c < best[0]:
+                    best[:] = [c, s_new, r_new]
+                    v_start = v
         try:
-            _shape_search(ev, st, v_best, sol, active, values, say, best)
+            _shape_search(ev, st, v_start, sol, active, values, say, best)
         except CancelledError:  # keep the best shape found so far
             pass
         if st.loop == "alternate":  # v8 T13: re-plan the stations for the new shape, and again

@@ -33,7 +33,7 @@ SAVED: dict[str, tuple[str, ...]] = {
         "point_size",
         "show_unreached",
     ),
-    "targets.heat": ("choice",),  # v8 T8
+    "targets.heat": ("choice", "cones"),  # v8 T8
     "targets.tools": ("row", "col", "row_dir", "radius", "max_angle", "max_edge"),
     "optimize": ("clearance", "joint_margin", "check_from"),
     "objects": ("gizmo_size", "gizmo_top"),
@@ -53,7 +53,7 @@ SAVED: dict[str, tuple[str, ...]] = {
     ),
     "stations.costs": ("require_all", "require_config"),
     "tool_opt.costs": ("require_all", "require_config"),
-    "tool_opt": ("max_stations", "tol", "shape_evals", "shape", "loop", "objective"),
+    "tool_opt": ("max_stations", "tol", "shape_evals", "shape", "start_shape", "loop", "objective"),
     "tolerance": ("part_mm", "part_deg", "station_mm", "samples", "seed"),
     "cycle": (
         "joint_speed",

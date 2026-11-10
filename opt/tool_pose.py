@@ -69,8 +69,16 @@ def optimize_pose(
 
     try:
         evaluate(v0, "nominal pose", 0.05)
+        if getattr(st, "start", "nominal") == "cones":  # v8 T15: approach-cone head turns first
+            from opt.approach_cones import shape_seeds
+
+            for v in shape_seeds(ev, v0):
+                evaluate(v, "approach-cone pose", 0.05)
         if active and st.shape_evals > 0:
-            u0 = (np.array([getattr(v0, k) for k in active]) - bounds[:, 0]) / (bounds[:, 1] - bounds[:, 0])
+            start = best.get("v", v0)
+            u0 = (np.array([getattr(start, k) for k in active]) - bounds[:, 0]) / (
+                bounds[:, 1] - bounds[:, 0]
+            )
             if st.shape_method in ("tpe", "gp"):  # v8 T10
                 from opt.refine_bayes import make_search
 
