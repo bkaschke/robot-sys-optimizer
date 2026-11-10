@@ -68,3 +68,50 @@ def test_examples_order_with_less_joint_motion_and_clean_paths():
         sim.order.value = "Pattern order"
     finally:
         server.stop()
+
+
+def test_gtsp_picks_the_branch_that_saves_motion():
+    from core.path_order_branches import solve_gtsp
+
+    # three points; the planned solutions (option 0) alternate between two far-apart arm poses,
+    # each point also has a solution near the first one: the route should use those
+    a, b = np.zeros(6), np.full(6, 2.0)
+    clusters = [[a], [b, a + 0.05], [b, a + 0.1]]
+    labels = [["A"], ["B", "A"], ["B", "A"]]
+    route, cost = solve_gtsp(clusters, labels, CycleSettings())
+    assert route[0] == (0, 0) and sorted(c for c, _ in route) == [0, 1, 2]
+    assert all(o == 1 for c, o in route if c > 0)
+    _, given = solve_gtsp(clusters[:1], labels[:1], CycleSettings())
+    assert cost < 1.0  # tiny moves, no reconfiguration
+
+
+def test_branch_options_are_the_same_tcp_pose():
+    from pathlib import Path
+
+    from core import golden_parts as gp
+    from core.collision import CollisionScene
+    from core.configs import config_label
+    from core.feasibility import FeasibilityChecker
+    from core.ik import make_ik
+    from core.path_order_branches import branch_options
+    from core.robot import Robot
+    from core.schema import TargetGroup
+    from core.tool import ToolModel, load_tool
+    from core.transforms import make_T
+
+    robot = Robot.from_registry("ur20")
+    ee = load_tool("orbital_sander")
+    tm = ToolModel(ee, Path(__file__).resolve().parents[1] / ee.urdf)
+    part, T_part = gp.flat_plate(), make_T(p=(0.8, 0.0, 0.4))
+    scene = CollisionScene(robot, tm, part, np.eye(4), T_part)
+    ch = FeasibilityChecker(robot, make_ik(robot), tm, scene, np.eye(4), T_part)
+    r = ch.check_point(0, np.array([0.0, 0.0, 0.02]), np.array([0.0, 0.0, 1.0]), TargetGroup(name="g"))
+    assert r.q is not None
+    opts = branch_options(ch, r, lambda q: config_label(ch.ik, q))
+    assert len(opts) >= 2 and np.allclose(opts[0][1], r.q)
+    assert len({lab for lab, _ in opts}) == len(opts)
+    T = robot.fk(np.asarray(r.q, float))
+    for _, q in opts:
+        assert np.allclose(robot.fk(q), T, atol=1e-6)
+        assert np.all(q >= ch.lo - 1e-9) and np.all(q <= ch.hi + 1e-9)
+        assert not scene.collides(q, r.tcp)

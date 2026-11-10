@@ -73,8 +73,8 @@ METHODS: dict[str, tuple[Method, ...]] = {
         Method(
             "gtsp",
             "Least joint motion (GTSP)",
-            "chooses the point order and joint solution per point together to minimize joint motion "
-            "and wrist flips",
+            "chooses the point order and the arm configuration per point together (any valid IK "
+            "branch; zones keep theirs) for the least joint motion and fewest reconfigurations",
         ),
     ),
 }

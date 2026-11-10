@@ -7,11 +7,11 @@ configuration group) so the sum of the joint move times between neighbours is sm
 open path from the sequence's first point (the pattern's start, so groups still chain from
 corner to corner). Joint move times are synchronized trapezoids (core.cycle_time).
 
-The joint solution of every point is the planned one: its configuration was chosen by the
-zones, and a point's other solutions are not kept after planning (a full generalized TSP over
-IK branches would need them). Solved with OR-Tools routing (guided local search, a time limit
-per sequence) up to ``MAX_POINTS`` points; the result is kept only when it beats the pattern
-order. Moves between points that are not surface neighbours lift off the surface.
+Here the joint solution of every point is the planned one; the path builder's *Least joint
+motion (GTSP)* uses core.path_order_branches, which also chooses among the IK branches.
+Solved with OR-Tools routing (guided local search, a time limit per sequence) up to
+``MAX_POINTS`` points; the result is kept only when it beats the pattern order. Moves
+between points that are not surface neighbours lift off the surface.
 """
 
 from __future__ import annotations
