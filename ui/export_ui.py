@@ -39,6 +39,7 @@ class ExportPanel:
             )
             self.urdf = gui.add_button("Optimized tool URDF (zip)")
             self.report = gui.add_button("HTML report")
+            self.pdf = gui.add_button("Report (PDF)", hint="the HTML report printed by Edge headless (v8)")
             from core.step_export import FLANGES
 
             self.step = gui.add_button(
@@ -53,6 +54,7 @@ class ExportPanel:
         self.uframes.on_click(lambda e: self._run(e, self.export_userframes))
         self.urdf.on_click(lambda e: self._run(e, self.export_urdf))
         self.report.on_click(lambda e: self._run(e, self.export_report))
+        self.pdf.on_click(lambda e: self._run(e, self.export_pdf))
         self.step.on_click(lambda e: self._run(e, self.export_step))
         self.tube_od = lambda: None  # app.py: Tool geometry -> Tube OD
 
@@ -182,6 +184,46 @@ class ExportPanel:
         zpath.write_bytes(buf.getvalue())
         return zpath, buf.getvalue()
 
+    def sections(self, sol) -> list[tuple[str, str]]:
+        """v8 T19: the report's extra sections, as HTML (from the GUI's own texts)."""
+        from core.report import md_html
+        from ui.log_panel import unreached_report
+        from ui.summary_card import card
+
+        s, out = self.s, []
+        out.append(("Summary", md_html(card(s, sol))))
+        cyc = [f"Estimated cycle time: **{sol.cycle_s:.0f} s**" if sol.cycle_s is not None else ""]
+        sim = getattr(self, "sim", None)
+        if (
+            sim is not None
+            and sim.plan is not None
+            and sim.label == sol.label
+            and getattr(sim, "cycle", None)
+        ):
+            c = sim.cycle
+            parts = ", ".join(f"{k} {v:.0f} s" for k, v in c.items() if k != "total" and v > 0.05)
+            cyc.append(f"Cycle time of the built paths: **{c['total']:.0f} s** ({parts}).")
+        if any(cyc):
+            out.append(("Cycle time", md_html("  \n".join(x for x in cyc if x))))
+        tol = getattr(s, "tolerance", None)
+        if tol is not None and tol.label == sol.label:
+            from ui.tolerance_ui import summary
+
+            out.append(("Tolerance check", md_html(summary(tol))))
+        msg = unreached_report(s.result_points.get(sol.label, {}), sol.unreached, sol.label)
+        out.append(("Unreached points", md_html(msg) if msg else "<p>Every point is reached.</p>"))
+        return out
+
+    def export_pdf(self, sol, client=None) -> tuple[Path, bytes]:
+        """v8 T19: the HTML report printed to PDF by Edge headless."""
+        from core.report import html_to_pdf
+
+        html_path, _ = self.export_report(sol, client)
+        pdf = self.out_dir / "report.pdf"
+        if not html_to_pdf(html_path, pdf):
+            raise ValueError("no Edge / Chrome found to print the PDF; the HTML report was written")
+        return pdf, pdf.read_bytes()
+
     def export_report(self, sol, client=None) -> tuple[Path, bytes]:
         s = self.s
         tm = self._tool(sol)
@@ -218,6 +260,7 @@ class ExportPanel:
             images=images,
             length_samples=self.length_samples(sol),
             notes=notes,
+            sections=self.sections(sol),
             settings={
                 "part": s.part.mesh_path if s.part else "-",
                 "targets": f"{len(s.targets.points)} points in {len(s.targets.groups)} group(s)",

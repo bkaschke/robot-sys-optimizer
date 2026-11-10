@@ -8,6 +8,7 @@ import html
 import io
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 
 import numpy as np
 
@@ -60,6 +61,52 @@ class ReportInput:
     length_samples: list = field(default_factory=list)  # opt.tool_geometry.LSample
     notes: list[str] = field(default_factory=list)
     settings: dict = field(default_factory=dict)
+    sections: list[tuple[str, str]] = field(default_factory=list)  # v8 T19: (heading, HTML)
+
+
+def md_html(md: str) -> str:
+    """Markdown (the GUI's own texts: summary card, tolerance table, ...) -> HTML, no raw HTML."""
+    from markdown_it import MarkdownIt
+
+    return MarkdownIt("commonmark", {"html": False}).enable("table").render(md)
+
+
+def html_to_pdf(html_path: Path, pdf_path: Path, timeout: float = 90.0) -> bool:
+    """v8 T19: print an HTML file to PDF with Edge (or Chrome) headless. False when no browser
+    is found (the HTML report is still there)."""
+    import shutil
+    import subprocess
+    import tempfile
+
+    cands = [
+        r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+        r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+        shutil.which("msedge"),
+        shutil.which("google-chrome"),
+        shutil.which("chromium"),
+    ]
+    exe = next((c for c in cands if c and Path(c).is_file()), None)
+    if exe is None:
+        return False
+    pdf_path = Path(pdf_path)
+    pdf_path.unlink(missing_ok=True)
+    with tempfile.TemporaryDirectory() as prof:
+        subprocess.run(
+            [
+                exe,
+                "--headless=new",
+                "--disable-gpu",
+                f"--user-data-dir={prof}",
+                "--no-pdf-header-footer",
+                f"--print-to-pdf={pdf_path}",
+                Path(html_path).resolve().as_uri(),
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=timeout,
+            check=False,
+        )
+    return pdf_path.is_file() and pdf_path.stat().st_size > 0
 
 
 def _e(x) -> str:
@@ -94,6 +141,9 @@ def build_report(r: ReportInput) -> str:
             f"<figure><img src='{uri}' alt='{_e(caption)}'><figcaption class='note'>{_e(caption)}"
             "</figcaption></figure>"
         )
+
+    for heading, body in r.sections:  # v8 T19: summary, cycle time, tolerance, unreached points
+        parts.append(f"<h2>{_e(heading)}</h2>{body}")
 
     parts.append("<h2>Cost breakdown</h2><table><tr><th>term</th><th>weighted value</th><th></th></tr>")
     total = max(sol.cost, 1e-9)

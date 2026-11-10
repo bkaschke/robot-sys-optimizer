@@ -365,7 +365,8 @@ It also re-runs the localization checks for the chosen solutions. It used to be 
   - **TCP poses (CSV)**
   - **Userframes (CSV)**: one row per stop: its carrier values and the **user frame**, the pose of the part frame in the robot's base frame at that stop (teach the points in it and they stay valid). The columns follow the robot model: UR arms `x_mm, y_mm, z_mm` + rotation vector `rx_rad, ry_rad, rz_rad` (as in a UR pose `p[...]`, with x y z converted to m); FANUC-style arms `X Y Z` (mm) + `W P R` (deg); every robot also gets the rotation matrix `r11 … r33`. The format comes from `frame_convention` in the robot's `spec.yaml` (`ur`, `fanuc` or `matrix`).
   - **Optimized tool URDF (zip)**
-  - **HTML report**: self-contained, printable to PDF, with an optional 3D snapshot.
+  - **HTML report**: self-contained, printable to PDF, with an optional 3D snapshot. Since v8 it opens with the customer sections: the **Summary** card, the **Cycle time** (the plan's estimate, and the built paths' when they belong to this plan), the **Tolerance check** of this plan (when one was run) and the **Unreached points** with their reasons.
+  - **Report (PDF)** (v8): the same report printed to `export/report.pdf` by Edge headless (Chrome works too); without a browser the HTML report is still written.
   - **Tool (STEP)** (v8): the selected result's tool (its optimized values, else the nominal) as a STEP file for CAD: the extension as round tube legs (the *Tube OD* chosen under Tool geometry, else the tool's radius) with a ball at each bend, plus an **ISO 9409-1 flange plate** at the mount (*Flange*: 50-4-M6 for UR arms, 63-4-M6, 80-6-M8; 8 mm thick, with the bolt holes and the centring bore). The head is not in it (use its own CAD). Made with CadQuery, which is part of the environment and the portable copy.
 
   Files go to `<project folder>/export/` and also download in the browser.
@@ -452,6 +453,17 @@ Robots live in `assets/robots/<name>/`: the URDF with its meshes and a `spec.yam
 The first plan with a new robot builds its reachability map (about a minute per tool), which is then cached.
 
 ---
+
+### Checking a plan in URSim
+
+`scripts/ursim_check.py` (v8) runs an exported plan in **URSim**, Universal Robots' simulator (e.g. the `universalrobots/ursim_e-series` Docker image with ports 29999 and 30002 published). Export **TCP poses (CSV)**, then:
+
+```
+python scripts/ursim_check.py <project>/export/tcp_poses.csv --host 127.0.0.1
+python scripts/ursim_check.py <project>/export/tcp_poses.csv --dry-run      # only write the programs
+```
+
+It writes one URScript program per stop (`export/ursim/stop_<k>.script`: a `movej` to every reached point in the planned order, with the planned joint values), sends each to URSim, waits until it has stopped and reads the safety status: a protective stop (joint limit, URSim's own self-collision model, a singularity on the way) fails that stop. `--stop k` runs one stop; `--speed` / `--acc` set the `movej` speed and acceleration. Carrier moves between stops are not part of it: place URSim's base per stop yourself. It needs URSim running; the dry run needs nothing.
 
 ## 6. Files, folders and formats
 

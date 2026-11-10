@@ -284,8 +284,9 @@ def build_app(
     workflow.gate(optimize.run, optimize.gate_md, feasibility_reason)  # T16: disabled buttons say why
     ex = results.export
     ex.tube_od = tool_opt.tube_od  # v8 T17: the STEP export uses the chosen tube
+    ex.sim = sim  # v8 T19: the report shows the built paths' cycle time
     workflow.gate(
-        (ex.csv, ex.uframes, ex.urdf, ex.report, ex.step), ex.gate_md, result_reason(results.selected)
+        (ex.csv, ex.uframes, ex.urdf, ex.report, ex.pdf, ex.step), ex.gate_md, result_reason(results.selected)
     )
     workflow.gate(sim.build_btn, sim.gate_md, plan_reason(sim.selected))
     workflow.gate(tool_opt.run, tool_opt.gate_md)
