@@ -44,6 +44,8 @@ class GeometrySettings:
     shape_method: str = "cmaes"  # v8 T10: "cmaes" | "tpe" | "gp" (opt.methods tool_shape)
     objective: str = "weighted"  # v8 T11: "weighted" | "pareto" (opt.methods tool_objective)
     pareto_keys: tuple = ("length", "stations", "cycle")
+    loop: str = "fixed"  # v8 T13: "fixed" | "alternate" (opt.methods tool_loop)
+    robust: dict | None = None  # v8 T12: {"tolerance": ToleranceSettings, "measure": str}
     planner: PlannerSettings = field(default_factory=lambda: PlannerSettings(refine_evals=12))
 
 
@@ -250,7 +252,13 @@ def optimize_tool(*args, **kw) -> GeometryResult:
     (``st.pareto_keys``) instead of the best three by cost."""
     st = kw.get("st") or GeometrySettings()
     seen: list = []
-    r = _optimize_tool(*args, **{**kw, "seen": seen})
+    holder: dict = {}
+    r = _optimize_tool(*args, **{**kw, "seen": seen, "holder": holder})
+    if st.objective == "robust" and seen and "ev" in holder:  # v8 T12
+        from opt.robust import rerank_designs
+
+        r.designs = rerank_designs(holder["ev"], seen, st, kw.get("cancelled"))
+        r.message += "; designs ranked by robust cost (worst case under tolerance)"
     if st.objective == "pareto" and seen:
         from opt.pareto import front, measures
 
@@ -292,6 +300,7 @@ def _optimize_tool(
     sites=None,
     obstacles: list | None = None,
     seen: list | None = None,
+    holder: dict | None = None,
 ) -> GeometryResult:
     st = st or GeometrySettings()
     say = progress or (lambda m, f: None)
@@ -312,6 +321,8 @@ def _optimize_tool(
     ev.cancelled = cancelled
     ev.obstacles = list(obstacles or [])
     ev.seen = seen if seen is not None else []  # v8 T11: every evaluated design
+    if holder is not None:
+        holder["ev"] = ev
     x = ee.extension
     if x.type == "pose":  # v2: head pose x y z rx ry rz, best overall cost (opt.tool_pose)
         from opt.tool_pose import POSE_KEYS, optimize_pose, pose_label
@@ -415,6 +426,18 @@ def _optimize_tool(
             _shape_search(ev, st, v_best, sol, active, values, say, best)
         except CancelledError:  # keep the best shape found so far
             pass
+        if st.loop == "alternate":  # v8 T13: re-plan the stations for the new shape, and again
+            from opt.tool_alternate import alternate
+
+            def values_for(v):
+                return lambda u: v.model_copy(
+                    update={
+                        k: float(bounds[i, 0] + np.clip(u, 0, 1)[i] * (bounds[i, 1] - bounds[i, 0]))
+                        for i, k in enumerate(active)
+                    }
+                )
+
+            alternate(ev, st, best, active, values_for, say, cancelled)
         sol, res = best[1], best[2]
         v_best = sol.tool_values
     label = f"L {v_best.L * 1000:.0f} mm" + "".join(

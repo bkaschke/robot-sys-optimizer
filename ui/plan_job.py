@@ -91,6 +91,7 @@ def station_job(payload: dict, emit, cancelled) -> dict:
     from core.schema import length_ref
     from opt.placement import plan_stations
     from opt.reachability import map_for_tool
+    from opt.tolerance import ToleranceSettings
     from ui.stations import part_footprint, world_targets
 
     s = session_from(payload)
@@ -137,6 +138,7 @@ def station_job(payload: dict, emit, cancelled) -> dict:
         )
         return {"best": out[0][0] if out else None, "rules_status": status}
     pareto = spec.get("objective") == "pareto"
+    robust = spec.get("objective") == "robust"
     fin: list = []
     out = plan_stations(
         rmap,
@@ -148,7 +150,7 @@ def station_job(payload: dict, emit, cancelled) -> dict:
         settings,
         L,
         L_ref,
-        on_solution=None if pareto else streamed,
+        on_solution=None if pareto or robust else streamed,
         progress=say,
         cancelled=cancelled,
         sites=sites,
@@ -178,7 +180,34 @@ def station_job(payload: dict, emit, cancelled) -> dict:
         for i, (sol, _res) in enumerate(plans):
             sol.label = f"Pareto {i + 1}/{n}: {sol.label}"
             sol.planner = "pareto"
-        emit("pareto", plans)
+        emit("replace", plans)
+        return {"best": plans[0][0] if plans else None, "rules_status": None}
+    if spec.get("objective") == "robust" and out and fin:  # v8 T12: worst case under tolerance
+        from opt.robust import station_robust
+
+        finish, used_sites = fin[0]
+        r = spec.get("robust") or {}
+        try:
+            plans = station_robust(
+                finish,
+                used_sites,
+                checker,
+                t,
+                out,
+                r.get("tolerance") or ToleranceSettings(samples=10),
+                r.get("measure", "Worst case"),
+                float(spec["weights"].unreached),
+                settings.refine_radius,
+                settings.refine_evals,
+                say,
+                cancelled,
+            )
+        except CancelledError:
+            plans = out
+        for sol, _res in plans:
+            sol.label = f"Robust: {sol.label}"
+            sol.planner = "robust"
+        emit("replace", plans)
         return {"best": plans[0][0] if plans else None, "rules_status": None}
     return {"best": out[0][0] if out else None, "rules_status": None}
 

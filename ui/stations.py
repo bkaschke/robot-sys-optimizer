@@ -77,6 +77,24 @@ class StationsPanel:
             from ui.pareto_ui import pareto_keys_widgets
 
             self.pareto_keys = pareto_keys_widgets(gui, ("stations", "cycle", "clearance"))
+            from opt.robust import MEASURES
+
+            self.robust_measure = gui.add_dropdown(  # v8 T12
+                "Robust measure",
+                MEASURES,
+                visible=False,
+                hint="points lost: the worst sample or the worst 20 %",
+            )
+            self.robust_samples = gui.add_number(
+                "Robust samples",
+                10,
+                min=2,
+                max=200,
+                step=1,
+                visible=False,
+                hint="tolerance samples per candidate",
+            )
+            self.tolerance_settings = None  # app.py: the Results -> Tolerance check offsets
             self.objective_m.dropdown.on_update(lambda _e: self._objective_fields())
             self.areas = gui.add_checkbox(
                 "Connected station areas", True, hint="each stop's points one area on the part (no overlap)"
@@ -123,6 +141,8 @@ class StationsPanel:
         on = self.objective_m.key == "pareto" and self.objective_m.visible
         for cb in self.pareto_keys.values():
             cb.visible = on
+        rob = self.objective_m.key == "robust" and self.objective_m.visible
+        self.robust_measure.visible = self.robust_samples.visible = rob
 
     def options(self) -> dict:
         """Planner options shared with the tool-geometry panel."""
@@ -197,6 +217,13 @@ class StationsPanel:
         if not quick and not rules:  # v8 T11 / T12: the Objective dropdown (Cost based mode)
             spec["objective"] = self.objective_m.key
             spec["pareto_keys"] = tuple(k for k, cb in self.pareto_keys.items() if cb.value)
+            from dataclasses import replace
+
+            from opt.tolerance import ToleranceSettings
+
+            tol = self.tolerance_settings() if self.tolerance_settings else ToleranceSettings()
+            n = int(self.robust_samples.value)
+            spec["robust"] = {"tolerance": replace(tol, samples=n), "measure": self.robust_measure.value}
         if rules:
             spec["rules"] = {"objective": self.objective.value, "sing_pct": float(self.sing_pct.value)}
         self._cancel.clear()
@@ -238,7 +265,7 @@ class StationsPanel:
                 s.max_manip = float(data)
             elif kind == "warn":
                 log(f"{what}: {data}.", "warn")
-            elif kind == "pareto":  # v8 T11: the front replaces the list
+            elif kind == "replace":  # v8 T11 / T12: the front / robust plans replace the list
                 s.results, s.result_points = [], {}
                 for sol, res in data:
                     s.stamps[sol.label] = stamp

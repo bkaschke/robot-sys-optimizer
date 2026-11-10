@@ -52,6 +52,7 @@ class ToleranceResult:
     points: dict[int, PointTolerance] = field(default_factory=dict)
     all_reached: float = 0.0  # fraction of samples in which every planned point was reached
     unplanned: list[int] = field(default_factory=list)  # unreached in the plan itself: not tested
+    lost: list[int] = field(default_factory=list)  # per sample: planned points not reached (v8 T12)
 
     def worst(self, n: int = 10) -> list[PointTolerance]:
         return sorted(self.points.values(), key=lambda p: (p.rate, p.fail_mm or np.inf))[:n]
@@ -135,6 +136,7 @@ def tolerance_check(
             float(r0.manipulability),
         )
     out.all_reached = float(ok.all(axis=1).mean()) if pids else 1.0
+    out.lost = [int(n) for n in (~ok).sum(axis=1)]
     return out
 
 

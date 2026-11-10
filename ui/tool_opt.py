@@ -53,6 +53,8 @@ class ToolOptPanel:
             from ui.method_picker import MethodPicker
 
             self.shape = MethodPicker(gui, "tool_shape", "Shape search")  # v8 T10
+            self.loop = MethodPicker(gui, "tool_loop", "Tool and stations")  # v8 T13
+            self.tolerance_settings = None  # app.py: Results -> Tolerance check offsets (T12)
             self.objective = MethodPicker(gui, "tool_objective", "Objective")  # v8 T11 / T12
             from ui.pareto_ui import pareto_keys_widgets
 
@@ -168,6 +170,11 @@ class ToolOptPanel:
             L_tol=self.tol.value / 1000, shape_evals=int(self.shape_evals.value), shape_method=self.shape.key
         )
         st.objective = self.objective.key
+        st.loop = self.loop.key
+        if self.tolerance_settings is not None:  # v8 T12: robust objective (Results tolerance offsets)
+            from dataclasses import replace
+
+            st.robust = {"tolerance": replace(self.tolerance_settings(), samples=10), "measure": "Worst case"}
         st.pareto_keys = tuple(k for k, cb in self.pareto_keys.items() if cb.value) or ("length",)
         req = self.costs.requirements()
         st.planner.zoning = opts["zoning"] or req["require_one_config"]

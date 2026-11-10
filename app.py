@@ -253,6 +253,8 @@ def build_app(
 
         tolerance = TolerancePanel(server, session, results.selected)  # v8 T5
         tolerance.on_done = lambda: targets.heat.draw()  # v8 T8: Colour part by -> tolerance
+        stations.tolerance_settings = tolerance.settings  # v8 T12: robust objective
+        tool_opt.tolerance_settings = tolerance.settings
         from ui.pareto_ui import ParetoView
 
         pareto = ParetoView(  # v8 T11: Results -> Pareto front
