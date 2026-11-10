@@ -5,7 +5,7 @@ ends fix it). The search is CMA-ES over the active components in normalized [0, 
 coordinates. Every candidate is planned with the station planner's quick plan (no
 refinement), and the objective is the full cost J (user decision: best overall cost:
 unreached points, stations, travel, manipulability, clearance, limits and the connector
-length as one weighted term). Payload is not considered (torque / payload checks off).
+length as one weighted term).
 The best candidate is planned once more with refinement.
 """
 

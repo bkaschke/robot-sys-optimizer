@@ -40,7 +40,7 @@ class PlacementPanel:
         self._map_key = None
         self._handles: list = []
         gui = server.gui
-        with gui.add_folder("Base placement (reachability)"):
+        with gui.add_folder("Base placement (reachability)", expand_by_default=False):
             self.res = gui.add_number("Map cell (mm)", 50.0, min=10.0, max=200.0, step=5.0)
             self.grid = gui.add_number("Heatmap cell (mm)", 25.0, min=5.0, max=200.0, step=5.0)
             self.half = gui.add_number("Search half-width (m)", 2.5, min=0.5, max=10.0, step=0.5)
@@ -51,7 +51,9 @@ class PlacementPanel:
             )
             self.move = gui.add_button("Move base to best", disabled=True)
             self.hide = gui.add_button("Hide heatmap")
-        self.show.on_click(lambda e: threading.Thread(target=self.compute, args=(e,), daemon=True).start())
+        self.show.on_click(
+            lambda e: threading.Thread(target=self._compute_safe, args=(e,), daemon=True).start()
+        )
 
         @self.move.on_click
         def _(e) -> None:
@@ -109,6 +111,15 @@ class PlacementPanel:
         )
         self._draw(len(P))
 
+    def _compute_safe(self, event=None) -> None:
+        """``compute`` in the background thread: any error is shown and logged (it used to end
+        the thread silently, leaving no heatmap and no message)."""
+        try:
+            self.compute(event)
+        except Exception as err:
+            self.show.disabled, self.progress.visible = False, False
+            notify(event, "Base placement failed", str(err))
+
     def _progress(self, f: float) -> None:
         self.progress.value = 100.0 * f
 
@@ -153,7 +164,7 @@ class PlacementPanel:
         self.info.content = (
             f"Best base: **x {bx * 1000:.0f} mm, y {by * 1000:.0f} mm**  \n"
             f"covers {v.coverage[k]:.1f}/{n_targets} targets (map estimate), worst-point "
-            f"manipulability {v.quality[k]:.2f}  \n_Yaw does not matter for this robot. Run the "
-            f"feasibility check to confirm with collisions and torque._"
+            f"manipulability {v.quality[k]:.2f}  \n_The map ignores collisions: run the "
+            f"feasibility check to confirm._"
         )
         self.move.disabled = False

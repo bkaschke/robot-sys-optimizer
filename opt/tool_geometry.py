@@ -150,10 +150,8 @@ class _Evaluator:
             world_bodies=wb,
             obstacles=self.obstacles,
         )
-        # tool geometry optimization ignores payload (user decision, v2): torque / payload
-        # checks off here; the feasibility check and the station planner still apply them
         checker = FeasibilityChecker(
-            self.robot, self.ik, tm, scene, self.T_base0, self.T_part, CheckSettings(payload=False)
+            self.robot, self.ik, tm, scene, self.T_base0, self.T_part, CheckSettings()
         )
         checker.cancelled = self.cancelled
         return checker

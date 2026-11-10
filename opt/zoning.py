@@ -5,7 +5,7 @@ For every station:
      (``FeasibilityChecker.check_point_configs``, one pass over the candidate poses);
   2. the fewest configurations that cover all points are chosen (``core.configs.min_zones``,
      exact), each point taking its best solution among them;
-  3. the chosen solutions get the station's robustness checks (tip-over, localization)
+  3. the chosen solutions get the station's robustness checks (localization)
      again; a point that fails keeps its original verified solution (and configuration);
   4. each zone's points are put in serpentine path order and their joint values unwrapped
      (+-360 deg copies) for continuity; jumps of joint 4/6 above 180 deg that remain count.

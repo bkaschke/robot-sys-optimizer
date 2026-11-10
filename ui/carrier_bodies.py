@@ -72,7 +72,6 @@ class BodyEditor:
             self.mesh_info = gui.add_markdown("")
             self.xyz = gui.add_vector3("Position (mm)", (0.0, 0.0, 0.0), step=5.0)
             self.rpy = gui.add_vector3("Rotation rpy (deg)", (0.0, 0.0, 0.0), step=5.0)
-            self.kg = gui.add_number("Mass (kg, 0 = unknown)", 0.0, min=0.0, step=5.0)
             self.drag = gui.add_checkbox("Drag body with gizmo", False)
         self.mount_folder = gui.add_folder("Robot mount", expand_by_default=True)
         with self.mount_folder:
@@ -108,7 +107,7 @@ class BodyEditor:
                 self.mount_on.value = moving[-1]
             k = self.index()
             b = self.bodies[k] if k is not None else None
-            for h in (self.name, self.attach, self.xyz, self.rpy, self.kg, self.drag, self.dup, self.remove):
+            for h in (self.name, self.attach, self.xyz, self.rpy, self.drag, self.dup, self.remove):
                 h.disabled = b is None
             self.box.visible = b is not None and b.shape == "box"
             self.cyl.visible = b is not None and b.shape == "cylinder"
@@ -124,7 +123,6 @@ class BodyEditor:
                     self.mesh_info.content = f"Mesh `{b.mesh}` ({b.units})"
                 self.xyz.value = tuple(v * 1000 for v in b.pose.xyz)
                 self.rpy.value = _deg(b.pose.rpy)
-                self.kg.value = b.kg or 0.0
             m = self.p.mount_pose
             self.mount_xyz.value = tuple(v * 1000 for v in m.xyz)
             self.mount_rpy.value = _deg(m.rpy)
@@ -138,7 +136,6 @@ class BodyEditor:
             name=self.name.value.strip() or b.name,
             attach=ATTACH[self.attach.value],
             pose=Pose(xyz=tuple(v / 1000 for v in self.xyz.value), rpy=tuple(np.radians(self.rpy.value))),
-            kg=self.kg.value or None,
         )
         if b.shape == "box":
             d["size"] = tuple(v / 1000 for v in self.box.value)
@@ -236,7 +233,7 @@ class BodyEditor:
                 self.sync()
                 self.p.draw()  # highlight the selected body
 
-        for h in (self.name, self.attach, self.box, self.cyl, self.xyz, self.rpy, self.kg):
+        for h in (self.name, self.attach, self.box, self.cyl, self.xyz, self.rpy):
             h.on_update(self._edit)
 
         self.add_box.on_click(lambda e: self.add_shape("box", e))

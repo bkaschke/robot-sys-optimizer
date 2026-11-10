@@ -13,7 +13,6 @@ class ProcessPreset:
     label: str
     contact: str  # "none": whole tool must stay clear of the part; "tcp": contact faces may touch
     tolerances: Tolerances
-    process_force_N: float = 0.0
     line_of_sight: bool = False
     approach_m: float = 0.0
     notes: str = ""
@@ -31,14 +30,12 @@ PRESETS: dict[str, ProcessPreset] = {
         "Sanding / polishing",
         "tcp",
         Tolerances(spin_deg="free", tilt_deg=10.0, standoff_m=0.0),
-        process_force_N=50.0,
-        notes="Pad only touches; process force enters the torque check.",
+        notes="Pad only touches the part.",
     ),
     "grinding": ProcessPreset(
         "Grinding / deburring",
         "tcp",
         Tolerances(spin_deg=0.0, tilt_deg=15.0, standoff_m=0.0),
-        process_force_N=80.0,
         notes="Spin fixed to the travel direction; edge targets.",
     ),
     "gripping": ProcessPreset(
@@ -72,7 +69,6 @@ def apply_preset(ee: EndEffector, process: ProcessType) -> EndEffector:
         update={
             "process": process,
             "tolerances": p.tolerances,
-            "process_force_N": p.process_force_N,
             "line_of_sight": p.line_of_sight,
             "approach_m": p.approach_m,
             "tcps": tcps,

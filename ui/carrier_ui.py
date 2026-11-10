@@ -1,6 +1,6 @@
 """External Axis tab (M9 + carrier builder): static or movable base, the carrier built from
 boxes, cylinders and meshes (ui.carrier_bodies), the robot mount, standoffs, keep-outs,
-localization and tip-over settings, and DOF sliders to jog the carrier.
+localization settings, and DOF sliders to jog the carrier.
 
 Axis-type and safety fields are committed with "Apply base settings"; body and mount edits
 apply immediately. Both go through ``commit`` (validated as schema.Base).
@@ -51,7 +51,7 @@ DEFAULTS = {
     "mobile": Base(
         mode="movable",
         carrier="mobile",
-        chassis=Primitive(shape="box", size=(1.2, 0.8, 0.4), kg=300),
+        chassis=Primitive(shape="box", size=(1.2, 0.8, 0.4)),
         riser=Primitive(shape="cylinder", radius=0.15, height=0.3),
         T_mount=Pose(xyz=(0.2, 0, 0.7)),
         joints=CarrierJoints(x=(-4.0, 4.0), y=(-4.0, 4.0), yaw_deg=(-180, 180)),
@@ -118,7 +118,6 @@ class CarrierPanel:
             self.env = gui.add_number("Keep-out clearance (mm)", 100.0, min=0.0, step=10.0)
             self.keepouts = gui.add_text("Keep-outs (mm)", "", hint="x0,y0,x1,y1; x0,y0,x1,y1 (floor boxes)")
             self.loc = gui.add_vector2("Localization ±mm / ±deg (mobile)", (10.0, 1.0), step=1.0)
-            self.tip = gui.add_checkbox("Tip-over check (mobile, needs mass)", False)
         self.apply = gui.add_button("Apply base settings", color="green")
         if dof_container is not None:  # the left panel's Jog folder (app.py)
             self.dof_folder = dof_container
@@ -155,7 +154,7 @@ class CarrierPanel:
         self.frame_xyz.visible = self.frame_yaw.visible = movable and kind in ("rail", "gantry")
         self.ty.visible = movable and kind in ("mobile", "gantry")
         self.tyaw.visible = movable and kind == "mobile"
-        self.loc.visible = self.tip.visible = movable and kind == "mobile"
+        self.loc.visible = movable and kind == "mobile"
         carrier_mobile.show(self, movable, kind)
         _label(
             self.tx,
@@ -210,7 +209,6 @@ class CarrierPanel:
             )
             self.loc.value = (b.localization_m * 1000, b.localization_deg)
             carrier_mobile.load(self, b)
-            self.tip.value = b.tip_over
             self.bodies = list(b.bodies)
             self.mount_pose = b.T_mount
             self._dof_sig = None  # next refresh re-reads the slider values from the base pose
@@ -250,7 +248,6 @@ class CarrierPanel:
             ),
             localization_m=self.loc.value[0] / 1000,
             localization_deg=self.loc.value[1],
-            tip_over=self.tip.value,
             **carrier_mobile.collect(self, kind),
         )
 

@@ -7,7 +7,7 @@ examples/rail_long_part/project.json
     the 6 m long test rail, a wall keep-out behind the part, 250 mm grid on the top face.
 examples/mobile_amr/project.json
     UR20 on a mobile robot designed from simple shapes (4 wheels, chassis, battery box,
-    column, robot on the column), tip-over check on, same long part, top face.
+    column, robot on the column), same long part, top face.
 
 v6, around the 3 m tall wall (assets/parts/tall_wall.stl, 2 x 0.3 m, on the floor):
 examples/gantry_overhead/project.json
@@ -54,10 +54,8 @@ def rail_base() -> Base:
         pose=Pose(xyz=(0.0, 0.15, 0.0)),
         bodies=[
             Primitive(name="track", shape="box", size=(7.0, 0.3, 0.1), attach="fixed"),
-            Primitive(name="carriage", shape="box", size=(0.5, 0.5, 0.15), pose=Pose(xyz=(0, 0, 0.1)), kg=60),
-            Primitive(
-                name="riser", shape="cylinder", radius=0.15, height=0.45, pose=Pose(xyz=(0, 0, 0.25)), kg=40
-            ),
+            Primitive(name="carriage", shape="box", size=(0.5, 0.5, 0.15), pose=Pose(xyz=(0, 0, 0.1))),
+            Primitive(name="riser", shape="cylinder", radius=0.15, height=0.45, pose=Pose(xyz=(0, 0, 0.25))),
         ],
         T_mount=Pose(xyz=(0.0, 0.0, 0.7)),
         joints=CarrierJoints(x=(-3.0, 3.0)),
@@ -67,7 +65,7 @@ def rail_base() -> Base:
 
 
 def mobile_base() -> Base:
-    wheel = dict(shape="cylinder", radius=0.1, height=0.08, kg=10)
+    wheel = dict(shape="cylinder", radius=0.1, height=0.08)
     wheels = [
         Primitive(name=f"wheel_{tag}", pose=Pose(xyz=(x, y, 0.1), rpy=(np.pi / 2, 0, 0)), **wheel)
         for tag, x, y in (("fl", 0.45, 0.39), ("fr", 0.45, -0.31), ("rl", -0.45, 0.39), ("rr", -0.45, -0.31))
@@ -77,13 +75,9 @@ def mobile_base() -> Base:
         carrier="mobile",
         bodies=[
             *wheels,
-            Primitive(name="chassis", shape="box", size=(1.1, 0.7, 0.3), pose=Pose(xyz=(0, 0, 0.1)), kg=220),
-            Primitive(
-                name="battery", shape="box", size=(0.35, 0.5, 0.2), pose=Pose(xyz=(-0.3, 0, 0.4)), kg=60
-            ),
-            Primitive(
-                name="column", shape="cylinder", radius=0.16, height=0.3, pose=Pose(xyz=(0.2, 0, 0.4)), kg=25
-            ),
+            Primitive(name="chassis", shape="box", size=(1.1, 0.7, 0.3), pose=Pose(xyz=(0, 0, 0.1))),
+            Primitive(name="battery", shape="box", size=(0.35, 0.5, 0.2), pose=Pose(xyz=(-0.3, 0, 0.4))),
+            Primitive(name="column", shape="cylinder", radius=0.16, height=0.3, pose=Pose(xyz=(0.2, 0, 0.4))),
         ],
         T_mount=Pose(xyz=(0.2, 0.0, 0.7)),
         joints=CarrierJoints(x=(-4.0, 4.0), y=(-3.0, 0.5), yaw_deg=(-180, 180)),
@@ -91,7 +85,6 @@ def mobile_base() -> Base:
         standoff_m=Standoffs(carrier_part_min=0.3, carrier_part_preferred=0.5, carrier_env_min=0.1),
         localization_m=0.01,
         localization_deg=1.0,
-        tip_over=True,
         facing="front",  # v2: the robot side faces the part, one fixed 400 mm standoff (opt.contour)
         fixed_standoff_m=0.4,
     )
@@ -169,14 +162,9 @@ def gantry_base() -> Base:
                 size=(0.3, 3.4, 0.25),
                 pose=Pose(xyz=(0, 0, 0.0)),
                 attach="x_axis",
-                kg=80,
             ),
-            Primitive(
-                name="carriage", shape="box", size=(0.5, 0.5, 0.25), pose=Pose(xyz=(0, 0, -0.25)), kg=80
-            ),
-            Primitive(
-                name="drop", shape="cylinder", radius=0.12, height=0.6, pose=Pose(xyz=(0, 0, -0.85)), kg=30
-            ),
+            Primitive(name="carriage", shape="box", size=(0.5, 0.5, 0.25), pose=Pose(xyz=(0, 0, -0.25))),
+            Primitive(name="drop", shape="cylinder", radius=0.12, height=0.6, pose=Pose(xyz=(0, 0, -0.85))),
         ],
         T_mount=Pose(xyz=(0.0, 0.0, -0.85), rpy=(np.pi, 0.0, 0.0)),  # inverted under the drop
         joints=CarrierJoints(x=(-2.4, 2.4), y=(-1.4, 1.4)),
@@ -206,14 +194,9 @@ def floor_xy_base() -> Base:
                 size=(0.3, 1.8, 0.1),
                 pose=Pose(xyz=(0, 0, 0.08)),
                 attach="x_axis",
-                kg=50,
             ),
-            Primitive(
-                name="carriage", shape="box", size=(0.4, 0.5, 0.12), pose=Pose(xyz=(0, 0, 0.18)), kg=50
-            ),
-            Primitive(
-                name="riser", shape="cylinder", radius=0.15, height=0.48, pose=Pose(xyz=(0, 0, 0.30)), kg=40
-            ),
+            Primitive(name="carriage", shape="box", size=(0.4, 0.5, 0.12), pose=Pose(xyz=(0, 0, 0.18))),
+            Primitive(name="riser", shape="cylinder", radius=0.15, height=0.48, pose=Pose(xyz=(0, 0, 0.30))),
         ],
         T_mount=Pose(xyz=(0.0, 0.0, 0.78)),
         joints=CarrierJoints(x=(-2.8, 2.8), y=(-0.35, 0.35)),
@@ -227,7 +210,7 @@ def mobile_lift_base() -> Base:
     b = mobile_base()
     bodies = [p for p in b.bodies if p.name != "column"]
     bodies += [
-        Primitive(name="mast", shape="box", size=(0.25, 0.3, 0.3), pose=Pose(xyz=(0.2, 0, 0.4)), kg=60),
+        Primitive(name="mast", shape="box", size=(0.25, 0.3, 0.3), pose=Pose(xyz=(0.2, 0, 0.4))),
         Primitive(
             name="lift_stage",  # a 1 m column, inside the chassis and mast when lowered
             shape="cylinder",
@@ -235,7 +218,6 @@ def mobile_lift_base() -> Base:
             height=1.0,
             pose=Pose(xyz=(0.2, 0, -0.3)),
             attach="lift",
-            kg=20,
         ),
     ]
     return b.model_copy(

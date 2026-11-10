@@ -169,7 +169,6 @@ def build_report(r: ReportInput) -> str:
         "tcp_world_z_mm",
         "tilt_deg",
         "clearance_mm",
-        "torque_util",
         "limit_margin_deg",
         "reason",
     ]

@@ -28,7 +28,6 @@ WORKSPACE = Path(os.environ.get("RSO_WORKSPACE") or REPO / "workspace")
 DEFAULT_PROJECT_DIR = WORKSPACE / "default"
 MESH_EXTS = (".stl", ".obj", ".ply")
 UNIT_SCALE = {"m": 1.0, "mm": 1e-3, "in": 0.0254}
-HOME_Q = {"ur20": np.radians([0, -90, 90, -90, -90, 0])}
 MOUNT_RPY = {"floor": (0.0, 0.0, 0.0), "wall": (0.0, -np.pi / 2, 0.0), "ceiling": (np.pi, 0.0, 0.0)}
 
 
@@ -88,7 +87,7 @@ class Session:
             raise ValueError(f"unknown robot '{name}'")
         self.robot = Robot.from_registry(name)
         self.robot_name, self.robot_urdf = name, None
-        self.q = HOME_Q.get(name, np.zeros(self.robot.nq)).copy()
+        self.q = self.robot.home_q()  # the spec.yaml home pose
         self.home_deg = None
 
     def load_robot_from_urdf(self, urdf: Path, flange_link: str | None = None) -> None:
@@ -209,7 +208,6 @@ class Session:
                 mount=self.mount,
                 base_pose=matrix_to_pose(self.T_world_base),
                 ik=r.spec.ik,
-                payload_spec=r.spec.payload,
                 home_deg=None if self.home_deg is None else [float(v) for v in self.home_deg],
                 joint_limits_deg=r.spec.limits_deg,
             )

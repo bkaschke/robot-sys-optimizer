@@ -15,10 +15,7 @@ if TYPE_CHECKING:
 
 
 def _robust(checker, t: Targets, i: int, r: PointResult, v: dict, sites) -> tuple[bool, str]:
-    """Extra per-point checks at a station: tip-over, then localization perturbations."""
-    ok, why = sites.point_ok(v, r, checker, t.N_world[i])
-    if not ok:
-        return False, why
+    """Extra per-point checks at a station: localization perturbations."""
     perturbed = sites.perturbations(v)
     result = (True, "")
     for vp in perturbed:

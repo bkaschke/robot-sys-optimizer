@@ -1,4 +1,4 @@
-"""M1 checks: registry, FK, Jacobian, gravity torques, analytic + numeric IK.
+"""M1 checks: registry, FK, Jacobian, analytic + numeric IK.
 
 Done-when: IK round trip (random q -> FK -> IK -> FK) matches within 1e-6 m on
 10,000 samples, and all solution branches are found.
@@ -43,8 +43,6 @@ def test_registry_lists_ur20():
     assert "ur20" in list_robots()
     spec = load_spec("ur20")
     assert spec.ik == "ur_analytic" and spec.flange_link == "tool0"
-    assert spec.payload.rated_kg == 20
-    assert spec.payload.is_complete()  # payload curve stands in for the unpublished wrist moments
 
 
 def test_unknown_robot_rejected():
@@ -88,48 +86,6 @@ def test_jacobian_matches_finite_difference(ur20):
             dR = Tp[:3, :3] @ Tm[:3, :3].T  # small rotation ~ I + [w]x * 2eps
             w = np.array([dR[2, 1] - dR[1, 2], dR[0, 2] - dR[2, 0], dR[1, 0] - dR[0, 1]]) / 2
             assert np.allclose(w / (2 * eps), J[3:, i], atol=1e-6)
-
-
-# --- gravity / static torques ----------------------------------------------------
-
-
-def _potential(ur20: Robot, q, m, com):
-    """Payload potential energy m*g*z of a point mass at `com` (flange frame)."""
-    T = ur20.fk(q)
-    return m * 9.81 * (T[:3, :3] @ com + T[:3, 3])[2]
-
-
-def test_payload_gravity_matches_energy_gradient(ur20):
-    rng = np.random.default_rng(2)
-    m, com = 12.0, np.array([0.0, 0.03, 0.25])
-    for _ in range(10):
-        q = ur20.random_q(rng)
-        tau = ur20.static_torques(q, payload_kg=m, payload_com=com) - ur20.gravity_torques(q)
-        eps = 1e-6
-        grad = np.array(
-            [
-                (_potential(ur20, q + eps * e, m, com) - _potential(ur20, q - eps * e, m, com)) / (2 * eps)
-                for e in np.eye(6)
-            ]
-        )
-        assert np.allclose(tau, grad, atol=1e-4)
-
-
-def test_arm_gravity_physical_sanity(ur20):
-    q = np.array([0.3, -np.pi / 2, 0, -np.pi / 2, 0, 0])  # arm pointing straight up
-    g = ur20.gravity_torques(q)
-    assert abs(g[0]) < 1e-9  # base axis is vertical: gravity never loads it
-    assert np.all(np.abs(g[1:3]) < 5.0)  # near-vertical arm: shoulder/elbow almost unloaded
-    q_out = np.array([0.0, 0.0, 0, 0, 0, 0])  # stretched horizontally: big shoulder torque
-    assert abs(ur20.gravity_torques(q_out)[1]) > 300
-
-
-def test_process_force_torque(ur20):
-    # pushing down with F at the flange: tau = J^T F exactly (static, no gravity term)
-    q = np.array([0.1, -1.2, 1.5, -1.9, -1.57, 0.4])
-    F = np.array([0, 0, -50.0, 0, 0, 0])
-    tau = ur20.static_torques(q, wrench=F) - ur20.gravity_torques(q)
-    assert np.allclose(tau, ur20.jacobian(q).T @ F)
 
 
 # --- IK helpers ------------------------------------------------------------------

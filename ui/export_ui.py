@@ -161,7 +161,7 @@ class ExportPanel:
                 images.append(("3D view at export time", png_data_uri(img)))
             except Exception as err:  # renderer unavailable / timed out: the report still works
                 notes.append(f"3D snapshot not included ({type(err).__name__}).")
-        # per-point notes carry "payload curve ... extrapolated (estimate)" only where it applied
+        # per-point notes (if any) go into the report
         flagged = sorted(
             {n for r in s.result_points.get(sol.label, {}).values() for n in getattr(r, "notes", [])}
         )

@@ -4,6 +4,7 @@ streams each solution into ``session.results`` (best cost first)."""
 from __future__ import annotations
 
 import threading
+import time
 from collections.abc import Callable
 
 import numpy as np
@@ -115,8 +116,13 @@ class StationsPanel:
             return notify(event, "Cannot plan", "Need a tool, a part and targets")
         if s.robot is None:
             return notify(event, "No robot", "Choose a robot first (tab 1 Robot & cell)")
-        if s.robot.spec.ik != "ur_analytic":
-            return notify(event, "Not supported", "Station planning needs a UR-type arm (v1)")
+        if not getattr(make_ik(s.robot), "batch", False):
+            return notify(
+                event,
+                "Not supported",
+                "Station planning needs an analytic IK solver (spec.yaml: ik ur_analytic or opw). "
+                "See the user guide, Adding a robot.",
+            )
         sites = s.sites()
         static = sites is None
         settings = PlannerSettings(
@@ -209,7 +215,7 @@ class StationsPanel:
                     if best
                     else "_No solution found._"
                 )
-                plan_log(s, best, self._cancel.is_set())
+                plan_log(s, best, self._cancel.is_set(), self._t0)
                 if self._cancel.is_set():
                     self.status.content = "**Cancelled.** " + (
                         f"Best so far: **{best.label}**, cost {best.cost:.2f}"
@@ -226,6 +232,7 @@ class StationsPanel:
             finally:
                 self.run.visible, self.stop.visible, self.progress.visible = True, False, False
 
+        self._t0 = time.monotonic()
         self._thread = threading.Thread(target=work, daemon=True)
         self._thread.start()
         if block:

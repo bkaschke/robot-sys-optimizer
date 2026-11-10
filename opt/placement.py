@@ -7,7 +7,7 @@ Pipeline for a fixed tool geometry:
      (min stations, then max sum of best manipulability via an assignment model;
      if k_min > max_stations: max coverage with max_stations);
   4. order stations by a small open TSP;
-  5. refine each station with CMA-ES on the exact checker (collision + torque);
+  5. refine each station with CMA-ES on the exact checker (collision);
   6. final exact verification and cost; each solution is streamed via ``on_solution``.
 
 Base yaw is irrelevant to reach for full-turn first joints (see opt/reachability.py); it

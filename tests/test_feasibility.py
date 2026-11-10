@@ -17,7 +17,7 @@ from core.ik import make_ik
 from core.robot import Robot
 from core.schema import TargetGroup, TargetPoint, Targets
 from core.tool import ToolModel, load_tool
-from core.transforms import make_T, rpy_to_matrix
+from core.transforms import make_T
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -125,20 +125,6 @@ def test_scene_pocket_needs_long_tool(robot, ik, L, expected):
         assert r.reason == "collision"
 
 
-def test_scene_torque_limit(robot, ik):
-    """A 3000 N process force needs more than 80% of the 738 N·m shoulder torque at ~1 m
-    lever -> every IK branch fails the torque check."""
-    t = _targets([((0, 0, 0.02), (0, 0, 1))], SANDING)
-    r = _checker(robot, ik, gp.flat_plate(), make_T(p=(0.9, 0, 0.3)), process_force_N=3000.0).check_all(t)[0]
-    assert r.status == "unreachable" and r.reason == "torque"
-
-
-def test_rated_payload_exceeded(robot, ik):
-    t = _targets([((0, 0, 0.02), (0, 0, 1))], SANDING)
-    r = _checker(robot, ik, gp.flat_plate(), make_T(p=(0.9, 0, 0.3)), mass_kg=25.0).check_all(t)[0]
-    assert r.status == "unreachable" and r.reason == "torque"
-
-
 def test_scanning_standoff(robot, ik):
     """Contact-free process: TCP held 200 mm off the surface along the normal."""
     from core.process import apply_preset
@@ -179,40 +165,3 @@ def test_fixed_spin_is_centred_first():
     assert spins[0] == 90.0 and min(spins) >= 80.0 and max(spins) <= 100.0
     T0 = target_frame(np.zeros(3), np.array([0, 0, 1.0]))
     assert np.allclose(T0[:3, 0], [1, 0, 0])  # spin reference: part +x
-
-
-def test_ceiling_mount_flips_gravity(robot):
-    q = np.array([0.2, -1.0, 1.1, -0.4, 0.9, 0.0])
-    floor = robot.gravity_torques(q)
-    robot.set_mount(rpy_to_matrix((np.pi, 0, 0)))
-    try:
-        assert np.allclose(robot.gravity_torques(q), -floor)
-    finally:
-        robot.set_mount(np.eye(3))
-
-
-# --- payload curve (UR20 datasheet) -----------------------------------------------------------
-
-
-def test_payload_curve_values(robot):
-    spec = robot.spec.payload
-    assert spec.allowed_kg(0) == (20.0, False)
-    assert spec.allowed_kg(200) == (20.0, False)
-    assert spec.allowed_kg(500)[0] == pytest.approx(13.5)  # halfway down 20 -> 7
-    assert spec.allowed_kg(800) == (7.0, False)
-    kg, extrap = spec.allowed_kg(1000)  # linear extrapolation (estimate)
-    assert extrap and kg == pytest.approx(7 - 13 / 600 * 200)
-    assert spec.allowed_kg(2000)[0] == 0.0
-
-
-def test_payload_curve_check(robot):
-    from core.payload import static_check
-
-    q = np.radians([0, -90, 90, -90, -90, 0])
-    ok = static_check(robot, q, 10.0, np.array([0, 0, 0.3]), util_limit=1.0)
-    assert ok.ok and not any("payload curve" in n for n in ok.notes)
-    heavy = static_check(robot, q, 15.0, np.array([0, 0, 0.6]), util_limit=1.0)  # curve: 9.6 kg at 600 mm
-    assert not heavy.ok and any("payload curve" in n for n in heavy.notes)
-    far = static_check(robot, q, 2.0, np.array([0, 0, 0.9]), util_limit=1.0)
-    assert any("extrapolated" in n for n in far.notes)
-    assert not any("skipped" in n for n in ok.notes)

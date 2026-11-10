@@ -83,7 +83,6 @@ CSV_COLUMNS = [
     "standoff_mm",
     "clearance_mm",
     "manipulability",
-    "torque_util",
     "limit_margin_deg",
 ]
 
@@ -161,7 +160,6 @@ def tcp_rows(
             standoff_mm=f"{r.standoff * 1000:.1f}",
             clearance_mm=f"{min(r.clearance, 99.999) * 1000:.1f}",
             manipulability=f"{r.manipulability:.4f}",
-            torque_util=f"{r.torque_util:.3f}",
             limit_margin_deg=f"{r.limit_margin_deg:.1f}",
         )
         for j, v in enumerate(np.degrees(r.q)):
@@ -200,7 +198,7 @@ def _origin(T: np.ndarray) -> str:
 def tool_urdf(ee: EndEffector, values: ExtensionValues | None, head_urdf: Path | None) -> str:
     """URDF of the tool with the given geometry, rooted at ``flange`` (= robot tool0).
 
-    Chain: flange -> mount -> extension segment links (cylinder + sphere caps, mass per m)
+    Chain: flange -> mount -> extension segment links (cylinder + sphere caps)
     -> head root (the original head URDF's links/joints, copied) -> tcp_<name> frames.
     Head mesh paths stay relative to the head URDF's folder (copy that folder alongside).
     """
@@ -222,26 +220,16 @@ def tool_urdf(ee: EndEffector, values: ExtensionValues | None, head_urdf: Path |
         xx = ref - (ref @ z) * z
         xx /= np.linalg.norm(xx)
         T_seg = make_T(np.column_stack([xx, np.cross(z, xx), z]), a)  # flange frame, z along segment
-        mass = x.kg_per_m * length
         r = x.radius
         geo = f'<geometry><cylinder radius="{r}" length="{length:.9g}"/></geometry>'
         cap = f'<geometry><sphere radius="{r}"/></geometry>'
-        inertial = ""
-        if mass > 0:
-            ixx = mass * (3 * r * r + length * length) / 12
-            izz = mass * r * r / 2
-            inertial = (
-                f'<inertial><origin xyz="0 0 {length / 2:.9g}"/><mass value="{mass:.6g}"/>'
-                f'<inertia ixx="{ixx:.6g}" iyy="{ixx:.6g}" izz="{izz:.6g}" ixy="0" ixz="0" iyz="0"/>'
-                "</inertial>"
-            )
         body = (
             f'<visual><origin xyz="0 0 {length / 2:.9g}"/>{geo}</visual>'
             f'<collision><origin xyz="0 0 {length / 2:.9g}"/>{geo}</collision>'
             f'<collision><origin xyz="0 0 0"/>{cap}</collision>'
             f'<collision><origin xyz="0 0 {length:.9g}"/>{cap}</collision>'
         )
-        out.append(f'  <link name="extension_{k}">{body}{inertial}</link>')
+        out.append(f'  <link name="extension_{k}">{body}</link>')
         out.append(
             f'  <joint name="mount_extension_{k}" type="fixed"><parent link="mount"/>'
             f'<child link="extension_{k}"/>{_origin(T_inv_mount @ T_seg)}</joint>'
@@ -382,8 +370,6 @@ def envelope_svg(tool: ToolModel, values: ExtensionValues | None = None, width: 
     for name, _ in tcps:
         off = tool.T_flange_tcp(name, v)[:3, 3] * 1000
         lines.append(f"TCP {name}: ({off[0]:.0f}, {off[1]:.0f}, {off[2]:.0f}) mm")
-    mp = tool.mass_properties(v)
-    lines.append(f"mass {mp.mass_kg:.2f} kg, COG {np.linalg.norm(mp.com_flange) * 1000:.0f} mm from flange")
     for i, t in enumerate(lines):
         el.append(f'<text x="{width - 205}" y="{24 + 16 * i}" fill="#222">{t}</text>')
     el.append(

@@ -99,6 +99,11 @@ def main(out: Path) -> None:
     # exports
     out.mkdir(parents=True, exist_ok=True)
     sol, results = geo.solution, geo.point_results
+    if sol is None:  # no length reaches every target: export the best design found instead
+        if not geo.designs:
+            print("no tool design to export")
+            return
+        sol, results = geo.designs[0].solution, geo.designs[0].point_results
     rows = ex.tcp_rows(sol, results, project_targets, robot, tool, Base(), np.eye(4))
     (out / "tcp_poses.csv").write_text(ex.rows_to_csv(rows), encoding="utf-8")
     ex.export_tool(ee, sol.tool_values, ROOT / ee.urdf, out / "tool")

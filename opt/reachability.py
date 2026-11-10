@@ -1,7 +1,7 @@
 """Reachability map, inverse reachability and base voting (plan § Solver strategy 1-2).
 
 The map answers "can the TCP be at position p (base frame) with tool axis d?" using IK +
-joint limits only (no collision, no torque: the exact check in core/feasibility does that).
+joint limits only (no collision: the exact check in core/feasibility does that).
 
 Symmetry: for arms whose first joint is a full-turn rotation about base z (all UR arms),
 reachability is invariant under rotation about that axis. The map is therefore stored on a
@@ -22,7 +22,7 @@ from pathlib import Path
 
 import numpy as np
 
-from core.ik.ur import URAnalyticIK, solve_batch, ur_manipulability
+from core.ik import make_ik
 from core.robot import Robot
 
 MAP_VERSION = 1
@@ -97,15 +97,18 @@ class ReachMap:
         progress: Callable[[float], None] | None = None,
         cancelled: Callable[[], bool] | None = None,
     ) -> ReachMap:
-        if robot.spec.ik != "ur_analytic":
-            raise NotImplementedError("reachability maps need the UR analytic solver (v1)")
+        ik = make_ik(robot)
+        if not getattr(ik, "batch", False):
+            raise NotImplementedError(
+                f"reachability maps need an analytic IK solver (spec.yaml ik: ur_analytic or opw); "
+                f"{robot.spec.name} uses '{robot.spec.ik}'"
+            )
         lower, upper = map_limits(robot)
         if upper[0] - lower[0] < 2 * np.pi - 1e-6:
             raise NotImplementedError("map symmetry needs a full-turn first joint")
-        ik = URAnalyticIK(robot)
         tcp_len = float(np.linalg.norm(T_flange_tcp[:3, 3]))
         reach = (robot.spec.reach_m or 2.0) + tcp_len + settings.res
-        d1 = ik.d1
+        d1 = ik.base_height
         r_vals = np.arange(0.0, reach + 1e-9, settings.res)
         z_vals = np.arange(d1 - reach, d1 + reach + 1e-9, settings.res)
         dirs = fibonacci_sphere(settings.n_dirs)
@@ -129,9 +132,9 @@ class ReachMap:
 
                     raise CancelledError
                 T[:, :3, 3] = (r, 0.0, z)
-                q, valid = solve_batch(ik, T @ T_tcp_flange)
+                q, valid = ik.solve_batch(T @ T_tcp_flange)
                 valid &= within_limits(q, lo, hi)
-                mu = np.where(valid, ur_manipulability(ik, q), 0.0).max(axis=1).reshape(D, S)
+                mu = np.where(valid, ik.manipulability(q), 0.0).max(axis=1).reshape(D, S)
                 ok = valid.any(axis=1).reshape(D, S)
                 reach_arr[i, j] = ok.any(axis=1)
                 manip_arr[i, j] = mu.max(axis=1)
@@ -150,6 +153,7 @@ class ReachMap:
             "robot": robot.spec.name,
             "urdf": hashlib.sha256(urdf).hexdigest(),
             "dh": robot.spec.dh.model_dump() if robot.spec.dh else None,
+            **({"opw": robot.spec.opw.model_dump()} if robot.spec.opw else {}),
             "limits": np.round(np.concatenate(map_limits(robot)), 9).tolist(),
             "tcp": np.round(T_flange_tcp, 6).tolist(),
             "settings": settings.__dict__,

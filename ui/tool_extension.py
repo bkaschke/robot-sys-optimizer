@@ -49,12 +49,11 @@ def build(gui, tab) -> None:
         "ones the optimizer may change._"
     )
     tab.radius = gui.add_number("Capsule radius (mm)", 40.0, min=1.0, step=1.0)
-    tab.kg_per_m = gui.add_number("Mass per m (kg/m)", 0.0, min=0.0, step=0.1)
     tab.nominal_folder = gui.add_folder("Rough placement")
 
 
 def widgets(tab) -> tuple:
-    return (tab.ext_type, *tab.ext_ranges.values(), tab.radius, tab.kg_per_m)
+    return (tab.ext_type, *tab.ext_ranges.values(), tab.radius)
 
 
 def keys_for(kind: str) -> tuple[str, ...]:
@@ -74,7 +73,6 @@ def commit(tab, d: dict) -> None:
     if kind != "bent":
         x["theta_deg"], x["d"] = (0.0, 0.0), (0.0, 0.0)
     x["radius"] = tab.radius.value / 1000
-    x["kg_per_m"] = tab.kg_per_m.value
     n = x["nominal"]
     for key in keys_for(kind):
         lo, hi = x[key]
@@ -111,7 +109,7 @@ def refresh(tab, x, on_nominal) -> None:
         w.visible = key in shown
     tab.ext_note.visible = x.type == "pose"
     tab.legacy_note.visible = x.type != "pose"
-    tab.radius.value, tab.kg_per_m.value = x.radius * 1000, x.kg_per_m
+    tab.radius.value = x.radius * 1000
     with tab.nominal_folder:
         for key in keys_for(x.type):
             label, k = FIELDS[key]

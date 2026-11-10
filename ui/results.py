@@ -13,7 +13,7 @@ from viser.extras import ViserUrdf
 from core import targets as tg
 from core.transforms import make_T, matrix_to_wxyz, rpy_to_matrix
 from ui.robot_view import quiet_remove
-from ui.session import HOME_Q, Session
+from ui.session import Session
 
 ROOT = "/results"
 STATION_COLORS = [(230, 60, 60), (40, 120, 230), (240, 170, 20), (150, 70, 200), (20, 170, 170), (90, 90, 90)]
@@ -351,7 +351,7 @@ class ResultsTab:
         self._used.add(k)
         self._ghosts.append(frame)
         names = list(urdf.get_actuated_joint_names())
-        q = q if q is not None else HOME_Q.get(self.s.robot_name or "", np.zeros(robot.nq))
+        q = q if q is not None else robot.home_q()
         cfg = np.zeros(len(names))
         cfg[[names.index(j) for j in robot.joint_names]] = q
         urdf.update_cfg(cfg)

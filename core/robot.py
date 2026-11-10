@@ -16,12 +16,11 @@ from typing import Literal
 import numpy as np
 import pinocchio as pin
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from core.schema import PayloadSpec
+from core.schema import drop_removed
 
 ROBOTS_DIR = Path(__file__).resolve().parents[1] / "assets" / "robots"
-GRAVITY = 9.81
 
 
 class DHParams(BaseModel):
@@ -37,8 +36,31 @@ class DHParams(BaseModel):
     d6: float
 
 
+class OPWParams(BaseModel):
+    """OPW parameters (m, rad) of an industrial 6R arm, as in ROS-Industrial opw_kinematics
+    parameter files: q_i = (theta_i + offsets_i) * sign_corrections_i (core.ik.opw)."""
+
+    model_config = ConfigDict(extra="forbid")
+    a1: float
+    a2: float
+    b: float = 0.0
+    c1: float
+    c2: float
+    c3: float
+    c4: float
+    offsets: tuple[float, float, float, float, float, float] = (0.0,) * 6
+    sign_corrections: tuple[int, int, int, int, int, int] = (1,) * 6
+
+
 class RobotSpec(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_removed(cls, data):
+        """Older spec.yaml files carry a ``payload`` section (removed in v7)."""
+        return drop_removed(data)
+
     name: str
     urdf: str
     base_link: str
@@ -53,8 +75,8 @@ class RobotSpec(BaseModel):
     home_deg: list[float] | None = None
     # user joint limits (deg, (min, max) per joint) inside the URDF's; None = the URDF limits
     limits_deg: list[tuple[float, float]] | None = None
-    dh: DHParams | None = None
-    payload: PayloadSpec = Field(default_factory=PayloadSpec)
+    dh: DHParams | None = None  # ik: ur_analytic
+    opw: OPWParams | None = None  # ik: opw
     folder: Path | None = None  # filled in by load_spec
 
 
@@ -83,7 +105,7 @@ def _skew(v: np.ndarray) -> np.ndarray:
 class Robot:
     """A registry robot loaded into Pinocchio. Not thread-safe (owns one pin.Data)."""
 
-    def __init__(self, spec: RobotSpec, gravity_base: np.ndarray | None = None):
+    def __init__(self, spec: RobotSpec):
         self.spec = spec
         urdf_path = spec.folder / spec.urdf
         self.model = pin.buildModelFromUrdf(str(urdf_path))
@@ -98,20 +120,16 @@ class Robot:
         self.urdf_upper = np.array(self.model.upperPositionLimit, dtype=float)
         self.lower, self.upper = self.urdf_lower.copy(), self.urdf_upper.copy()
         self.set_limits(spec.limits_deg)
-        self.effort = np.array(self.model.effortLimit, dtype=float)
         self.base_frame_id = self._frame_id(spec.base_link)
         self.flange_frame_id = self._frame_id(spec.flange_link)
-        # gravity in the base_link frame: (0, 0, -g) for a floor mount; walls/ceilings differ
-        g = np.array([0, 0, -GRAVITY]) if gravity_base is None else np.asarray(gravity_base, float)
-        self.model.gravity.linear = self._base_rotation_world() @ g
 
     @classmethod
-    def from_registry(cls, name: str, gravity_base: np.ndarray | None = None) -> Robot:
-        return cls(load_spec(name), gravity_base)
+    def from_registry(cls, name: str) -> Robot:
+        return cls(load_spec(name))
 
     @classmethod
     def from_urdf(cls, urdf_path: Path, base_link: str, flange_link: str, name: str | None = None) -> Robot:
-        """A non-registry robot (e.g. a user upload): numeric IK, unknown payload limits."""
+        """A non-registry robot (e.g. a user upload): numeric IK."""
         urdf_path = Path(urdf_path).resolve()
         spec = RobotSpec(
             name=name or urdf_path.stem,
@@ -127,16 +145,6 @@ class Robot:
         if not self.model.existFrame(name):
             raise ValueError(f"frame '{name}' not in URDF of {self.spec.name}")
         return self.model.getFrameId(name)
-
-    def _base_rotation_world(self) -> np.ndarray:
-        """Rotation world<-base_link of the URDF's own root (identity for the UR files)."""
-        pin.framesForwardKinematics(self.model, self.data, pin.neutral(self.model))
-        return np.asarray(self.data.oMf[self.base_frame_id].rotation)
-
-    def set_mount(self, R_world_base: np.ndarray) -> None:
-        """Point gravity along world -z for a base rotated by R_world_base (wall/ceiling)."""
-        g_base = np.asarray(R_world_base, float).T @ np.array([0.0, 0.0, -GRAVITY])
-        self.model.gravity.linear = self._base_rotation_world() @ g_base
 
     def set_limits(self, limits_deg: list | None) -> None:
         """Joint limits (deg, (min, max) per joint), kept inside the URDF limits; None = the
@@ -207,35 +215,3 @@ class Robot:
         """Yoshikawa measure sqrt(det(J J^T))."""
         J = self.jacobian(q, offset_flange)
         return float(np.sqrt(max(np.linalg.det(J @ J.T), 0.0)))
-
-    # --- statics ------------------------------------------------------------
-
-    def gravity_torques(self, q) -> np.ndarray:
-        """Joint torques that hold the bare arm against gravity."""
-        return np.array(pin.computeGeneralizedGravity(self.model, self.data, self._check_q(q)))
-
-    def static_torques(
-        self,
-        q,
-        payload_kg: float = 0.0,
-        payload_com=(0.0, 0.0, 0.0),
-        wrench=None,
-        wrench_point=(0.0, 0.0, 0.0),
-    ) -> np.ndarray:
-        """tau = g_arm(q) + J_com^T (m * -g) + J_p^T F.
-
-        payload_com and wrench_point are in the flange frame. ``wrench`` (fx fy fz mx my mz,
-        base-aligned) is what the tool exerts ON the environment, e.g. a 50 N sanding force
-        along -target.z; the joints must supply J^T wrench to produce it.
-        """
-        q = self._check_q(q)
-        if payload_kg < 0:
-            raise ValueError("payload mass must be >= 0")
-        tau = self.gravity_torques(q)
-        if payload_kg > 0:
-            g_base = self._base_rotation_world().T @ np.asarray(self.model.gravity.linear)
-            Jc = self.jacobian(q, payload_com)
-            tau -= Jc[:3].T @ (payload_kg * g_base)
-        if wrench is not None:
-            tau += self.jacobian(q, wrench_point).T @ np.asarray(wrench, float)
-        return tau

@@ -7,6 +7,7 @@ thread-safe); results land in ``session.feasibility`` and recolour the target po
 from __future__ import annotations
 
 import threading
+import time
 from collections.abc import Callable
 
 import numpy as np
@@ -42,7 +43,6 @@ class OptimizeTab:
         with gui.add_folder("Feasibility check"):
             self.clearance = gui.add_number("Clearance (mm)", 10.0, min=0.0, step=1.0)
             self.joint_margin = gui.add_number("Joint-limit margin (deg)", 5.0, min=0.0, step=1.0)
-            self.torque = gui.add_number("Torque utilization limit", 0.8, min=0.05, max=1.0, step=0.05)
             self.check_from = gui.add_dropdown(
                 "Check from", CHECK_FROM, hint="each point from its stop in the selected plan, or from here"
             )
@@ -50,7 +50,7 @@ class OptimizeTab:
             self.stop = gui.add_button("Cancel", visible=False)
             self.progress = gui.add_progress_bar(0.0, visible=False)
             self.summary = gui.add_markdown("_Not run yet._")
-        with gui.add_folder("Inspect result"):
+        with gui.add_folder("Inspect result", expand_by_default=False):
             self.source = gui.add_dropdown("Show", INSPECT_SOURCES, initial_value=INSPECT_SOURCES[1])
             self.pick = gui.add_slider("Point #", 0, 1, 1, 0)
             self.step_pts = gui.add_button_group(
@@ -107,7 +107,9 @@ class OptimizeTab:
         if s.robot is None:
             raise ValueError("choose a robot first (tab 1 Robot & cell)")
         robot = Robot(s.robot.spec)  # private Pinocchio data for this thread
-        settings = CheckSettings(self.joint_margin.value, self.torque.value, self.clearance.value / 1000)
+        settings = CheckSettings(
+            joint_margin_deg=self.joint_margin.value, clearance=self.clearance.value / 1000
+        )
         sites = s.sites()  # carrier bodies collide with the arm and tool too
         bb, wb = sites.scene_bodies() if sites is not None else ([], [])
         scene = CollisionScene(
@@ -161,7 +163,7 @@ class OptimizeTab:
                     + (" (no plan selected in Results)." if self.check_from.value == CHECK_FROM[0] else ".")
                 )
                 self._finish(len(res), len(targets.points), where)
-                log(f"Feasibility check finished: {len(res)} point(s). {where}", "done")
+                log(f"Feasibility check finished: {len(res)} point(s). {where}", "done", self._t0)
                 msg = unreached_report(
                     self.s.feasibility, [p.id for p in targets.points], "Feasibility check"
                 )
@@ -173,6 +175,7 @@ class OptimizeTab:
             finally:
                 self.run.visible, self.stop.visible, self.progress.visible = True, False, False
 
+        self._t0 = time.monotonic()
         self._thread = threading.Thread(target=work, daemon=True)
         self._thread.start()
         if block:
@@ -295,6 +298,6 @@ class OptimizeTab:
             f"Point **{r.id}**{where}: {r.status} with TCP `{r.tcp}`  \n"
             f"spin {r.spin_deg:.0f}°, tilt {r.tilt_deg:.1f}°, standoff {r.standoff * 1000:.0f} mm  \n"
             f"clearance {r.clearance * 1000:.1f} mm · manipulability {r.manipulability:.3f} · "
-            f"torque {100 * r.torque_util:.0f}% · limit margin {r.limit_margin_deg:.0f}°  \n"
+            f"limit margin {r.limit_margin_deg:.0f}°  \n"
             f"q (deg): {q}"
         )

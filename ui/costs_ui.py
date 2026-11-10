@@ -30,7 +30,6 @@ FIELDS = (
     ("manip", "Manipulability", "mean 1 / (1 + μ): low = near singular"),
     ("clearance", "Clearance", "mean shortfall below 50 mm to the part"),
     ("limits", "Joint limits", "mean closeness to a joint limit (within 30°)"),
-    ("torque", "Torque", "worst static torque use"),
     ("standoff", "Preferred standoff", "carrier closer than the preferred standoff"),
 )
 
@@ -41,7 +40,8 @@ class CostPanel:
         self.field = field  # Optimizer field holding these weights
         self._busy = False
         gui = server.gui
-        self.folder = gui.add_folder("Costs & requirements", expand_by_default=False)
+        title = "Costs & requirements" + (" (tool optimizer)" if field == "tool_weights" else "")
+        self.folder = gui.add_folder(title, expand_by_default=False)
         with self.folder:
             gui.add_markdown("**Must be met**")
             self.require_all = gui.add_checkbox("All points reachable", False)

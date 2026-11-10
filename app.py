@@ -79,9 +79,10 @@ def build_app(
     server.scene.add_frame("/world/origin", axes_length=0.2, axes_radius=0.005)
 
     state: dict = {"session": session}
-    dark_toggle = server.gui.add_checkbox("Dark mode", dark)
+    with server.gui.add_folder("Settings & help", expand_by_default=False):  # v7: out of the way
+        dark_toggle = server.gui.add_checkbox("Dark mode", dark)
+        guide = add_guide_panel(server, guide_port)
     dark_toggle.on_update(lambda e: apply_theme(server, dark_toggle.value))
-    guide = add_guide_panel(server, guide_port)
 
     def on_loaded() -> None:
         state["cell"].refresh()

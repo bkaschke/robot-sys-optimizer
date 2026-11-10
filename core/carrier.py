@@ -4,7 +4,7 @@ A carrier is a few extra DOFs that place the robot base (station mode: the carri
 then the arm works). See schema.Base for the frame conventions. This module turns a Base
 into: the DOF list and bounds, the robot base pose for given DOF values, the primitive
 bodies (moving with the carriage, or static like a rail track), their floor footprint, the
-travel metric between stations, a static tip-over check, and a URDF of the chain.
+travel metric between stations, and a URDF of the chain.
 
 Bodies come from ``Base.bodies`` (boxes, cylinders and meshes placed freely on the carriage
 or fixed in the carrier frame). Older projects use ``chassis``/``riser``/``track`` instead;
@@ -20,7 +20,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
-import pinocchio as pin
 import trimesh
 from shapely.affinity import affine_transform
 from shapely.geometry import MultiPoint, Polygon
@@ -29,7 +28,6 @@ from shapely.ops import unary_union
 from core.schema import Base, Pose, Primitive
 from core.transforms import make_T, pose_to_matrix, rpy_to_matrix
 
-G = 9.81
 REPO = Path(__file__).resolve().parents[1]
 UNIT_SCALE = {"m": 1.0, "mm": 1e-3, "in": 0.0254}
 MESH_EXTS = (".stl", ".obj", ".ply")
@@ -151,16 +149,11 @@ def body_top(p: Primitive, resolve: Resolver | None = None) -> np.ndarray:
     return np.array([(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, hi[2]])
 
 
-def _com(mesh: trimesh.Trimesh) -> np.ndarray:
-    return np.asarray(mesh.center_mass if mesh.is_volume else mesh.bounds.mean(axis=0))
-
-
 @dataclass
 class Body:
     name: str
     mesh: trimesh.Trimesh  # in its own frame
     T: np.ndarray  # world pose of that frame
-    kg: float | None = None
 
 
 def lift_levels(lo: float, hi: float, step: float = 0.25) -> np.ndarray:
@@ -250,7 +243,7 @@ class Carrier:
 
     def _bodies(self, attach: str, T_parent: np.ndarray) -> list[Body]:
         return [
-            Body(p.name, self.mesh(k), T_parent @ pose_to_matrix(p.pose), p.kg)
+            Body(p.name, self.mesh(k), T_parent @ pose_to_matrix(p.pose))
             for k, p in enumerate(self.specs)
             if p.attach == attach
         ]
@@ -374,58 +367,6 @@ class Carrier:
             dict(zip(self.dofs, map(float, vals), strict=True))
             for vals in zip(*(g.ravel() for g in grid), strict=True)
         ]
-
-    # --- tip-over -----------------------------------------------------------------------------
-
-    def tip_over(
-        self,
-        v: dict,
-        robot,
-        q: np.ndarray,
-        tool_kg: float,
-        tool_com_flange: np.ndarray,
-        force_world: np.ndarray | None,
-        tcp_world: np.ndarray | None,
-    ) -> tuple[bool, float]:
-        """Static stability of a mobile base: the centre of pressure of gravity (chassis,
-        riser, arm, tool) plus the part's reaction to the process force must lie inside the
-        chassis footprint shrunk by ``tip_margin_m``. Returns (ok, margin to the edge in m)."""
-        if self.kind != "mobile" or not self.base.tip_over:
-            return True, float("inf")
-        forces: list[tuple[np.ndarray, np.ndarray]] = []  # (point, force) in world
-        for body in self.moving_bodies(v):
-            if body.kg:
-                c = body.T[:3, :3] @ _com(body.mesh) + body.T[:3, 3]
-                forces.append((c, np.array([0, 0, -G * body.kg])))
-        T_wb = self.T_world_base(v)
-        pin.framesForwardKinematics(robot.model, robot.data, np.asarray(q))
-        T_ub = np.asarray(robot.data.oMf[robot.base_frame_id].homogeneous)
-        T_wu = T_wb @ np.linalg.inv(T_ub)
-        com = pin.centerOfMass(robot.model, robot.data, np.asarray(q))
-        forces.append(
-            (T_wu[:3, :3] @ com + T_wu[:3, 3], np.array([0, 0, -G * pin.computeTotalMass(robot.model)]))
-        )
-        if tool_kg > 0:
-            T_wf = T_wb @ robot.fk(q)
-            forces.append((T_wf[:3, :3] @ tool_com_flange + T_wf[:3, 3], np.array([0, 0, -G * tool_kg])))
-        if force_world is not None and tcp_world is not None:
-            forces.append((np.asarray(tcp_world), -np.asarray(force_world)))  # part pushes back
-        P = np.array([f[0] for f in forces])
-        F = np.array([f[1] for f in forces])
-        N = -F[:, 2].sum()
-        if N <= 0:
-            return False, -np.inf
-        cx = (P[:, 2] * F[:, 0] - P[:, 0] * F[:, 2]).sum() / N
-        cy = -(P[:, 1] * F[:, 2] - P[:, 2] * F[:, 1]).sum() / N
-        support = self.footprint_moving(v)
-        from shapely.geometry import Point
-
-        inside = support.buffer(-self.base.tip_margin_m)
-        pt = Point(cx, cy)
-        margin = (
-            float(support.exterior.distance(pt)) if support.contains(pt) else -float(support.distance(pt))
-        )
-        return bool(not inside.is_empty and inside.contains(pt)), margin - self.base.tip_margin_m
 
     def footprint_moving(self, v: dict) -> Polygon:
         """Support polygon: convex hull of the carriage bodies that reach the floor (lowest

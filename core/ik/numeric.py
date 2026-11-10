@@ -14,6 +14,9 @@ from core.robot import Robot
 
 
 class NumericIK:
+    n_branches = 4  # labels E±W± only
+    batch = False  # one pose at a time: no reachability maps / station planner
+
     def __init__(
         self,
         robot: Robot,
@@ -27,6 +30,28 @@ class NumericIK:
         self.max_iter = max_iter
         self.tol = tol
         self.damping = damping
+        pin.forwardKinematics(robot.model, robot.data, pin.neutral(robot.model))
+        self.base_height = float(robot.data.oMi[min(2, robot.nq)].translation[2])  # joint 2 height
+
+    def solve_batch(self, T_base_flange: np.ndarray, return_singular: bool = False):
+        """Pose by pose (slow): up to 8 solutions each."""
+        T = np.asarray(T_base_flange, float)
+        q = np.zeros((len(T), 8, self.robot.nq))
+        valid = np.zeros((len(T), 8), bool)
+        for i, t in enumerate(T):
+            s = self.solve(t, rng=np.random.default_rng(i))[:8]
+            q[i, : len(s)], valid[i, : len(s)] = s, True
+        return (q, valid, np.zeros(len(T), bool)) if return_singular else (q, valid)
+
+    def manipulability(self, q) -> np.ndarray:
+        q = np.asarray(q, float)
+        flat = q.reshape(-1, q.shape[-1])
+        return np.array([self.robot.manipulability(x) for x in flat]).reshape(q.shape[:-1])
+
+    def config_label(self, q) -> str:
+        """``E±W±``: signs of sin q3 and sin q5 (no geometric model of the arm)."""
+        q = np.asarray(q, float)
+        return f"E{'+' if np.sin(q[2]) >= 0 else '-'}W{'+' if np.sin(q[4]) >= 0 else '-'}"
 
     def _descend(self, target: pin.SE3, q: np.ndarray) -> np.ndarray | None:
         r = self.robot

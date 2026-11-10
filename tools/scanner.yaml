@@ -24,13 +24,36 @@ extension:
   roll_deg:
   - 0.0
   - 0.0
+  x:
+  - 0.0
+  - 0.0
+  y:
+  - 0.0
+  - 0.0
+  z:
+  - 0.05
+  - 0.5
+  rx_deg:
+  - 0.0
+  - 0.0
+  ry_deg:
+  - 0.0
+  - 0.0
+  rz_deg:
+  - 0.0
+  - 0.0
   radius: 0.03
-  kg_per_m: 1.5
   nominal:
     L: 0.1
     theta_deg: 0.0
     d: 0.0
     roll_deg: 0.0
+    x: 0.0
+    y: 0.0
+    z: 0.1
+    rx_deg: 0.0
+    ry_deg: 0.0
+    rz_deg: 0.0
 tcps:
 - name: sensor
   T_head_tcp:
@@ -44,7 +67,6 @@ tcps:
     - 0.0
   contact_links: []
   contact_faces: {}
-process_force_N: 0.0
 tolerances:
   spin_deg: free
   tilt_deg: 3.0

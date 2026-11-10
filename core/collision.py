@@ -3,7 +3,7 @@ Pinocchio GeometryModel so all pair checks run in C++ (Coal).
 
 Pair categories and the margin each must keep (``Margins``):
     robot_part, tool_part   >= clearance        (tool_part skips the active TCP's contact geometry)
-    tool_robot              >= self_clearance   (wrist_3 excluded: the tool is mounted on it)
+    tool_robot              >= self_clearance   (the flange link excluded: the tool is mounted on it)
     robot_self              >= 0                (adjacent / always-touching pairs excluded)
     floor                   >= 0                (base and shoulder excluded)
     carrier                 >= self_clearance   (arm from upper_arm on + tool vs carrier bodies)
@@ -90,7 +90,9 @@ class CollisionScene:
             model, urdf, pin.GeometryType.COLLISION, None, [str(robot.spec.folder)]
         )
         self.robot_ids = list(range(self.gm.ngeoms))
-        names = [g.name for g in self.gm.geometryObjects]
+        # the joint each robot shape moves with (0 = fixed base): pairs are chosen by link, not by
+        # the shape's position in the list (a URDF link may have several collision shapes)
+        joint_of = [g.parentJoint for g in self.gm.geometryObjects]
 
         # world <-> pinocchio universe (URDF root)
         pin.framesForwardKinematics(model, robot.data, pin.neutral(model))
@@ -179,23 +181,25 @@ class CollisionScene:
                 add(i, self.part_id, P.robot_part)
             for i in self.tool_ids:
                 add(i, self.part_id, P.tool_part)
-        flange_link_geom = names[-1]  # last robot link (wrist_3 for 6R arms) carries the tool
+        flange_joint = model.frames[robot.flange_frame_id].parentJoint  # its link carries the tool
         for i in self.tool_ids:
             for j in self.robot_ids:
-                if names[j] != flange_link_geom:
+                if joint_of[j] != flange_joint:
                     add(i, j, P.tool_robot)
-        for a in self.robot_ids:
+        for a in self.robot_ids:  # links at least two joints apart
             for b in self.robot_ids:
-                if b >= a + 2:
+                if b > a and abs(joint_of[b] - joint_of[a]) >= 2:
                     add(a, b, P.robot_self)
+        shoulder_on = [i for i in self.robot_ids if joint_of[i] >= 1]
+        upper_arm_on = [i for i in self.robot_ids if joint_of[i] >= 2]
         if self.floor_id is not None:
-            for i in [*self.robot_ids[2:], *self.tool_ids]:
+            for i in [*upper_arm_on, *self.tool_ids]:
                 add(i, self.floor_id, P.floor)
         for o in self.obstacle_ids:  # stay-out zones: arm from the shoulder on, and the tool
-            for i in [*self.robot_ids[1:], *self.tool_ids]:
+            for i in [*shoulder_on, *self.tool_ids]:
                 add(i, o, P.obstacle)
         for c in self.carrier_ids:  # arm beyond the shoulder and the tool vs the carrier
-            for i in [*self.robot_ids[2:], *self.tool_ids]:
+            for i in [*upper_arm_on, *self.tool_ids]:
                 add(i, c, P.carrier)
 
         self.gd = pin.GeometryData(self.gm)

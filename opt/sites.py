@@ -7,7 +7,6 @@ exposes that space to the planner:
     T(v)                  robot base pose (world) for DOF values v
     accept(v)             (ok, soft penalty) from standoff / keep-out zones
     travel(a, b)          carrier travel metric between two stations
-    point_ok(v, r, ...)   extra per-point checks (tip-over), default: ok
 
 FloorSites is the M7 behaviour (free floor positions, part AABB keep-out).
 CarrierSites wraps core.carrier.Carrier with core.standoff zones.
@@ -88,9 +87,6 @@ class FloorSites:
 
     def travel(self, a: dict, b: dict) -> float:
         return float(np.hypot(a["x"] - b["x"], a["y"] - b["y"]))
-
-    def point_ok(self, v, r, checker, n_world) -> tuple[bool, str]:
-        return True, ""
 
     def perturbations(self, v: dict) -> list[dict]:
         return []
@@ -303,17 +299,6 @@ class CarrierSites:
             lf = {"lift": (1 - s) * lifts[0]["lift"] + s * lifts[-1]["lift"]} if lifts[0] else {}
             out.append(pose(*p, lf))
         return [(v, self.transit_ok(v, ends)) for v in out]
-
-    def point_ok(self, v: dict, r, checker, n_world: np.ndarray) -> tuple[bool, str]:
-        if self.kind != "mobile" or not self.c.base.tip_over or r.q is None:
-            return True, ""
-        T_wb = self.T(v)
-        T_tcp = T_wb @ checker.robot.fk(r.q) @ checker.T_flange_tcp[r.tcp]
-        force = -checker.force * np.asarray(n_world)
-        ok, _ = self.c.tip_over(
-            self.full(v), checker.robot, r.q, checker.mass, checker.com, force, T_tcp[:3, 3]
-        )
-        return ok, "" if ok else "tip_over"
 
     def perturbations(self, v: dict) -> list[dict]:
         """Mobile localization tolerance: base poses the robot must also work from."""

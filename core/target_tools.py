@@ -126,21 +126,31 @@ def brush_dab(
     return P[keep], N[keep]
 
 
+SAME_SIDE_COS = 0.5  # normals within 60 deg: the same side of the part
+
+
 def dedupe(
-    P_new: np.ndarray, N_new: np.ndarray, P_old: np.ndarray, tol: float
+    P_new: np.ndarray,
+    N_new: np.ndarray,
+    P_old: np.ndarray,
+    tol: float,
+    N_old: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Drop new points within ``tol`` of an existing point (or of an earlier new point)."""
+    """Drop new points within ``tol`` of an existing point (or of an earlier new point) on
+    the same side: points whose normals differ by more than 60 deg are never duplicates (the
+    two faces of a thin plate). Without ``N_old`` every close old point counts."""
     if len(P_new) == 0:
         return P_new, N_new
     from scipy.spatial import cKDTree
 
     keep = np.ones(len(P_new), bool)
     if len(P_old):
-        dist, _ = cKDTree(P_old).query(P_new, k=1)
-        keep &= dist > tol
+        for i, near in enumerate(cKDTree(P_old).query_ball_point(P_new, tol)):
+            if near and (N_old is None or np.any(N_old[near] @ N_new[i] > SAME_SIDE_COS)):
+                keep[i] = False
     tree = cKDTree(P_new)
     for i, j in sorted(tree.query_pairs(tol)):
-        if keep[i]:
+        if keep[i] and N_new[i] @ N_new[j] > SAME_SIDE_COS:
             keep[j] = False
     return P_new[keep], N_new[keep]
 

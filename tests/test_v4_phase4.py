@@ -66,8 +66,6 @@ def test_spline_connector_leaves_and_arrives_along_the_axes():
     assert np.degrees(np.arccos(d0 @ [0, 0, 1])) < 12  # leaves the mount along its z
     assert np.degrees(np.arccos(d1 @ T_fh[:3, 2])) < 12  # arrives along the head z
     assert tm.length() > np.linalg.norm(T_fh[:3, 3])  # a curve, longer than the chord
-    tm.ee = tm.ee.model_copy(update={"extension": tm.ee.extension.model_copy(update={"kg_per_m": 2.0})})
-    assert tm.mass_properties().mass_kg == pytest.approx(2.0 * tm.length(), rel=1e-9)
 
 
 # --- map for any TCP offset ------------------------------------------------------------------------
@@ -147,7 +145,7 @@ def _make_pose(app, z=(0.1, 0.5), ry=(-45.0, 45.0)):
     return s
 
 
-def test_pose_optimizer_best_cost_no_payload(app):
+def test_pose_optimizer_best_cost(app):
     s = _make_pose(app)
     panel = app["tool_opt"]
     panel.shape_evals.value = 6
@@ -159,7 +157,6 @@ def test_pose_optimizer_best_cost_no_payload(app):
     assert x.z[0] - 1e-9 <= v.z <= x.z[1] + 1e-9 and x.ry_deg[0] - 1e-9 <= v.ry_deg <= x.ry_deg[1] + 1e-9
     assert v.x == x.nominal.x and v.rx_deg == x.nominal.rx_deg  # fixed components untouched
     assert len(r.samples) >= 7 and r.solution.cost == pytest.approx(min(sm.cost for sm in r.samples), abs=0.5)
-    assert all(p.torque_util == 0.0 for p in r.point_results.values() if p.q is not None)  # payload off
     assert "connector (mm)" in panel.info.content
     panel.apply_values(v)
     assert s.tool.extension.nominal.z == pytest.approx(v.z)

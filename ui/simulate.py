@@ -16,7 +16,7 @@ import numpy as np
 import viser
 
 from core.feasibility import CancelledError
-from ui.log_panel import log
+from ui.log_panel import log, took
 from ui.robot_view import quiet_remove
 from ui.session import Session
 from ui.sim_build import carrier_path as sim_carrier_path
@@ -180,6 +180,7 @@ class SimPanel:
         self._cancel.clear()
         self.build_btn.visible, self.stop.visible, self.progress.visible = False, True, True
         self.progress.value = 0.0
+        self._t0 = time.monotonic()
 
         def work() -> None:
             try:
@@ -193,7 +194,7 @@ class SimPanel:
                     step=self.step.value / 1000,
                     jump_deg=self.jump.value,
                     cancelled=self._cancel.is_set,
-                    progress=lambda f: setattr(self.progress, "value", 100.0 * f),
+                    progress=self._build_progress,
                     pattern=pattern,
                     lift=self.lift.value / 1000,
                     home=home,
@@ -225,6 +226,12 @@ class SimPanel:
         if block:
             self._thread.join()
 
+    def _build_progress(self, f: float) -> None:
+        """Progress bar + a status line with the elapsed time (collision detours can take
+        tens of seconds per stop)."""
+        self.progress.value = 100.0 * f
+        self.info.content = f"_Building paths… {100 * f:.0f} % · {took(self._t0)}_"
+
     def _after_build(self) -> None:
         plan = self.plan
         c = plan.counts()
@@ -254,6 +261,7 @@ class SimPanel:
             f"Paths built for **{self.label}**: {len(plan.samples)} samples, {plan.length():.2f} m; "
             f"flagged: {problems}.",
             "done" if problems == "none" else "warn",
+            getattr(self, "_t0", None),
         )
         if getattr(self, "home_blocked", None):
             log(

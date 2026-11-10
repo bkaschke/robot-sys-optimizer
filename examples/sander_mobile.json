@@ -2,39 +2,319 @@
   "version": 1,
   "units": "m",
   "robot": {
+    "name": null,
     "urdf": "assets/ur20/ur20.urdf",
     "flange_link": "tool0",
     "mount": "floor",
-    "base_pose": {"xyz": [1.2, 0.0, 0.0], "rpy": [0, 0, 1.57]},
+    "base_pose": {
+      "xyz": [
+        1.2,
+        0.0,
+        0.0
+      ],
+      "rpy": [
+        0.0,
+        0.0,
+        1.57
+      ]
+    },
     "ik": "ur_analytic",
-    "payload_spec": {"rated_kg": 20, "wrist_moment_Nm": [null, null, null], "joint_torque_Nm": [null]}
+    "home_deg": null,
+    "joint_limits_deg": null
   },
   "base": {
-    "mode": "movable", "carrier": "mobile",
-    "chassis": {"shape": "box", "size": [1.2, 0.8, 0.4], "kg": 300},
-    "riser": {"shape": "cylinder", "radius": 0.15, "height": 0.3},
-    "joints": {"x": [0, 6.0], "y": [0, 4.0], "yaw_deg": [-180, 180], "lift": [0, 0.5]},
-    "T_mount": {"xyz": [0.2, 0, 0.7], "rpy": [0, 0, 0]},
+    "mode": "movable",
+    "carrier": "mobile",
+    "pose": {
+      "xyz": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rpy": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "chassis": {
+      "shape": "box",
+      "size": [
+        1.2,
+        0.8,
+        0.4
+      ],
+      "radius": null,
+      "height": null,
+      "name": "",
+      "attach": "carriage",
+      "pose": {
+        "xyz": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rpy": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "mesh": null,
+      "units": "m"
+    },
+    "riser": {
+      "shape": "cylinder",
+      "size": null,
+      "radius": 0.15,
+      "height": 0.3,
+      "name": "",
+      "attach": "carriage",
+      "pose": {
+        "xyz": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rpy": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "mesh": null,
+      "units": "m"
+    },
+    "track": null,
+    "bodies": [],
+    "joints": {
+      "x": [
+        0.0,
+        6.0
+      ],
+      "y": [
+        0.0,
+        4.0
+      ],
+      "z": null,
+      "yaw_deg": [
+        -180.0,
+        180.0
+      ],
+      "lift": [
+        0.0,
+        0.5
+      ]
+    },
+    "T_mount": {
+      "xyz": [
+        0.2,
+        0.0,
+        0.7
+      ],
+      "rpy": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
     "keepouts": [],
-    "standoff_m": {"carrier_part_min": 0.3, "carrier_part_preferred": 0.5, "carrier_env_min": 0.1}
+    "standoff_m": {
+      "carrier_part_min": 0.3,
+      "carrier_part_preferred": 0.5,
+      "carrier_env_min": 0.1
+    },
+    "localization_m": 0.0,
+    "localization_deg": 0.0,
+    "facing": null,
+    "fixed_standoff_m": null,
+    "facings": [],
+    "part_sides": [],
+    "align_to_part": false
   },
+  "stayouts": [],
   "end_effector": {
-    "tool": "tools/orbital_sander.yaml", "process": "sanding", "urdf": "assets/sander/sander.urdf",
-    "T_flange_mount": {"xyz": [0, 0, 0.02], "rpy": [0, 0, 0]},
-    "extension": {"type": "bent", "L": [0.05, 0.6], "theta_deg": [0, 45], "radius": 0.04, "kg_per_m": 2.0},
-    "tcps": [{"name": "pad", "T_head_tcp": {"xyz": [0, 0, 0.12], "rpy": [0, 0, 0]}, "contact_links": ["pad_link"]}],
-    "process_force_N": 50
+    "name": "tool",
+    "tool": "tools/orbital_sander.yaml",
+    "process": "sanding",
+    "urdf": "assets/sander/sander.urdf",
+    "T_flange_mount": {
+      "xyz": [
+        0.0,
+        0.0,
+        0.02
+      ],
+      "rpy": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "extension": {
+      "type": "bent",
+      "L": [
+        0.05,
+        0.6
+      ],
+      "theta_deg": [
+        0.0,
+        45.0
+      ],
+      "d": [
+        0.0,
+        0.0
+      ],
+      "roll_deg": [
+        0.0,
+        0.0
+      ],
+      "x": [
+        0.0,
+        0.0
+      ],
+      "y": [
+        0.0,
+        0.0
+      ],
+      "z": [
+        0.05,
+        0.5
+      ],
+      "rx_deg": [
+        0.0,
+        0.0
+      ],
+      "ry_deg": [
+        0.0,
+        0.0
+      ],
+      "rz_deg": [
+        0.0,
+        0.0
+      ],
+      "radius": 0.04,
+      "nominal": {
+        "L": 0.1,
+        "theta_deg": 0.0,
+        "d": 0.0,
+        "roll_deg": 0.0,
+        "x": 0.0,
+        "y": 0.0,
+        "z": 0.1,
+        "rx_deg": 0.0,
+        "ry_deg": 0.0,
+        "rz_deg": 0.0
+      }
+    },
+    "tcps": [
+      {
+        "name": "pad",
+        "T_head_tcp": {
+          "xyz": [
+            0.0,
+            0.0,
+            0.12
+          ],
+          "rpy": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "contact_links": [
+          "pad_link"
+        ],
+        "contact_faces": {}
+      }
+    ],
+    "tolerances": {
+      "spin_deg": "free",
+      "tilt_deg": 0.0,
+      "standoff_m": 0.0
+    },
+    "line_of_sight": false,
+    "approach_m": 0.0
   },
-  "part": {"mesh": "assets/parts/flat_plate.stl", "pose": {"xyz": [0, 0, 0.8], "rpy": [0, 0, 0]}},
+  "part": {
+    "mesh": "assets/parts/flat_plate.stl",
+    "units": "m",
+    "pose": {
+      "xyz": [
+        0.0,
+        0.0,
+        0.8
+      ],
+      "rpy": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    }
+  },
   "targets": {
-    "groups": [{"name": "top", "spin_deg": "free", "tilt_deg": 10, "standoff_m": 0, "tcps": ["pad"]}],
-    "points": [{"id": 0, "p": [0.1, 0.2, 0.9], "n": [0, 0, 1], "group": "top"}]
+    "groups": [
+      {
+        "name": "top",
+        "spin_deg": "free",
+        "tilt_deg": 10.0,
+        "standoff_m": 0.0,
+        "tcps": [
+          "pad"
+        ]
+      }
+    ],
+    "points": [
+      {
+        "id": 0,
+        "p": [
+          0.1,
+          0.2,
+          0.9
+        ],
+        "n": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "group": "top"
+      }
+    ]
   },
   "optimizer": {
-    "free": ["L", "theta", "base"],
+    "free": [
+      "L",
+      "theta",
+      "base"
+    ],
     "max_stations": 3,
-    "weights": {"L": 1.0, "unreached": 1000, "stations": 5, "travel": 0.5, "manip": 0.3, "clearance": 0.3, "limits": 0.2, "torque": 0.5},
-    "margins": {"clearance_m": 0.01, "joint_deg": 5, "torque_util": 0.8}
+    "weights": {
+      "L": 1.0,
+      "unreached": 1000.0,
+      "stations": 5.0,
+      "travel": 0.5,
+      "manip": 0.3,
+      "clearance": 0.3,
+      "limits": 0.2,
+      "standoff": 1.0,
+      "group": 1.0,
+      "motion": 1.0,
+      "wrist_flip": 1.0
+    },
+    "margins": {
+      "clearance_m": 0.01,
+      "joint_deg": 5.0
+    },
+    "tool_weights": null
   },
-  "results": []
+  "results": [],
+  "work": {
+    "q": null,
+    "selection_mesh": null,
+    "selection": [],
+    "feasibility": [],
+    "result_points": {},
+    "ui": {},
+    "stamps": {},
+    "steps": {}
+  }
 }

@@ -1,14 +1,13 @@
 """Per-point feasibility (M5): IK over spin/tilt/standoff samples, joint limits with
-margin, static torque, then collision with contact filtering.
+margin, then collision with contact filtering.
 
 For each target the candidate TCP poses are tried in order of increasing tilt; the first
 pose with a feasible branch wins, and among its branches the one with the best
 (manipulability + joint-limit distance) score is kept. Status:
     reachable   feasible with comfortable margins
-    marginal    feasible but clearance < margin + 5 mm, torque util > 90% of its limit, or a
-                joint within 15 deg of its limit
+    marginal    feasible but clearance < margin + 5 mm or a joint within 15 deg of its limit
     unreachable with the first stage that no candidate got past as reason:
-                no_ik -> joint_limits -> torque -> collision
+                no_ik -> joint_limits -> collision
 
 Target frame convention (spin reference): target z = outward normal n; target x = part
 frame +x projected onto the tangent plane (+y if n is nearly parallel to x). A TCP
@@ -25,13 +24,12 @@ import numpy as np
 
 from core.collision import CollisionScene
 from core.ik import best_copies
-from core.payload import PayloadResult, static_check
 from core.robot import Robot
 from core.schema import TargetGroup
 from core.tool import ToolModel
 from core.transforms import make_T
 
-STAGES = ("no_ik", "joint_limits", "torque", "collision")
+STAGES = ("no_ik", "joint_limits", "collision")
 MARGINAL_CLEARANCE = 0.005  # m above the clearance margin
 SPIN_STEP_DEG = 30.0
 TILT_AZIMUTHS = 6
@@ -40,9 +38,7 @@ TILT_AZIMUTHS = 6
 @dataclass
 class CheckSettings:
     joint_margin_deg: float = 5.0
-    torque_util: float = 0.8
     clearance: float = 0.01
-    payload: bool = True  # False: skip torque / payload checks (tool geometry optimization, v2)
 
 
 @dataclass
@@ -57,7 +53,6 @@ class PointResult:
     standoff: float = 0.0
     clearance: float = float("inf")
     manipulability: float = 0.0
-    torque_util: float = 0.0
     limit_margin_deg: float = 0.0
     notes: list[str] = field(default_factory=list)
     config: str = ""  # joint configuration label (core.configs), when zoning is on
@@ -152,16 +147,12 @@ class FeasibilityChecker:
         self.set_base(T_world_base)
         m = np.radians(self.settings.joint_margin_deg)
         self.lo, self.hi = robot.lower + m, robot.upper - m
-        mp = tool.mass_properties()
-        self.mass, self.com = mp.mass_kg, mp.com_flange
-        self.force = tool.ee.process_force_N
         self.T_flange_tcp = {t.name: tool.T_flange_tcp(t.name) for t in tool.ee.tcps}
         self._T_tcp_flange = {k: np.linalg.inv(v) for k, v in self.T_flange_tcp.items()}
 
     def set_base(self, T_world_base: np.ndarray) -> None:
         """Evaluate from another base pose (stations, refinement) without rebuilding."""
         self.T_base_part = np.linalg.inv(T_world_base) @ self.T_world_part
-        self.robot.set_mount(T_world_base[:3, :3])
         self.scene.set_base(T_world_base)
 
     def check_point(
@@ -185,7 +176,7 @@ class FeasibilityChecker:
         from core.configs import config_label
 
         out: dict[str, PointResult] = {}
-        n_max = 8 if hasattr(self.ik, "a2") else 4
+        n_max = getattr(self.ik, "n_branches", 4)
         for r in self._feasible(pid, p, n, group, max_poses, [0], all_branches=True):
             lab = config_label(self.ik, r.q)
             if lab not in out:
@@ -198,14 +189,12 @@ class FeasibilityChecker:
     def _ik_stream(self, poses):
         """(pose, joint solutions in (-pi, pi]) per candidate pose, in order. UR arms use the
         vectorized solver on growing chunks (1, 2, 4, ... CHUNK poses): most points succeed on
-        their first pose, hard ones get big cheap batches. Wrist-singular poses and other arms
-        use the scalar ``ik.solve``."""
-        if not (self.batch_ik and hasattr(self.ik, "a2")):
+        their first pose, hard ones get big cheap batches. Wrist-singular poses and solvers
+        without a fast batch (numeric) use the scalar ``ik.solve``."""
+        if not (self.batch_ik and getattr(self.ik, "batch", False)):
             for item in poses:
                 yield item, self.ik.solve(item[-1])
             return
-        from core.ik.ur import solve_batch
-
         chunk: list = []
         size = 1
         for item in itertools.chain(poses, [None]):
@@ -216,7 +205,7 @@ class FeasibilityChecker:
             size = min(2 * size, CHUNK)
             if not chunk:
                 break
-            Q, V, sing = solve_batch(self.ik, np.array([c[-1] for c in chunk]), return_singular=True)
+            Q, V, sing = self.ik.solve_batch(np.array([c[-1] for c in chunk]), return_singular=True)
             for j, c in enumerate(chunk):
                 yield c, (self.ik.solve(c[-1]) if sing[j] else Q[j][V[j]])
             chunk = []
@@ -228,8 +217,6 @@ class FeasibilityChecker:
         branches best first (only the best one unless ``all_branches``). ``stage[0]`` is
         set to the furthest check stage any candidate passed."""
         tcps = group.tcps or list(self.T_flange_tcp)
-        R_bp = self.T_base_part[:3, :3]
-        force_base = -self.force * (R_bp @ np.asarray(n, float))  # tool pushes into the surface
         poses = (
             (tcp, spin, tilt, so, self.T_base_part @ T_part_tcp @ self._T_tcp_flange[tcp])
             for tcp, spin, tilt, so, T_part_tcp in candidate_poses(p, n, group, tcps)
@@ -247,38 +234,21 @@ class FeasibilityChecker:
             if not cands:
                 continue
             stage[0] = max(stage[0], 2)
-            # rank the branches first (cheap), then torque + collision lazily in that order:
-            # the same branch wins as when every branch was torque-checked first
+            # rank the branches first (cheap), then check collision lazily in that order
             offset = self.T_flange_tcp[tcp][:3, 3]
             Q = np.array(cands)
-            if hasattr(self.ik, "a2"):  # UR: closed-form |det J| (= Pinocchio's, any TCP offset)
-                from core.ik.ur import ur_manipulability
-
-                mus = ur_manipulability(self.ik, Q)
+            if hasattr(self.ik, "manipulability"):  # |det J| from the solver (any TCP offset)
+                mus = np.asarray(self.ik.manipulability(Q), float)
             else:
                 mus = np.array([self.robot.manipulability(q, offset) for q in Q])
             lms = np.min(np.minimum(Q - self.robot.lower, self.robot.upper - Q), axis=1)
             # ties (mirror branches at equal quality) go to the lower branch index, not float noise
             for b in sorted(range(len(Q)), key=lambda b: (-round(float(mus[b] + 0.1 * lms[b]), 9), b)):
                 q, mu, lm = Q[b], float(mus[b]), float(lms[b])
-                pr = (
-                    static_check(
-                        self.robot, q, self.mass, self.com, force_base, offset, self.settings.torque_util
-                    )
-                    if self.settings.payload
-                    else PayloadResult(np.zeros(0), 0.0, True, [])  # payload check off
-                )
-                if not pr.ok:
-                    continue
-                stage[0] = max(stage[0], 3)
                 if self.scene.collides(q, tcp):
                     continue
                 clear = self.scene.part_clearance(q, tcp) if clearance else float("inf")
-                marginal = (
-                    clear < self.settings.clearance + MARGINAL_CLEARANCE
-                    or pr.max_util > 0.9 * self.settings.torque_util
-                    or np.degrees(lm) < 15.0
-                )
+                marginal = clear < self.settings.clearance + MARGINAL_CLEARANCE or np.degrees(lm) < 15.0
                 yield PointResult(
                     pid,
                     "marginal" if marginal else "reachable",
@@ -290,9 +260,7 @@ class FeasibilityChecker:
                     so,
                     clear,
                     mu,
-                    pr.max_util,
                     float(np.degrees(lm)),
-                    pr.notes,
                 )
                 if not all_branches:
                     break
@@ -331,7 +299,6 @@ def result_to_data(r: PointResult):
         standoff=float(r.standoff),
         clearance=float(r.clearance) if finite else None,
         manipulability=float(r.manipulability),
-        torque_util=float(r.torque_util),
         limit_margin_deg=float(r.limit_margin_deg),
         notes=[str(n) for n in r.notes],
         config=r.config,
@@ -352,7 +319,6 @@ def result_from_data(d) -> PointResult:
         standoff=d.standoff,
         clearance=float("inf") if d.clearance is None else d.clearance,
         manipulability=d.manipulability,
-        torque_util=d.torque_util,
         limit_margin_deg=d.limit_margin_deg,
         notes=list(d.notes),
         config=d.config,

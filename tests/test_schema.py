@@ -55,5 +55,19 @@ def test_invalid_projects_rejected(mutate):
         Project.model_validate(d)
 
 
-def test_payload_spec_placeholder_is_incomplete():
-    assert not load_project(EXAMPLE).robot.payload_spec.is_complete()
+def test_removed_v7_fields_are_dropped_on_load():
+    """Payload, torque, mass, tip-over and process force were removed in v7: older files
+    that still carry them load, and the fields are gone."""
+    d = json.loads(EXAMPLE.read_text(encoding="utf-8"))
+    d["robot"]["payload_spec"] = {"rated_kg": 20}
+    d["end_effector"]["process_force_N"] = 50.0
+    d["end_effector"]["mass_kg"] = 3.0
+    d["end_effector"]["extension"]["kg_per_m"] = 1.5
+    d["optimizer"]["weights"]["torque"] = 0.5
+    d["optimizer"]["margins"]["torque_util"] = 0.8
+    p = Project.model_validate(d)
+    assert "payload_spec" not in p.robot.model_dump()
+    assert "process_force_N" not in p.end_effector.model_dump()
+    assert "torque" not in p.optimizer.weights.model_dump()
+    with pytest.raises(ValidationError):  # other unknown keys still fail loudly
+        Project.model_validate({**d, "robt": {}})

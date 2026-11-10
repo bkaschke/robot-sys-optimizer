@@ -75,9 +75,9 @@ class PointTools:
         self, P: np.ndarray, N: np.ndarray, event=None, what: str = "points", tol: float | None = None
     ) -> int:
         """Append points (deduplicated against existing ones) as one undo step."""
-        _, P_old, _, _ = tg.as_arrays(self.s.targets)
+        _, P_old, N_old, _ = tg.as_arrays(self.s.targets)
         tol = self._tol() if tol is None else tol
-        P, N = tt.dedupe(np.asarray(P).reshape(-1, 3), np.asarray(N).reshape(-1, 3), P_old, tol)
+        P, N = tt.dedupe(np.asarray(P).reshape(-1, 3), np.asarray(N).reshape(-1, 3), P_old, tol, N_old)
         if len(P) == 0:
             self.info.content = f"_No new {what} (all already present)._"
             return 0

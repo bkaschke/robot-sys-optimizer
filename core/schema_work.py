@@ -6,11 +6,19 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class _Model(BaseModel):
     model_config = ConfigDict(extra="forbid", validate_assignment=True)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_removed(cls, data):
+        """Older projects saved ``torque_util`` per point (removed in v7)."""
+        if isinstance(data, dict) and "torque_util" in data:
+            return {k: v for k, v in data.items() if k != "torque_util"}
+        return data
 
 
 class PointResultData(_Model):
@@ -26,7 +34,6 @@ class PointResultData(_Model):
     standoff: float = 0.0
     clearance: float | None = None  # None = no collision geometry nearby (infinite)
     manipulability: float = 0.0
-    torque_util: float = 0.0
     limit_margin_deg: float = 0.0
     notes: list[str] = Field(default_factory=list)
     config: str = ""  # joint configuration label (core.configs)

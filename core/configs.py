@@ -10,9 +10,10 @@ Labels: ``"S+E-W+"`` with
      that vanishes at the shoulder singularity),
   E  sign of sin(q3)  (elbow branch),
   W  sign of sin(q5)  (wrist flip).
-These are the three factors of |det J| (core.ik.ur.ur_manipulability), so a label never
-changes without passing through a singularity. For non-UR arms the shoulder letter is
-omitted (sign of q3 and q5 only).
+These are the three factors of |det J| (``ik.manipulability``), so a label never
+changes without passing through a singularity. Each solver computes its own labels
+(``ik.config_label``: UR and OPW arms ``S±E±W±``; the numeric solver only ``E±W±``, the
+signs of q3 and q5).
 
 Wrist wraps: joints 4 and 6 can often take values 360 deg apart; ``unwrap_path`` picks
 the copies that keep a path continuous, and any remaining jump above ``WRAP_JUMP_DEG``
@@ -34,12 +35,11 @@ def _sgn(x: float) -> str:
 
 
 def config_label(ik, q: np.ndarray) -> str:
+    """The solver's configuration label for joint values ``q``."""
     q = np.asarray(q, float)
-    e, w = _sgn(np.sin(q[2])), _sgn(np.sin(q[4]))
-    if not all(hasattr(ik, a) for a in ("a2", "a3", "d5")):
-        return f"E{e}W{w}"
-    reach = ik.a2 * np.cos(q[1]) + ik.a3 * np.cos(q[1] + q[2]) + ik.d5 * np.sin(q[1] + q[2] + q[3])
-    return f"S{_sgn(reach)}E{e}W{w}"
+    if hasattr(ik, "config_label"):
+        return ik.config_label(q)
+    return f"E{_sgn(np.sin(q[2]))}W{_sgn(np.sin(q[4]))}"
 
 
 def min_zones(options: dict[int, dict[str, float]]) -> list[tuple[str, list[int]]]:

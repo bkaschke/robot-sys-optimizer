@@ -3,7 +3,7 @@ plan exactly.
   * CSV: every row's TCP pose, recomputed from its joint solution, lies on its target
     (p + standoff * n) within 1 um, and re-parses with the documented columns;
   * tool URDF: loads in Pinocchio and yourdfpy (with meshes); every tcp_<name> frame equals
-    ToolModel.T_flange_tcp for the optimized values; the extension mass is included;
+    ToolModel.T_flange_tcp for the optimized values;
   * HTML report: self-contained (no external requests) with all sections;
   * all three exports work from the GUI (Results tab -> Export) into <project>/export/.
 """
@@ -58,8 +58,6 @@ def test_tool_urdf_tcp_frames_match_model(sander, tmp_path):
     for t in ee.tcps:
         T = np.linalg.inv(T_flange) @ data.oMf[model.getFrameId(f"tcp_{t.name}")].homogeneous
         assert np.allclose(T, tm.T_flange_tcp(t.name, V_OPT), atol=1e-9)
-    mp = tm.mass_properties(V_OPT)
-    assert sum(i.mass for i in model.inertias) == pytest.approx(mp.mass_kg, rel=1e-6)
     # meshes travel with the URDF: yourdfpy resolves them relative to the file
     u = yourdfpy.URDF.load(str(path), load_meshes=True, build_scene_graph=True)
     assert len(u.scene.geometry) >= 2

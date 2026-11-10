@@ -45,7 +45,6 @@ def cost_breakdown(
     mu = np.array([r.manipulability / max_manip for r in ok]) if ok else np.zeros(0)
     clear = np.array([min(r.clearance, 10.0) for r in ok]) if ok else np.zeros(0)
     lim = np.array([r.limit_margin_deg for r in ok]) if ok else np.zeros(0)
-    tau = np.array([r.torque_util for r in ok]) if ok else np.zeros(0)
     terms = {
         "L": tool_length / L_ref if L_ref > 0 else 0.0,
         "unreached": float(n_unreached),
@@ -54,7 +53,6 @@ def cost_breakdown(
         "manip": float(np.mean(1 / (1 + mu))) if len(mu) else 1.0,
         "clearance": float(np.mean(np.maximum(0, 1 - clear / C_REF))) if len(clear) else 0.0,
         "limits": float(np.mean(np.maximum(0, 1 - lim / LIMIT_REF_DEG))) if len(lim) else 0.0,
-        "torque": float(tau.max()) if len(tau) else 0.0,
         "standoff": float(standoff_penalty),
         "group": float(groups),
         "wrist_flip": float(wrist_flips),

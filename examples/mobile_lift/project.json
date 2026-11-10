@@ -19,39 +19,8 @@
       ]
     },
     "ik": "ur_analytic",
-    "payload_spec": {
-      "rated_kg": 20.0,
-      "wrist_moment_Nm": [
-        null,
-        null,
-        null
-      ],
-      "joint_torque_Nm": [
-        738.0,
-        738.0,
-        433.0,
-        107.0,
-        107.0,
-        107.0
-      ],
-      "curve_mm_kg": [
-        [
-          0.0,
-          20.0
-        ],
-        [
-          200.0,
-          20.0
-        ],
-        [
-          800.0,
-          7.0
-        ]
-      ],
-      "curve_extrapolate": "linear",
-      "curve_source": "UR20 datasheet Dec 2024 (plot reading); >800 mm extrapolated estimate"
-    },
-    "home_deg": null
+    "home_deg": null,
+    "joint_limits_deg": null
   },
   "base": {
     "mode": "movable",
@@ -77,7 +46,6 @@
         "size": null,
         "radius": 0.1,
         "height": 0.08,
-        "kg": 10.0,
         "name": "wheel_fl",
         "attach": "carriage",
         "pose": {
@@ -100,7 +68,6 @@
         "size": null,
         "radius": 0.1,
         "height": 0.08,
-        "kg": 10.0,
         "name": "wheel_fr",
         "attach": "carriage",
         "pose": {
@@ -123,7 +90,6 @@
         "size": null,
         "radius": 0.1,
         "height": 0.08,
-        "kg": 10.0,
         "name": "wheel_rl",
         "attach": "carriage",
         "pose": {
@@ -146,7 +112,6 @@
         "size": null,
         "radius": 0.1,
         "height": 0.08,
-        "kg": 10.0,
         "name": "wheel_rr",
         "attach": "carriage",
         "pose": {
@@ -173,7 +138,6 @@
         ],
         "radius": null,
         "height": null,
-        "kg": 220.0,
         "name": "chassis",
         "attach": "carriage",
         "pose": {
@@ -200,7 +164,6 @@
         ],
         "radius": null,
         "height": null,
-        "kg": 60.0,
         "name": "battery",
         "attach": "carriage",
         "pose": {
@@ -227,7 +190,6 @@
         ],
         "radius": null,
         "height": null,
-        "kg": 60.0,
         "name": "mast",
         "attach": "carriage",
         "pose": {
@@ -250,7 +212,6 @@
         "size": null,
         "radius": 0.11,
         "height": 1.0,
-        "kg": 20.0,
         "name": "lift_stage",
         "attach": "lift",
         "pose": {
@@ -308,8 +269,6 @@
     },
     "localization_m": 0.01,
     "localization_deg": 1.0,
-    "tip_over": true,
-    "tip_margin_m": 0.05,
     "facing": "front",
     "fixed_standoff_m": 0.4,
     "facings": [],
@@ -377,7 +336,6 @@
         0.0
       ],
       "radius": 0.04,
-      "kg_per_m": 2.0,
       "nominal": {
         "L": 0.15,
         "theta_deg": 0.0,
@@ -412,9 +370,6 @@
         "contact_faces": {}
       }
     ],
-    "process_force_N": 50.0,
-    "mass_kg": null,
-    "com_head": null,
     "tolerances": {
       "spin_deg": "free",
       "tilt_deg": 10.0,
@@ -1852,16 +1807,16 @@
       "manip": 0.3,
       "clearance": 0.3,
       "limits": 0.2,
-      "torque": 0.5,
       "standoff": 1.0,
       "group": 1.0,
+      "motion": 1.0,
       "wrist_flip": 1.0
     },
     "margins": {
       "clearance_m": 0.01,
-      "joint_deg": 5.0,
-      "torque_util": 0.8
-    }
+      "joint_deg": 5.0
+    },
+    "tool_weights": null
   },
   "results": [],
   "work": {

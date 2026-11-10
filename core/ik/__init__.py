@@ -1,8 +1,22 @@
 """Inverse kinematics: shared helpers and solver dispatch.
 
-Every solver exposes ``solve(T_base_flange) -> (k, nq) array`` of joint solutions.
-Analytic solvers return each branch once, with angles wrapped to (-pi, pi]; use
-``expand_to_limits`` to get the 2*pi-equivalent copies a joint range allows.
+Every solver has the same interface (v7: the planners, maps and paths only use this):
+
+    solve(T_base_flange) -> (k, nq)      joint solutions; analytic ones once per branch,
+                                         wrapped to (-pi, pi] (``expand_to_limits`` adds
+                                         the 2*pi copies a joint range allows)
+    solve_batch(T (N, 4, 4), return_singular=False)
+                                     -> q (N, B, nq), valid (N, B)[, singular (N,)]
+    manipulability(q (..., nq))      -> |det J|-type measure (any TCP offset)
+    config_label(q)                  -> joint-configuration label, e.g. "S+E-W+"
+    n_branches                       most configurations a pose can have
+    batch                            True when solve_batch is fast (analytic): the
+                                     reachability maps and the station planner need it
+    base_height                      shoulder height above the base frame (maps)
+
+Solvers: ``ur_analytic`` (core.ik.ur, UR family), ``opw`` (core.ik.opw, industrial arms with
+a spherical wrist: FANUC, ABB, KUKA, Yaskawa ...), ``numeric`` (core.ik.numeric, any chain;
+slow, no maps).
 """
 
 from __future__ import annotations
@@ -74,6 +88,10 @@ def make_ik(robot: Robot, kind: str | None = None):
         from core.ik.ur import URAnalyticIK
 
         return URAnalyticIK(robot)
+    if kind == "opw":
+        from core.ik.opw import OPWIK
+
+        return OPWIK(robot)
     if kind == "numeric":
         from core.ik.numeric import NumericIK
 

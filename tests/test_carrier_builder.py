@@ -1,7 +1,7 @@
 """Carrier builder: carriers made of several boxes / cylinders / meshes (External Axis tab).
 
 Checks: legacy chassis/riser/track convert to the same geometry; multi-body carriers give
-the right support polygon, tip-over, URDF, mount snapping, collision and standoff; mesh
+the right support polygon, URDF, mount snapping, collision and standoff; mesh
 bodies load with units; the GUI editor adds, edits, drags, snaps, uploads and round-trips
 through the project file; the planner works with a multi-body mobile robot.
 """
@@ -29,7 +29,7 @@ REPO = Path(__file__).resolve().parents[1]
 
 def amr(**kw) -> Base:
     """A small AMR: chassis on four wheels, a column on top, robot mounted on the column."""
-    wheel = dict(shape="cylinder", radius=0.1, height=0.08, kg=10)
+    wheel = dict(shape="cylinder", radius=0.1, height=0.08)
     wheels = [
         Primitive(name=f"wheel{i}", pose=Pose(xyz=(x, y, 0.1), rpy=(np.pi / 2, 0, 0)), **wheel)
         for i, (x, y) in enumerate(((0.45, 0.36), (0.45, -0.28), (-0.45, 0.36), (-0.45, -0.28)))
@@ -39,8 +39,8 @@ def amr(**kw) -> Base:
         carrier="mobile",
         bodies=[
             *wheels,
-            Primitive(name="chassis", shape="box", size=(1.1, 0.7, 0.3), pose=Pose(xyz=(0, 0, 0.1)), kg=250),
-            Primitive(name="column", shape="box", size=(0.3, 0.3, 0.4), pose=Pose(xyz=(0.2, 0, 0.4)), kg=30),
+            Primitive(name="chassis", shape="box", size=(1.1, 0.7, 0.3), pose=Pose(xyz=(0, 0, 0.1))),
+            Primitive(name="column", shape="box", size=(0.3, 0.3, 0.4), pose=Pose(xyz=(0.2, 0, 0.4))),
         ],
         T_mount=Pose(xyz=(0.2, 0, 0.8)),
         joints=CarrierJoints(x=(-4.0, 4.0), y=(-4.0, 4.0), yaw_deg=(-180, 180)),
@@ -88,15 +88,6 @@ def test_body_names_are_unique_and_safe():
 def test_schema_rejects_bad_bodies():
     with pytest.raises(ValidationError):
         Primitive(shape="mesh")  # no file
-    with pytest.raises(ValidationError):
-        amr(tip_over=True).model_copy(update={}).model_validate(
-            {
-                **amr().model_dump(),
-                "tip_over": True,
-                "bodies": [Primitive(shape="box", size=(1, 1, 1)).model_dump()],
-            }
-        )  # tip-over without any mass
-    assert amr(tip_over=True).tip_over
 
 
 # --- multi-body carrier ---------------------------------------------------------------------------
@@ -113,28 +104,6 @@ def test_support_polygon_is_the_wheels():
 
     fp = c.footprint({"x": 0.0, "y": 0.0, "yaw": 0.0})
     assert fp.contains(box(-0.54, -0.34, 0.54, 0.34)) and not fp.contains(poly)
-
-
-def test_tip_over_counts_every_body_mass():
-    robot = Robot.from_registry("ur20")
-    q = np.radians([0, -90, 90, -90, -90, 0])
-    v = {"x": 0.0, "y": 0.0, "yaw": 0.0}
-    ok, m_heavy = Carrier(amr(tip_over=True)).tip_over(v, robot, q, 3.0, np.zeros(3), None, None)
-    assert ok
-    # a sideways pull that a 330 kg AMR resists but the same AMR without wheel/column mass not
-    light = amr(tip_over=True)
-    light = light.model_copy(
-        update={
-            "bodies": [
-                b.model_copy(update={"kg": None if b.name != "chassis" else 250}) for b in light.bodies
-            ]
-        }
-    )
-    tcp = np.array([0.4, 0.0, 1.2])
-    F = np.array([0, 900.0, 0])
-    ok_h, mh = Carrier(amr(tip_over=True)).tip_over(v, robot, q, 3.0, np.zeros(3), F, tcp)
-    ok_l, ml = Carrier(light).tip_over(v, robot, q, 3.0, np.zeros(3), F, tcp)
-    assert mh > ml  # more mass, more margin
 
 
 def test_urdf_body_frames_match():

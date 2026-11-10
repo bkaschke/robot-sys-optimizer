@@ -41,6 +41,9 @@ def _inv(T: np.ndarray) -> np.ndarray:
 
 
 class URAnalyticIK:
+    n_branches = 8
+    batch = True
+
     def __init__(self, robot: Robot):
         if robot.spec.dh is None or robot.nq != 6:
             raise ValueError(f"{robot.spec.name}: UR analytic IK needs 6 joints and DH params")
@@ -56,6 +59,22 @@ class URAnalyticIK:
         self.T_6_f = _inv(self.T_b_0 @ self._dh_fk(q0)) @ robot.fk(q0)
         self.T_0_b = _inv(self.T_b_0)
         self.T_f_6 = _inv(self.T_6_f)
+        self.base_height = self.d1  # shoulder height above the base (reachability maps)
+
+    def solve_batch(self, T_base_flange: np.ndarray, return_singular: bool = False):
+        return solve_batch(self, T_base_flange, return_singular)
+
+    def manipulability(self, q) -> np.ndarray:
+        return ur_manipulability(self, q)
+
+    def config_label(self, q) -> str:
+        """``S±E±W±``: signs of the three |det J| factors (shoulder reach, sin q3, sin q5)."""
+        q = np.asarray(q, float)
+        reach = self.a2 * np.cos(q[1]) + self.a3 * np.cos(q[1] + q[2]) + self.d5 * np.sin(q[1] + q[2] + q[3])
+        return "".join(
+            f"{k}{'+' if v >= 0 else '-'}"
+            for k, v in (("S", reach), ("E", np.sin(q[2])), ("W", np.sin(q[4])))
+        )
 
     def _A(self, i: int, q: float) -> np.ndarray:
         return _dh(q, self._d[i], self._a[i], self._alpha[i])

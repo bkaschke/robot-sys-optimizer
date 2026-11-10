@@ -75,18 +75,6 @@ def test_capsule_spans_segment():
     assert tm.extension_mesh(ExtensionValues(L=0.0)) is None
 
 
-def test_mass_properties():
-    tm = _sander()
-    mp = tm.mass_properties(ExtensionValues(L=0.15))
-    assert np.isclose(mp.mass_kg, 2.9 + 2.0 * 0.15)
-    # head COM: (2.5*0.075 + 0.4*0.16) / 2.9 above the head origin at z = 0.02 + 0.15
-    head_com_z = 0.17 + (2.5 * 0.075 + 0.4 * 0.16) / 2.9
-    ext_com_z = 0.02 + 0.075
-    assert np.isclose(mp.com_flange[2], (2.9 * head_com_z + 0.3 * ext_com_z) / 3.2)
-    tm.ee = tm.ee.model_copy(update={"mass_kg": 5.0, "com_head": (0, 0, 0.1)})
-    assert np.isclose(tm.mass_properties().mass_kg, 5.0 + 0.3)
-
-
 def test_nominal_outside_range_rejected():
     with pytest.raises(ValueError):
         Extension(L=(0.1, 0.2), nominal=ExtensionValues(L=0.5))
@@ -115,7 +103,7 @@ def test_contact_free_preset_clears_contacts():
     assert scan.tcps[0].contact_links == [] and scan.line_of_sight
     assert scan.tolerances.standoff_m == PRESETS["scanning"].tolerances.standoff_m
     sand = apply_preset(ee, "sanding")
-    assert sand.process_force_N == 50.0 and sand.tcps[0].contact_links == ["pad_link"]
+    assert sand.tcps[0].contact_links == ["pad_link"]
 
 
 def test_library_round_trip(tmp_path, monkeypatch):

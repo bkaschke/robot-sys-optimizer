@@ -22,10 +22,42 @@ Vec3 = tuple[float, float, float]
 Range = tuple[float, float]
 
 
+# fields of older versions that no longer exist (payload, torque, mass, tip-over and process
+# force were removed in v7 to keep the tool robot-agnostic); dropped silently on load
+REMOVED_FIELDS = frozenset(
+    {
+        "payload_spec",
+        "payload",
+        "tip_over",
+        "tip_margin_m",
+        "kg",
+        "kg_per_m",
+        "process_force_N",
+        "mass_kg",
+        "com_head",
+        "torque",
+        "torque_util",
+    }
+)
+
+
+def drop_removed(data):
+    """``data`` without the keys in REMOVED_FIELDS (dict input only)."""
+    if isinstance(data, dict) and REMOVED_FIELDS.intersection(data):
+        return {k: v for k, v in data.items() if k not in REMOVED_FIELDS}
+    return data
+
+
 class _Model(BaseModel):
-    """Base: reject unknown keys so typos in project files fail loudly."""
+    """Base: reject unknown keys so typos in project files fail loudly (removed fields of
+    older versions are dropped first)."""
 
     model_config = ConfigDict(extra="forbid", validate_assignment=True)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_removed(cls, data):
+        return drop_removed(data)
 
 
 def _check_range(r: Range | None, name: str) -> None:
@@ -50,61 +82,6 @@ class Pose(_Model):
 # --- Robot -------------------------------------------------------------------
 
 
-class PayloadSpec(_Model):
-    """Datasheet limits. ``None`` means unknown: payload checks must refuse to run.
-
-    ``curve_mm_kg`` is the manufacturer's payload curve: allowed payload (kg) against the
-    payload COG distance from the flange (mm), as (offset, kg) points with increasing
-    offset. Past the last point it is either refused ("none") or extrapolated linearly
-    from the last segment ("linear", an estimate) down to 0 kg.
-    """
-
-    rated_kg: float | None = Field(default=None, gt=0)
-    wrist_moment_Nm: list[float | None] = Field(default_factory=lambda: [None, None, None])
-    joint_torque_Nm: list[float | None] = Field(default_factory=list)
-    curve_mm_kg: list[tuple[float, float]] | None = None
-    curve_extrapolate: Literal["none", "linear"] = "none"
-    curve_source: str = ""
-
-    @field_validator("curve_mm_kg")
-    @classmethod
-    def _curve(cls, v):
-        if v is None:
-            return v
-        if len(v) < 2:
-            raise ValueError("payload curve needs at least 2 points")
-        xs = [x for x, _ in v]
-        if any(b <= a for a, b in zip(xs, xs[1:], strict=False)) or xs[0] < 0:
-            raise ValueError("payload curve offsets must start >= 0 and increase")
-        if any(kg < 0 for _, kg in v):
-            raise ValueError("payload curve masses must be >= 0")
-        return v
-
-    def allowed_kg(self, offset_mm: float) -> tuple[float | None, bool]:
-        """(allowed payload at this COG offset, whether it is extrapolated). None = unknown."""
-        if self.curve_mm_kg is None:
-            return None, False
-        xs = [x for x, _ in self.curve_mm_kg]
-        ys = [y for _, y in self.curve_mm_kg]
-        if offset_mm <= xs[-1]:
-            import numpy as np
-
-            return float(np.interp(offset_mm, xs, ys)), False
-        if self.curve_extrapolate == "none":
-            return 0.0, False
-        slope = (ys[-1] - ys[-2]) / (xs[-1] - xs[-2])
-        return max(0.0, ys[-1] + slope * (offset_mm - xs[-1])), True
-
-    def is_complete(self) -> bool:
-        """Rated payload, every joint torque, and a payload curve or all wrist moments."""
-        return (
-            self.rated_kg is not None
-            and len(self.joint_torque_Nm) > 0
-            and all(t is not None for t in self.joint_torque_Nm)
-            and (self.curve_mm_kg is not None or all(m is not None for m in self.wrist_moment_Nm))
-        )
-
-
 class Robot(_Model):
     name: str | None = None  # registry name, e.g. "ur20"; preferred over a raw urdf path
     urdf: str | None = None
@@ -112,7 +89,6 @@ class Robot(_Model):
     mount: Literal["floor", "wall", "ceiling", "custom"] = "floor"
     base_pose: Pose = Field(default_factory=Pose)
     ik: Literal["ur_analytic", "opw", "numeric"] = "numeric"
-    payload_spec: PayloadSpec = Field(default_factory=PayloadSpec)
     # home pose saved with the project (deg, one per joint); None = the robot's spec.yaml home
     home_deg: list[float] | None = None
     # joint limits saved with the project (deg, (min, max) per joint); None = the URDF limits
@@ -145,7 +121,6 @@ class Primitive(_Model):
     size: Vec3 | None = None  # box: L x W x H (m)
     radius: float | None = Field(default=None, gt=0)
     height: float | None = Field(default=None, gt=0)
-    kg: float | None = Field(default=None, ge=0)
     name: str = Field(default="", max_length=64)
     attach: Literal["carriage", "lift", "fixed", "x_axis"] = "carriage"
     pose: Pose = Field(default_factory=Pose)
@@ -227,8 +202,6 @@ class Base(_Model):
     standoff_m: Standoffs = Field(default_factory=Standoffs)
     localization_m: float = Field(default=0.0, ge=0)  # mobile: position uncertainty
     localization_deg: float = Field(default=0.0, ge=0)  # mobile: heading uncertainty
-    tip_over: bool = False  # mobile: static tip-over check (needs chassis kg)
-    tip_margin_m: float = Field(default=0.05, ge=0)
     # mobile, v2: the side of the base that faces the part and ONE fixed gap between the base
     # outline and the part outline (top view). Both set: stops lie on that contour around the
     # part with the heading given (opt.contour); either None: free x, y, yaw search (v1).
@@ -257,12 +230,6 @@ class Base(_Model):
             missing = [k for k in need if getattr(j, k) is None]
             if missing:
                 raise ValueError(f"{self.carrier} needs travel ranges for {missing}")
-        if self.tip_over:
-            moving = [b for b in self.bodies if b.attach == "carriage"] or [
-                b for b in (self.chassis, self.riser) if b is not None
-            ]
-            if not any(b.kg for b in moving):
-                raise ValueError("tip-over check needs the chassis mass")
         return self
 
 
@@ -313,7 +280,6 @@ class Extension(_Model):
     ry_deg: Range = (0.0, 0.0)
     rz_deg: Range = (0.0, 0.0)
     radius: float = Field(default=0.04, gt=0)
-    kg_per_m: float = Field(default=0.0, ge=0)
     nominal: ExtensionValues = Field(default_factory=ExtensionValues)
 
     @model_validator(mode="after")
@@ -378,9 +344,6 @@ class EndEffector(_Model):
     T_flange_mount: Pose = Field(default_factory=Pose)
     extension: Extension = Field(default_factory=Extension)
     tcps: list[TCP] = Field(min_length=1)
-    process_force_N: float = Field(default=0.0, ge=0)
-    mass_kg: float | None = Field(default=None, ge=0)  # override of the URDF head mass
-    com_head: Vec3 | None = None  # override of the URDF head COM (head frame, m)
     tolerances: Tolerances = Field(default_factory=Tolerances)
     line_of_sight: bool = False  # scanning: require a clear ray from sensor to point
     approach_m: float = Field(default=0.0, ge=0)  # gripping: approach/retreat distance
@@ -458,7 +421,6 @@ class Weights(_Model):
     manip: float = Field(default=0.3, ge=0)
     clearance: float = Field(default=0.3, ge=0)
     limits: float = Field(default=0.2, ge=0)
-    torque: float = Field(default=0.5, ge=0)
     standoff: float = Field(default=1.0, ge=0)  # soft: carrier closer than the preferred standoff
     group: float = Field(default=1.0, ge=0)  # per extra joint-configuration group at a stop
     motion: float = Field(default=1.0, ge=0)  # mean largest joint move between neighbouring points / 90 deg
@@ -468,6 +430,7 @@ class Weights(_Model):
     @classmethod
     def _legacy_config(cls, data):
         """Projects before v5 had one ``config`` weight for both counts."""
+        data = drop_removed(data)
         if isinstance(data, dict) and "config" in data:
             data = dict(data)
             c = data.pop("config")
@@ -479,7 +442,6 @@ class Weights(_Model):
 class Margins(_Model):
     clearance_m: float = Field(default=0.01, ge=0)
     joint_deg: float = Field(default=5.0, ge=0)
-    torque_util: float = Field(default=0.8, gt=0, le=1)
 
 
 FreeVar = Literal["L", "theta", "d", "roll", "base", "stations"]

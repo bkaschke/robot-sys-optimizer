@@ -1,5 +1,5 @@
 """Tool Setup tab: tool library, process preset, flange mount, extension, TCPs, contact
-faces and mass. Edits go through ``_commit`` which re-validates the whole EndEffector."""
+faces. Edits go through ``_commit`` which re-validates the whole EndEffector."""
 
 from __future__ import annotations
 
@@ -46,7 +46,6 @@ class ToolSetupTab:
         with gui.add_folder("Process"):
             self.process = gui.add_dropdown("Type", tuple(PRESETS), initial_value="custom")
             self.notes = gui.add_markdown("")
-            self.force = gui.add_number("Process force (N)", 0.0, min=0.0, step=1.0)
             self.tilt = gui.add_number("Tilt cone (deg)", 0.0, min=0.0, max=90.0, step=0.5)
             self.standoff = gui.add_vector2("Standoff min/max (mm)", (0.0, 0.0), step=1.0)
             self.spin = gui.add_text("Spin (deg)", "free", hint="'free', a half-width, or 'lo,hi'")
@@ -70,11 +69,6 @@ class ToolSetupTab:
             self.clear_faces = gui.add_button("Clear contact faces")
             self.links_folder = gui.add_folder("Whole-link contact")
             self.contact_info = gui.add_markdown("")
-        with gui.add_folder("Mass"):
-            self.mass_info = gui.add_markdown("")
-            self.mass_override = gui.add_checkbox("Override head mass/COM", False)
-            self.mass = gui.add_number("Head mass (kg)", 0.0, min=0.0, step=0.1)
-            self.com = gui.add_vector3("Head COM (mm)", (0.0, 0.0, 0.0), step=1.0)
         self._wire()
         self.refresh()
 
@@ -150,9 +144,8 @@ class ToolSetupTab:
             d["tolerances"] = Tolerances(
                 spin_deg=spin, tilt_deg=self.tilt.value, standoff_m=lo if lo == hi else (lo, hi)
             ).model_dump()
-            d["process_force_N"] = self.force.value
 
-        for w in (self.force, self.tilt, self.standoff, self.spin):
+        for w in (self.tilt, self.standoff, self.spin):
 
             @w.on_update
             @g
@@ -211,19 +204,6 @@ class ToolSetupTab:
         @self.pick.on_update
         def _(e) -> None:
             self.view.on_pick = self._on_pick if self.pick.value else None
-
-        def mass(d: dict) -> None:
-            on = self.mass_override.value
-            d["mass_kg"] = self.mass.value if on else None
-            d["com_head"] = tuple(v / 1000 for v in self.com.value) if on else None
-
-        for w in (self.mass_override, self.mass, self.com):
-
-            @w.on_update
-            @g
-            def _(e) -> None:
-                if self._commit(mass, e):
-                    self._update_info()
 
         self.view.on_pick = None
 
@@ -363,13 +343,12 @@ class ToolSetupTab:
             self.choice.value = NONE
             self.view.rebuild()
             self.mount.gizmo.visible = self.tcp_pose.gizmo.visible = False  # no tool: nothing below them
-            self.mass_info.content = self.contact_info.content = "_No tool loaded._"
+            self.contact_info.content = "_No tool loaded._"
             return
         self.choice.value = ee.name if ee.name in list_tools() else NONE
         self.name.value = ee.name
         self.process.value = ee.process
         self.notes.content = f"_{PRESETS[ee.process].notes}_"
-        self.force.value = ee.process_force_N
         tol = ee.tolerances
         self.tilt.value = tol.tilt_deg
         so = tol.standoff_m if isinstance(tol.standoff_m, tuple) else (tol.standoff_m, tol.standoff_m)
@@ -390,9 +369,6 @@ class ToolSetupTab:
                 cb.on_update(self._on_link_contact(hl.name))
                 self._link_boxes[hl.name] = cb
                 self._dyn.append(cb)
-        self.mass_override.value = ee.mass_kg is not None
-        self.mass.value = ee.mass_kg or 0.0
-        self.com.value = tuple(v * 1000 for v in (ee.com_head or (0.0, 0.0, 0.0)))
         self.mount.gizmo.visible = True
         self.mount.set_handles(self.mount.show.value)
         self.view.rebuild()
@@ -419,13 +395,6 @@ class ToolSetupTab:
         tm, ee = self.s.tool_model, self.s.tool
         if tm is None:
             return
-        mp = tm.mass_properties()
-        warn = "" if mp.head_mass_known else "  \n⚠ URDF has no inertials: set the head mass."
-        c = mp.com_flange * 1000
-        self.mass_info.content = (
-            f"**Total {mp.mass_kg:.2f} kg** (head + extension {tm.length() * 1000:.0f} mm)  \n"
-            f"COM in flange: {c[0]:.1f}, {c[1]:.1f}, {c[2]:.1f} mm{warn}"
-        )
         tcp = next((t for t in ee.tcps if t.name == self.tcp_choice.value), None)
         if tcp is not None:
             n = sum(len(v) for v in tcp.contact_faces.values())

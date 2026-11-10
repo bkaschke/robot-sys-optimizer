@@ -111,7 +111,7 @@ class _Tracer:
     def __init__(self, checker: FeasibilityChecker, mesh: trimesh.Trimesh, step: float, jump_deg: float):
         self.ch, self.mesh, self.step = checker, mesh, step
         self.jump = np.radians(jump_deg)
-        self.ur = hasattr(checker.ik, "a2")
+        self.batch = getattr(checker.ik, "batch", False)
         self.park = None  # a clear arm pose (home) to go via when a direct joint move collides
 
     def tcp_pose(self, r: PointResult) -> np.ndarray:
@@ -244,10 +244,8 @@ class _Tracer:
         """(q, issue) for one sample: keep ``label``, nearest 2*pi copy to ``prev``."""
         ch = self.ch
         T = ch.T_base_part @ T_part_tcp @ ch._T_tcp_flange[tcp]
-        if self.ur:
-            from core.ik.ur import solve_batch
-
-            Q, V, sing = solve_batch(ch.ik, T[None], return_singular=True)
+        if self.batch:
+            Q, V, sing = ch.ik.solve_batch(T[None], return_singular=True)
             sols = ch.ik.solve(T) if sing[0] else Q[0][V[0]]
         else:
             sols = ch.ik.solve(T)

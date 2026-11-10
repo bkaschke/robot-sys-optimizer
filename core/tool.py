@@ -53,18 +53,10 @@ class HeadLink:
     mesh: trimesh.Trimesh  # visual geometry in the link frame
 
 
-@dataclass
-class MassProperties:
-    mass_kg: float
-    com_flange: np.ndarray
-    head_mass_known: bool  # False when the URDF has no inertials and no override is set
-
-
 class ToolModel:
     def __init__(self, ee: EndEffector, urdf_path: Path | None):
         self.ee = ee
         self.links: list[HeadLink] = []
-        self._head_mass, self._head_com = 0.0, np.zeros(3)
         if urdf_path is not None:
             self._load_head(Path(urdf_path))
 
@@ -96,17 +88,6 @@ class ToolModel:
             if meshes:
                 mesh = trimesh.util.concatenate(meshes)
                 self.links.append(HeadLink(name, urdf.get_transform(name, root), mesh))
-        mass, moment = 0.0, np.zeros(3)
-        for name, link in urdf.link_map.items():
-            inertial = link.inertial
-            if inertial is None or not inertial.mass:
-                continue
-            T = urdf.get_transform(name, root)
-            c_link = inertial.origin[:3, 3] if inertial.origin is not None else np.zeros(3)
-            mass += inertial.mass
-            moment += inertial.mass * (T[:3, :3] @ c_link + T[:3, 3])
-        self._head_mass = mass
-        self._head_com = moment / mass if mass > 0 else np.zeros(3)
 
     def link(self, name: str) -> HeadLink:
         for hl in self.links:
@@ -179,22 +160,6 @@ class ToolModel:
 
     def length(self, v: ExtensionValues | None = None) -> float:
         return float(sum(np.linalg.norm(b - a) for a, b in self.extension_segments(v)))
-
-    # --- mass -------------------------------------------------------------------------
-
-    def mass_properties(self, v: ExtensionValues | None = None) -> MassProperties:
-        head_m = self.ee.mass_kg if self.ee.mass_kg is not None else self._head_mass
-        head_c = np.asarray(self.ee.com_head) if self.ee.com_head is not None else self._head_com
-        known = self.ee.mass_kg is not None or self._head_mass > 0
-        T_fh = self.T_flange_head(v)
-        total = head_m
-        moment = head_m * (T_fh[:3, :3] @ head_c + T_fh[:3, 3])
-        for a, b in self.extension_segments(v):
-            m = self.ee.extension.kg_per_m * float(np.linalg.norm(b - a))
-            total += m
-            moment += m * (a + b) / 2
-        com = moment / total if total > 0 else np.zeros(3)
-        return MassProperties(total, com, known)
 
 
 # --- tool library (tools/<name>.yaml) ------------------------------------------------

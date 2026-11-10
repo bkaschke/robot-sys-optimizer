@@ -4,11 +4,13 @@ with the coverage-vs-length samples and an "apply to tool" action."""
 from __future__ import annotations
 
 import threading
+import time
 from collections.abc import Callable
 
 import viser
 
 from core.feasibility import CancelledError
+from core.ik import make_ik
 from core.robot import Robot
 from core.schema import ExtensionValues, Optimizer
 from opt.tool_geometry import GeometryResult, GeometrySettings, optimize_tool
@@ -58,7 +60,7 @@ class ToolOptPanel:
             self.progress = gui.add_progress_bar(0.0, visible=False)
             self.info = gui.add_markdown(
                 "_Pose tools: the head pose (x y z rx ry rz within its ranges) with the best overall cost. "
-                "Straight / bent tools: the shortest L, then θ / d / roll. Payload is not considered._"
+                "Straight / bent tools: the shortest L, then θ / d / roll._"
             )
             self.legacy_hint = gui.add_markdown(
                 "_This tool is the legacy type: the optimizer only changes L / θ / d / roll. For x y z / "
@@ -138,8 +140,13 @@ class ToolOptPanel:
             return notify(event, "Cannot optimize", "Need a tool, a part and targets")
         if s.robot is None:
             return notify(event, "No robot", "Choose a robot first (tab 1 Robot & cell)")
-        if s.robot.spec.ik != "ur_analytic":
-            return notify(event, "Not supported", "Needs a UR-type arm (v1)")
+        if not getattr(make_ik(s.robot), "batch", False):
+            return notify(
+                event,
+                "Not supported",
+                "Tool optimization needs an analytic IK solver (spec.yaml: ik ur_analytic or opw). "
+                "See the user guide, Adding a robot.",
+            )
         opts = self.planner_options() if self.planner_options else {"zoning": False}
         robot = Robot(s.robot.spec)
         ee = s.tool
@@ -201,6 +208,7 @@ class ToolOptPanel:
             finally:
                 self.run.visible, self.stop.visible, self.progress.visible = True, False, False
 
+        self._t0 = time.monotonic()
         self._thread = threading.Thread(target=work, daemon=True)
         self._thread.start()
         if block:
@@ -243,7 +251,7 @@ class ToolOptPanel:
         if not r.feasible:
             pick = f"\n\n**Best designs (they miss points)**, pick one under *Design*:  \n{listing}"
             self.info.content = f"⚠ {r.message}" + (pick if names else "") + f"\n\n{table}"
-            log(f"Tool optimization finished: {r.message}", "warn")
+            log(f"Tool optimization finished: {r.message}", "warn", getattr(self, "_t0", None))
         else:
             v = r.values
             shape = "" if pose else f"θ {v.theta_deg:.1f}°, d {v.d * 1000:.0f} mm, roll {v.roll_deg:.1f}° · "
@@ -253,7 +261,7 @@ class ToolOptPanel:
                 "  \nNext: **Apply to tool**, then **Results → Paths & simulation → Build paths**."
                 f"\n\n**Best designs:**  \n{listing}\n\n{table}"
             )
-            log(f"Tool optimization finished: {r.message}.", "done")
+            log(f"Tool optimization finished: {r.message}.", "done", getattr(self, "_t0", None))
         for d in ds:  # every offered design is a result to inspect / build paths for
             self.s.stamps[d.solution.label] = self._stamp
             self.s.result_points[d.solution.label] = d.point_results

@@ -14,6 +14,7 @@ from pydantic import ValidationError
 
 from core import target_tools as tt
 from core import targets as tg
+from core.facing import facing_sides
 from core.schema import TargetGroup, Tolerances
 from core.surface_grid import surface_grid
 from core.transforms import make_T, wxyz_to_matrix
@@ -42,14 +43,15 @@ GEN_FIELDS = (
     "stepover",
     "direction",
     "normals_mode",
+    "split_sides",
 )
 # settings shown per generator (the rest are hidden)
 METHOD_FIELDS = {
-    GRID: ("row", "col", "inset", "row_angle", "normals_mode"),
-    LATTICE: ("row", "col", "row_dir", "direction", "normals_mode"),
-    "Projected grid": ("spacing", "direction", "normals_mode"),
+    GRID: ("row", "col", "inset", "row_angle", "normals_mode", "split_sides"),
+    LATTICE: ("row", "col", "row_dir", "direction", "normals_mode", "split_sides"),
+    "Projected grid": ("spacing", "direction", "normals_mode", "split_sides"),
     "Poisson (even)": ("spacing", "normals_mode"),
-    "Raster lines": ("spacing", "stepover", "direction", "normals_mode"),
+    "Raster lines": ("spacing", "stepover", "direction", "normals_mode", "split_sides"),
     "Selection edges": ("spacing",),
 }
 
@@ -95,12 +97,18 @@ class TargetsTab:
                 hint="(0,0,0) = automatic from the selection",
             )
             self.normals_mode = gui.add_dropdown("Normals", ("interpolated", "face"))
+            self.split_sides = gui.add_checkbox(
+                "Each side separately",
+                True,
+                hint="a selection around the part (e.g. opposite faces) gets points on every side; "
+                "the ray direction is then found per side",
+            )
             self.gen_group = gui.add_dropdown("Into group", ("default",))
             self.generate = gui.add_button("Generate on selection")
             self.gen_info = gui.add_markdown("")
             self.tools = PointTools(server, self)  # undo + last-add info
         self.tools.build_refine()
-        with gui.add_folder("Groups & tolerances"):
+        with gui.add_folder("Groups & tolerances", expand_by_default=False):
             self.group = gui.add_dropdown("Group", ("default",))
             self.new_group = gui.add_text("New group", "")
             self.add_group = gui.add_button("Add group")
@@ -109,7 +117,7 @@ class TargetsTab:
             self.standoff = gui.add_vector2("Standoff min/max (mm)", (0.0, 0.0), step=1.0)
             self.tcps = gui.add_text("TCPs (comma, empty = any)", "")
             self.apply_tol = gui.add_button("Apply to group")
-        with gui.add_folder("Edit points"):
+        with gui.add_folder("Edit points", expand_by_default=False):
             self.count = gui.add_markdown("")
             self.assign = gui.add_button("Assign selected-surface points to group")
             self.flip = gui.add_button("Flip normals on selected surface")
@@ -117,7 +125,7 @@ class TargetsTab:
             self.delete_all = gui.add_button("Delete all points")
             self.csv_units = gui.add_dropdown("CSV units", ("mm", "m"))
             self.csv = gui.add_upload_button("Import CSV (x,y,z,nx,ny,nz[,group])", mime_type="text/csv")
-        with gui.add_folder("Display"):
+        with gui.add_folder("Display", expand_by_default=False):
             self.color_by = gui.add_dropdown(
                 "Color points by", ("group", "feasibility", "zone", "configuration")
             )
@@ -326,37 +334,40 @@ class TargetsTab:
         if method == "Raster lines":
             tol = 0.4 * min(step, self.stepover.value / 1000)
         note = ""
-        try:
+
+        def one(faces) -> tuple[np.ndarray, np.ndarray, str]:
             if method == GRID:
                 P, N, info = surface_grid(
-                    m,
-                    self.selection,
-                    row,
-                    col,
-                    self.inset.value / 1000,
-                    self.row_angle.value,
-                    self.normals_mode.value,
+                    m, faces, row, col, self.inset.value / 1000, self.row_angle.value, self.normals_mode.value
                 )
-                note = f"{info.rows} rows on {info.area_m2 * 1e4:.0f} cm²"
+                txt = f"{info.rows} rows on {info.area_m2 * 1e4:.0f} cm²"
                 if info.dropped_at_edge:
-                    note += f"; {info.dropped_at_edge} within the edge inset left out"
-                note += "".join(f"  \n⚠ {w}" for w in info.warnings)
-            elif method == LATTICE:
-                P, N = tt.lattice_grid(
-                    m, self.selection, row, col, d, self.tools._row_dir(), normals=self.normals_mode.value
-                )
-            elif method == "Projected grid":
-                P, N = tg.projected_grid(
-                    m, self.selection, step, direction=d, normals=self.normals_mode.value
-                )
-            elif method == "Poisson (even)":
-                P, N = tg.poisson_disk(m, self.selection, step, normals=self.normals_mode.value)
-            elif method == "Raster lines":
-                P, N = tg.raster(
-                    m, self.selection, self.stepover.value / 1000, step, d, self.normals_mode.value
-                )
-            else:
-                P, N = tg.edge_paths(m, self.selection, step)
+                    txt += f"; {info.dropped_at_edge} within the edge inset left out"
+                return P, N, txt + "".join(f"  \n⚠ {w}" for w in info.warnings)
+            if method == LATTICE:
+                rd = self.tools._row_dir()
+                return (*tt.lattice_grid(m, faces, row, col, d, rd, normals=self.normals_mode.value), "")
+            if method == "Projected grid":
+                return (*tg.projected_grid(m, faces, step, direction=d, normals=self.normals_mode.value), "")
+            if method == "Poisson (even)":
+                return (*tg.poisson_disk(m, faces, step, normals=self.normals_mode.value), "")
+            if method == "Raster lines":
+                so = self.stepover.value / 1000
+                return (*tg.raster(m, faces, so, step, d, self.normals_mode.value), "")
+            return (*tg.edge_paths(m, faces, step), "")
+
+        try:
+            per_side = self.split_sides.value and d is None and "split_sides" in METHOD_FIELDS.get(method, ())
+            cell = row * col if method in (GRID, LATTICE) else step * step
+            sides = facing_sides(m, self.selection, min_area=cell) if per_side else [self.selection]
+            if not sides:
+                raise ValueError("Every selected side is smaller than one grid cell: reduce the spacing.")
+            outs = [one(f) for f in sides]
+            P = np.concatenate([o[0] for o in outs]) if outs else np.zeros((0, 3))
+            N = np.concatenate([o[1] for o in outs]) if outs else np.zeros((0, 3))
+            note = "; ".join(o[2] for o in outs if o[2])
+            if len(sides) > 1:
+                note = f"{len(sides)} sides" + (f": {note}" if note else "")
         except (ValueError, IndexError) as err:
             self.gen_info.content = f"_{err}_"
             notify(e, "Generation failed", str(err))
@@ -459,7 +470,12 @@ class TargetsTab:
                 f"{PART}/normals", seg, (30, 30, 30), thickness=1.5, thickness_units="screen"
             )
         if self.show_unreached.value:  # v6 feedback: make the points the plan misses obvious
-            bad = unreached_ids(ids, sel, self.s.feasibility)
+            from ui.staleness import feasibility_changes
+
+            # an out-of-date feasibility check (points, tool, part or base changed since) would
+            # mark the wrong points: only the selected plan's results are used then
+            feas = self.s.feasibility if self.s.feasibility and not feasibility_changes(self.s) else {}
+            bad = unreached_ids(ids, sel, feas)
             self._handles.update(
                 draw_unreached(self.server, PART, ids, P, N, bad, self.point_size.value / 1000)
             )

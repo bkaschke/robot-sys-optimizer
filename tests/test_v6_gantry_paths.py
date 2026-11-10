@@ -20,8 +20,8 @@ def _gantry(carrier="gantry") -> Base:
         carrier=carrier,
         pose=Pose(xyz=(0.0, -1.0, 0.0)),
         bodies=[
-            Primitive(name="bridge", shape="box", size=(0.3, 1.5, 0.1), attach="x_axis", kg=30),
-            Primitive(name="carriage", shape="box", size=(0.4, 0.4, 0.1), pose=Pose(xyz=(0, 0, 0.1)), kg=30),
+            Primitive(name="bridge", shape="box", size=(0.3, 1.5, 0.1), attach="x_axis"),
+            Primitive(name="carriage", shape="box", size=(0.4, 0.4, 0.1), pose=Pose(xyz=(0, 0, 0.1))),
         ],
         T_mount=Pose(xyz=(0, 0, 0.2)),
         joints=joints,

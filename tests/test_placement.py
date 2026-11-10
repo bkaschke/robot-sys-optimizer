@@ -64,7 +64,7 @@ def test_order_stations_shortest_open_path():
 
 def test_cost_breakdown_terms():
     w = Weights()
-    ok = PointResult(0, "reachable", clearance=0.05, manipulability=0.5, torque_util=0.3, limit_margin_deg=40)
+    ok = PointResult(0, "reachable", clearance=0.05, manipulability=0.5, limit_margin_deg=40)
     cost, terms = cost_breakdown([ok], 2, np.array([[0, 0], [1, 0]]), w, max_manip=1.0)
     assert terms["unreached"] == pytest.approx(2 * w.unreached)
     assert terms["stations"] == pytest.approx(w.stations)
@@ -145,7 +145,7 @@ def test_planner_finds_two_stations_full_coverage(rail_scene):
     assert len(best.stations) == 2
     assert best.unreached == [] and len(best.assignment) == len(t.ids)
     assert len(streamed) == len(out) >= 1  # solutions were streamed as they finished
-    # every assignment was verified by the exact checker (collision + torque) from its station
+    # every assignment was verified by the exact checker (collision) from its station
     for pid, k in best.assignment.items():
         checker.set_base(make_T(p=best.stations[k].xyz))
         r = checker.check_point(pid, t.P_part[pid], t.N_part[pid], t.groups[pid])

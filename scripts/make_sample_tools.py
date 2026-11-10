@@ -81,7 +81,6 @@ def main() -> None:
             L=(0.05, 0.6),
             theta_deg=(0, 45),
             radius=0.04,
-            kg_per_m=2.0,
             nominal=ExtensionValues(L=0.15),
         ),
         tcps=[TCP(name="pad", T_head_tcp=Pose(xyz=(0, 0, 0.17)), contact_links=["pad_link"])],
@@ -93,7 +92,7 @@ def main() -> None:
     scanner = EndEffector(
         name="scanner",
         urdf="assets/tools/scanner/scanner.urdf",
-        extension=Extension(L=(0.0, 0.4), radius=0.03, kg_per_m=1.5, nominal=ExtensionValues(L=0.1)),
+        extension=Extension(L=(0.0, 0.4), radius=0.03, nominal=ExtensionValues(L=0.1)),
         tcps=[TCP(name="sensor", T_head_tcp=Pose(xyz=(0, 0, 0.12)))],
     )
     save_tool(apply_preset(scanner, "scanning"))
