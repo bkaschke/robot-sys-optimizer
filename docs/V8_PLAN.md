@@ -46,7 +46,7 @@ docs/V8_PLAN.md on branch v8, task by task, in the order given."**
 | Package | For | Notes |
 |---|---|---|
 | `optuna` 5.0 | T10 Bayesian (TPE), T11 NSGA-II | pure-Python wheel + SQLAlchemy, alembic, Mako, MarkupSafe (small; checked with `pip install --dry-run` 2026-11-09). Optuna's **GP sampler needs PyTorch** (~1 GB unpacked): the GP method is a small numpy / scipy GP in `opt/refine_bayes.py` instead, unless the user wants torch |
-| `coacd` 1.0.14 | T3 convex decomposition | binary wheel `cp39-abi3-win_amd64`, no other dependencies; optional, falls back to the current mesh |
+| ~~`coacd`~~ | T3 | dropped: measured slower than the exact mesh (see Status T3) |
 | `cadquery` 2.8 | T17 STEP export | **heavy**: pulls `cadquery-ocp` (OpenCascade), VTK, matplotlib, numba, trame and more. Optional, kept **out of the portable zip** unless the user decides otherwise; without it the tool exports STL / URDF as today |
 
 Not needed: cycle time uses a built-in trapezoidal profile (no `toppra`); the PDF report is
@@ -323,9 +323,9 @@ including what was not verified in a browser.
 
 | Task | State | Notes |
 |---|---|---|
-| T1 | todo | |
-| T2 | todo | |
-| T3 | todo | |
+| T1 | done | `ui/jobs.py` (one persistent spawn worker, Cancel event + kill after 2 s, idle 5 min), `ui/plan_job.py` (station plan incl. quick / rules, tool optimizer). Worker plan = in-process plan on rail_long_part (test). Feasibility check / heatmap / paths stay in their threads (short runs; T5 / T9 studies use the worker) |
+| T2 | done | `opt/parallel.py`: pool fills the plan's `CheckMemo` (`prefetch`) before verify, localization, zoning, refinement batches, station areas: identical plans on rail_long_part (test). gantry_overhead 113.8 s serial -> 87.6 s (pool start included) -> 77.4 s with the pool reused; rail / mobile (25 pts) gain nothing (pool start ~10 s). The 2x zoning target holds only on big point sets; CP-SAT (24 s on the gantry) stays serial. Default 4 workers (16 GB PC). `Carrier.axis_follow` -> `AxisFollow` class (closures don't pickle) |
+| T3 | **dropped (measured)** | CoACD convex parts: same reach on all 5 examples (their parts are 12-face boxes, 1 piece), but on dense meshes **slower**: curved_panel 55k faces -> 14 pieces, 175 s to decompose, 0.82 vs 0.67 ms per `collides`; deep_hole 207k -> 39 pieces, 295 s, 1.17 vs 0.59 ms. Coal's BVH already handles dense parts; robot self / carrier pairs dominate. SDF clearance not done: `part_clearance` is ~7 % of plan time and an SDF needs dense robot sampling to stay within 1 mm. `coacd` removed from the env again |
 | T4 | todo | |
 | T5 | todo | |
 | T6 | todo | |

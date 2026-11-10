@@ -110,10 +110,11 @@ def station_job(payload: dict, emit, cancelled) -> dict:
         from opt.parallel import CheckerSpec, pool_for
 
         say(f"starting {workers} check workers", 0.0)
-        checker.pool = pool_for(
-            CheckerSpec(robot.spec, s.tool_model, mesh, T_base0, T_part, bb, wb, s.obstacle_entries()),
-            workers,
-        )
+        cs = CheckerSpec(robot.spec, s.tool_model, mesh, T_base0, T_part, bb, wb, s.obstacle_entries())
+        try:
+            checker.pool = pool_for(cs, workers)
+        except Exception as err:  # e.g. a setup object that doesn't pickle: plan serially
+            emit("warn", f"parallel checks off for this plan ({type(err).__name__}: {err})")
     emit("max_manip", float(rmap.max_manip))  # the Results card: manipulability in % (not saved)
     args = dict(t=t, T_base0=T_base0, fp=fp, weights=spec["weights"], settings=settings, L=L, L_ref=L_ref)
     rules = spec.get("rules")

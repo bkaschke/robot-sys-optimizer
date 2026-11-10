@@ -28,5 +28,4 @@ dependencies:
       - cma>=3.3         # CMA-ES refinement
       - shapely>=2.0     # floor footprints, standoff and keep-out zones
       - optuna>=5.0      # v8: Bayesian (TPE) refinement and NSGA-II Pareto fronts (GP is our own, no torch)
-      - coacd>=1.0.14    # v8: convex decomposition of the part for faster collision checks
       - cadquery>=2.8    # v8: STEP export of designed tools (OpenCascade; large, but in the portable zip)
