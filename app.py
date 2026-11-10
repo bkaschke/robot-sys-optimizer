@@ -239,6 +239,9 @@ def build_app(
             set_q=cell.set_q,
             order=results.export.folder.order - 0.5,  # above Export
         )
+        from ui.tolerance_ui import TolerancePanel
+
+        tolerance = TolerancePanel(server, session, results.selected)  # v8 T5
     state["results"] = results
     tool_opt.planner_options = stations.options
     workflow.gate(stations.run, stations.gate_md)  # optimizers need a confirmed setup (T5)
@@ -250,6 +253,7 @@ def build_app(
     workflow.gate((ex.csv, ex.uframes, ex.urdf, ex.report), ex.gate_md, result_reason(results.selected))
     workflow.gate(sim.build_btn, sim.gate_md, plan_reason(sim.selected))
     workflow.gate(tool_opt.run, tool_opt.gate_md)
+    workflow.gate(tolerance.run, tolerance.gate_md, plan_reason(results.selected))
 
     def selected_results() -> dict:
         sol = results.selected()
@@ -325,6 +329,7 @@ def build_app(
         placement=placement,
         stations=stations,
         tool_opt=tool_opt,
+        tolerance=tolerance,
         project=project,
         dark_toggle=dark_toggle,
         guide=guide,

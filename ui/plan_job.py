@@ -56,11 +56,36 @@ def session_from(payload: dict):
     return s
 
 
-def station_job(payload: dict, emit, cancelled) -> dict:
-    """Plan stations (normal, quick or rules only, from ``spec``)."""
+def build_checker(s, robot, sites, workers: int, say, emit):
+    """The exact checker of the planners (part, carrier bodies, stay-out zones), with a check
+    pool (v8 T2) when ``workers`` > 1 (kept for the next job with the same setup)."""
     from core.collision import CollisionScene
     from core.feasibility import FeasibilityChecker
     from core.ik import make_ik
+
+    mesh = s.part_mesh()
+    T_base0, T_part = s.T_world_base.copy(), s.part.T_world_part.copy()
+    bb, wb = sites.scene_bodies() if sites is not None else ([], [])
+    obstacles = s.obstacle_entries()  # stay-out zones
+    scene = CollisionScene(
+        robot, s.tool_model, mesh, T_base0, T_part, base_bodies=bb, world_bodies=wb, obstacles=obstacles
+    )
+    checker = FeasibilityChecker(robot, make_ik(robot), s.tool_model, scene, T_base0, T_part)
+    if workers > 1:
+        from opt.parallel import CheckerSpec, pool_for
+
+        say(f"starting {workers} check workers", 0.0)
+        try:
+            checker.pool = pool_for(
+                CheckerSpec(robot.spec, s.tool_model, mesh, T_base0, T_part, bb, wb, obstacles), workers
+            )
+        except Exception as err:  # e.g. a setup object that doesn't pickle: run serially
+            emit("warn", f"parallel checks off for this run ({type(err).__name__}: {err})")
+    return checker
+
+
+def station_job(payload: dict, emit, cancelled) -> dict:
+    """Plan stations (normal, quick or rules only, from ``spec``)."""
     from core.robot import Robot
     from core.schema import length_ref
     from opt.placement import plan_stations
@@ -74,9 +99,8 @@ def station_job(payload: dict, emit, cancelled) -> dict:
     tcp = s.tool.tcps[0].name
     t = world_targets(s)
     fp = part_footprint(s)
-    mesh = s.part_mesh()
     sites = s.sites()
-    T_base0, T_part = s.T_world_base.copy(), s.part.T_world_part.copy()
+    T_base0 = s.T_world_base.copy()
     L = s.tool_model.length()
     L_ref = length_ref(s.tool.extension)
 
@@ -93,28 +117,7 @@ def station_job(payload: dict, emit, cancelled) -> dict:
         cancelled=cancelled,
         any_offset=s.tool.extension.type == "pose",  # pose tools: shared flange map
     )
-    bb, wb = sites.scene_bodies() if sites is not None else ([], [])
-    scene = CollisionScene(
-        robot,
-        s.tool_model,
-        mesh,
-        T_base0,
-        T_part,
-        base_bodies=bb,
-        world_bodies=wb,
-        obstacles=s.obstacle_entries(),  # stay-out zones
-    )
-    checker = FeasibilityChecker(robot, make_ik(robot), s.tool_model, scene, T_base0, T_part)
-    workers = int(spec.get("workers", 1))
-    if workers > 1:  # v8 T2: exact checks in a process pool (kept for the next plan)
-        from opt.parallel import CheckerSpec, pool_for
-
-        say(f"starting {workers} check workers", 0.0)
-        cs = CheckerSpec(robot.spec, s.tool_model, mesh, T_base0, T_part, bb, wb, s.obstacle_entries())
-        try:
-            checker.pool = pool_for(cs, workers)
-        except Exception as err:  # e.g. a setup object that doesn't pickle: plan serially
-            emit("warn", f"parallel checks off for this plan ({type(err).__name__}: {err})")
+    checker = build_checker(s, robot, sites, int(spec.get("workers", 1)), say, emit)
     emit("max_manip", float(rmap.max_manip))  # the Results card: manipulability in % (not saved)
     args = dict(t=t, T_base0=T_base0, fp=fp, weights=spec["weights"], settings=settings, L=L, L_ref=L_ref)
     rules = spec.get("rules")
@@ -177,4 +180,35 @@ def tool_job(payload: dict, emit, cancelled):
         cancelled=cancelled,
         sites=sites,
         obstacles=s.obstacle_entries(),  # stay-out zones
+    )
+
+
+def tolerance_job(payload: dict, emit, cancelled):
+    """v8 T5: Monte Carlo tolerance check of a plan (``spec``: sol, results, settings, workers).
+    Returns opt.tolerance.ToleranceResult."""
+    from core.export import station_pose
+    from core.robot import Robot
+    from opt.tolerance import tolerance_check
+    from ui.stations import world_targets
+
+    s = session_from(payload)
+    spec = payload["spec"]
+    sol = spec["sol"]
+    robot = Robot(s.robot.spec)
+
+    def say(msg: str, f: float) -> None:
+        emit("progress", (msg, f))
+
+    checker = build_checker(s, robot, s.sites(), int(spec.get("workers", 1)), say, emit)
+    T_stops = [station_pose(s.base, st, s.T_world_base) for st in sol.stations]
+    return tolerance_check(
+        checker,
+        world_targets(s),
+        sol,
+        spec["results"],
+        T_stops,
+        spec["settings"],
+        pool=checker.pool,
+        progress=say,
+        cancelled=cancelled,
     )

@@ -8,7 +8,8 @@ the serial loop then reads them from the memo. Results are identical to the seri
 (same inputs, same deterministic checker).
 
 ``calls`` are ``(T_world_base, kind, pid, p, n, group, max_poses, clearance)`` with kind
-"point" (``check_point``) or "configs" (``check_point_configs``; clearance ignored).
+"point" (``check_point``) or "configs" (``check_point_configs``; clearance ignored), and an
+optional 9th entry, the part pose for that call (tolerance samples, ``opt.tolerance``).
 
 Pools are kept per spec (``pool_for``): building one costs a few seconds (imports, robot,
 collision scene per worker), so later plans with the same setup reuse it. Workers end
@@ -91,10 +92,17 @@ def _init(spec: CheckerSpec) -> None:  # pragma: no cover - runs in pool workers
 
 
 def _run(settings, calls: list) -> list:  # pragma: no cover - runs in pool workers
+    from opt.tolerance import set_part
+
     c = _CHECKER
     c.settings = settings
+    T_part0 = getattr(c, "_T_part0", None)
+    if T_part0 is None:
+        T_part0 = c._T_part0 = c.T_world_part.copy()
     out = []
-    for T, kind, pid, p, n, group, max_poses, clearance in calls:
+    for call in calls:  # an optional 9th entry moves the part (v8 T5 tolerance samples)
+        T, kind, pid, p, n, group, max_poses, clearance = call[:8]
+        set_part(c, call[8] if len(call) > 8 and call[8] is not None else T_part0)
         c.set_base(T)
         if kind == "point":
             out.append(c._check_point(pid, p, n, group, max_poses, clearance))
