@@ -313,6 +313,7 @@ class Solution(_Model):
     planner: str = ""
     run_s: float | None = None
     cycle_s: float | None = None  # v8 T6: estimated cycle time (core.cycle_time.plan_estimate)
+    provenance: dict[str, str] = Field(default_factory=dict)  # v8 T21: code, methods, settings, seed
 
     @model_validator(mode="after")
     def _station_refs(self) -> Solution:

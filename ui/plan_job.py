@@ -119,7 +119,21 @@ def station_job(payload: dict, emit, cancelled) -> dict:
     def say(msg: str, f: float) -> None:
         emit("progress", (msg, f))
 
+    from core.provenance import stamp
+
+    prov = stamp(
+        {
+            "refinement": getattr(settings, "refine_method", "cmaes") if settings.refine else "none",
+            "objective": spec.get("objective") or ("rules" if spec.get("rules") else "weighted"),
+        },
+        settings,
+        spec["weights"],
+        spec.get("rules"),
+        spec.get("pareto_keys"),
+    )
+
     def streamed(sol, res) -> None:
+        sol.provenance = dict(prov)  # v8 T21
         emit("solution", (sol, res))
 
     say("loading reachability map (first time per tool length: ~1 min)", 0.0)
@@ -191,6 +205,8 @@ def station_job(payload: dict, emit, cancelled) -> dict:
         for i, (sol, _res) in enumerate(plans):
             sol.label = f"Pareto {i + 1}/{n}: {sol.label}"
             sol.planner = "pareto"
+        for sol, _res in plans:
+            sol.provenance = dict(prov)
         emit("replace", plans)
         return {"best": plans[0][0] if plans else None, "rules_status": None}
     if spec.get("objective") == "robust" and out and fin:  # v8 T12: worst case under tolerance
@@ -218,6 +234,7 @@ def station_job(payload: dict, emit, cancelled) -> dict:
         for sol, _res in plans:
             sol.label = f"Robust: {sol.label}"
             sol.planner = "robust"
+            sol.provenance = dict(prov)
         emit("replace", plans)
         return {"best": plans[0][0] if plans else None, "rules_status": None}
     return {"best": out[0][0] if out else None, "rules_status": None}
@@ -239,7 +256,7 @@ def tool_job(payload: dict, emit, cancelled):
         x = ee.extension.model_copy(update={"radius": float(spec["tube_od_mm"]) / 2000})
         ee = ee.model_copy(update={"extension": x})
     sites = s.sites()
-    return optimize_tool(
+    r = optimize_tool(
         Robot(s.robot.spec),
         ee,
         s.resolve(ee.urdf) if ee.urdf else None,
@@ -256,6 +273,19 @@ def tool_job(payload: dict, emit, cancelled):
         sites=sites,
         obstacles=s.obstacle_entries(),  # stay-out zones
     )
+    from core.provenance import stamp
+
+    st = spec["st"]
+    prov = stamp(
+        {"shape": st.shape_method, "start": st.start, "loop": st.loop, "objective": st.objective},
+        st,
+        spec["weights"],
+    )
+    for d in r.designs:  # v8 T21
+        d.solution.provenance = dict(prov)
+    if r.solution is not None:
+        r.solution.provenance = dict(prov)
+    return r
 
 
 def family_parts(dirs: list[str]) -> list:

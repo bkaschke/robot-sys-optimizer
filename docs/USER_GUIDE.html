@@ -787,6 +787,15 @@ $RUFF check . &amp;&amp; $RUFF format --check .   # lint + format
 </code></pre>
 <ul>
 <li>
+<p><strong>CI</strong> (v8): <code>.github/workflows/tests.yml</code> runs lint, the guide check and <code>scripts/test_batches.py --fast</code> on Windows for every push and pull request (conda env from <code>environment.yml</code>, reachability maps cached). The slow and browser tests run locally.</p>
+</li>
+<li>
+<p><strong>Reproducible results</strong> (v8): every plan and tool result records where it came from: the code version (git commit, <code>+dirty</code> with uncommitted changes), the methods, a hash of all planner settings and weights, and the seed (all searches are seeded, so the same settings on the same code give the same plan). The Results summary card shows it on its last line; the project file keeps it.</p>
+</li>
+<li>
+<p><strong>Speed history</strong> (v8): <code>$PY scripts/profile_plan.py &lt;example&gt; --record</code> times a plan and appends a row to <code>docs/perf_history.csv</code> (date, code version, example, seconds, results, best cost); without <code>--record</code> it prints a profile.</p>
+</li>
+<li>
 <p><strong>Browser tests</strong> (v8, <code>tests/e2e/</code>, marker <code>e2e</code>): the app runs in-process and headless Edge clicks into it through the DevTools protocol (<code>tests/e2e/cdp.py</code>): face selection with plain / Shift / Ctrl clicks, Alt+click → Move and Cancel, dragging the part's gizmo, picking a stay-out zone in 3D, the dark-mode log colours and the guide's search. They are skipped when Edge is not installed.</p>
 </li>
 <li>

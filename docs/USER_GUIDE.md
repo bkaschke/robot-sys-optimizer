@@ -571,6 +571,9 @@ $PY scripts/test_batches.py --e2e        # browser tests in headless Edge (tests
 $RUFF check . && $RUFF format --check .   # lint + format
 ```
 
+- **CI** (v8): `.github/workflows/tests.yml` runs lint, the guide check and `scripts/test_batches.py --fast` on Windows for every push and pull request (conda env from `environment.yml`, reachability maps cached). The slow and browser tests run locally.
+- **Reproducible results** (v8): every plan and tool result records where it came from: the code version (git commit, `+dirty` with uncommitted changes), the methods, a hash of all planner settings and weights, and the seed (all searches are seeded, so the same settings on the same code give the same plan). The Results summary card shows it on its last line; the project file keeps it.
+- **Speed history** (v8): `$PY scripts/profile_plan.py <example> --record` times a plan and appends a row to `docs/perf_history.csv` (date, code version, example, seconds, results, best cost); without `--record` it prints a profile.
 - **Browser tests** (v8, `tests/e2e/`, marker `e2e`): the app runs in-process and headless Edge clicks into it through the DevTools protocol (`tests/e2e/cdp.py`): face selection with plain / Shift / Ctrl clicks, Alt+click → Move and Cancel, dragging the part's gizmo, picking a stay-out zone in 3D, the dark-mode log colours and the guide's search. They are skipped when Edge is not installed.
 
 - `CLAUDE.md` holds the conventions (frames, units, cost), the milestone status with each done-when check, and design notes per module.

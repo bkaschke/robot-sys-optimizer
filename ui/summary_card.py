@@ -46,5 +46,16 @@ def card(s, sol) -> str:
         f"| Points reached | **{n - len(sol.unreached)}/{n}** | Worst clearance | {worst_c} |\n"
         f"| Closest joint limit | {lim} | Lowest manipulability | {low_mu} |\n"
         f"| Planner | {planner} | Rules | {rules} |\n"
-        f"| Run time | {run} | Cycle time | {cyc} |\n"
+        f"| Run time | {run} | Cycle time | {cyc} |\n" + prov_line(sol)
+    )
+
+
+def prov_line(sol) -> str:
+    """v8 T21: code version, methods, settings hash and seed of the result (if known)."""
+    p = sol.provenance
+    if not p:
+        return ""
+    return (
+        f"\n_Code {p.get('code', '?')} · {p.get('methods', '')} · settings {p.get('settings', '?')}"
+        f" · seed {p.get('seed', '?')}_\n"
     )

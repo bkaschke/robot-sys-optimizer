@@ -1,0 +1,46 @@
+# v8 T21: lint and the fast tests on every push / pull request (Windows, the conda env `rso`).
+# The slow tests (full plans, tool optimizer, paths) and the browser tests run locally:
+#   python scripts/test_batches.py          # everything (~60 min)
+#   python scripts/test_batches.py --e2e    # headless Edge
+name: tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  fast:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash -el {0}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniforge-version: latest
+          environment-file: environment.yml
+          activate-environment: rso
+          use-mamba: true
+
+      - name: Reachability map cache
+        uses: actions/cache@v4
+        with:
+          path: cache/reachability
+          key: maps-${{ hashFiles('assets/robots/**/spec.yaml', 'opt/reachability.py') }}
+
+      - name: Lint
+        run: |
+          ruff check .
+          ruff format --check .
+
+      - name: Guide up to date
+        run: python scripts/build_guide.py --check
+
+      - name: Fast tests
+        env:
+          PYTHONUTF8: "1"
+        run: python scripts/test_batches.py --fast
