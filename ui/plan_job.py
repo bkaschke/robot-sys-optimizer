@@ -223,6 +223,9 @@ def tool_job(payload: dict, emit, cancelled):
     spec = payload["spec"]
     spec["st"].family = family_parts(spec.get("family_dirs") or [])  # v8 T16
     ee = s.tool
+    if spec.get("tube_od_mm"):  # v8 T17: a standard tube instead of the tool's own capsule radius
+        x = ee.extension.model_copy(update={"radius": float(spec["tube_od_mm"]) / 2000})
+        ee = ee.model_copy(update={"extension": x})
     sites = s.sites()
     return optimize_tool(
         Robot(s.robot.spec),

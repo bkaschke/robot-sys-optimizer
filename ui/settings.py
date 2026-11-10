@@ -53,7 +53,18 @@ SAVED: dict[str, tuple[str, ...]] = {
     ),
     "stations.costs": ("require_all", "require_config"),
     "tool_opt.costs": ("require_all", "require_config"),
-    "tool_opt": ("max_stations", "tol", "shape_evals", "shape", "start_shape", "loop", "objective"),
+    "tool_opt": (
+        "max_stations",
+        "tol",
+        "shape_evals",
+        "shape",
+        "start_shape",
+        "loop",
+        "objective",
+        "family_cost",
+        "tube",
+        "bend_step",
+    ),
     "tolerance": ("part_mm", "part_deg", "station_mm", "samples", "seed"),
     "cycle": (
         "joint_speed",
@@ -67,7 +78,7 @@ SAVED: dict[str, tuple[str, ...]] = {
         "settle_s",
     ),
     "results": ("choice", "show_lines", "show_ghosts", "show_areas"),
-    "results.export": ("screenshot",),
+    "results.export": ("screenshot", "flange"),
     "sim": (
         "motion",
         "order",

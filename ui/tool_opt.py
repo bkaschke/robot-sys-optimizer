@@ -60,6 +60,16 @@ class ToolOptPanel:
                 hint="other project folders, separated by ;  the tool must work on their parts too",
             )
             self.family_cost = gui.add_dropdown("Family cost", ("sum", "worst"), hint="over all the parts")
+            from core.step_export import BEND_STEPS, TUBE_OD_MM
+
+            self.tube = gui.add_dropdown(  # v8 T17
+                "Tube OD (mm)",
+                ("tool's own radius", *(f"{d:g}" for d in TUBE_OD_MM)),
+                hint="a standard tube as the extension (its collision radius = OD / 2)",
+            )
+            self.bend_step = gui.add_dropdown(
+                "Bend angle steps", BEND_STEPS, hint="bend angles the optimizer may use (inside the search)"
+            )
             self.loop = MethodPicker(gui, "tool_loop", "Tool and stations")  # v8 T13
             self.tolerance_settings = None  # app.py: Results -> Tolerance check offsets (T12)
             self.objective = MethodPicker(gui, "tool_objective", "Objective")  # v8 T11 / T12
@@ -119,6 +129,13 @@ class ToolOptPanel:
             except (OSError, ValueError) as err:
                 return notify(e, "Save failed", str(err))
             notify(e, "Saved", str(path), ok=True)
+
+    def tube_od(self) -> float | None:
+        """The chosen standard tube OD (mm), or None (the tool's own radius)."""
+        try:
+            return float(self.tube.value)
+        except ValueError:
+            return None
 
     def save_to_library(self, name: str):
         """The current tool with the optimized values as its nominal, saved as a new
@@ -195,9 +212,13 @@ class ToolOptPanel:
             "weights": self.costs.commit(),  # the tool optimizer's own cost weights
             "max_stations": int(self.max_stations.value),
             "st": st,
+            "tube_od_mm": self.tube_od(),
             "family_dirs": [d.strip() for d in self.family.value.split(";") if d.strip()],
         }
         st.family_cost = self.family_cost.value
+        from core.step_export import step_deg
+
+        st.bend_step = step_deg(self.bend_step.value)
         if self.on_start is not None:
             self.on_start()
         self._cancel.clear()

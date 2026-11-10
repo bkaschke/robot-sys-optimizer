@@ -42,6 +42,7 @@ class GeometrySettings:
     start: str = "nominal"  # v8 T15: "nominal" | "cones" (opt.methods tool_start)
     family: list = field(default_factory=list)  # v8 T16: FamilyPart of the other parts
     family_cost: str = "sum"  # "sum" | "worst" over the parts
+    bend_step: float = 0.0  # v8 T17: bend angles in multiples of this (deg; 0 = free)
     robust: dict | None = None  # v8 T12: {"tolerance": ToleranceSettings, "measure": str}
     planner: PlannerSettings = field(default_factory=lambda: PlannerSettings(refine_evals=12))
 

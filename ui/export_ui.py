@@ -39,12 +39,22 @@ class ExportPanel:
             )
             self.urdf = gui.add_button("Optimized tool URDF (zip)")
             self.report = gui.add_button("HTML report")
+            from core.step_export import FLANGES
+
+            self.step = gui.add_button(
+                "Tool (STEP)", hint="extension tube + flange plate (CadQuery)"
+            )  # v8 T17
+            self.flange = gui.add_dropdown(
+                "Flange", tuple(FLANGES), hint="ISO 9409-1 pattern of the STEP plate"
+            )
             self.gate_md = gui.add_markdown("", visible=False)  # why the exports are disabled (T16)
             self.info = gui.add_markdown("_Files are saved to the project folder's export/ directory._")
         self.csv.on_click(lambda e: self._run(e, self.export_csv))
         self.uframes.on_click(lambda e: self._run(e, self.export_userframes))
         self.urdf.on_click(lambda e: self._run(e, self.export_urdf))
         self.report.on_click(lambda e: self._run(e, self.export_report))
+        self.step.on_click(lambda e: self._run(e, self.export_step))
+        self.tube_od = lambda: None  # app.py: Tool geometry -> Tube OD
 
     # --- helpers ---------------------------------------------------------------------------------
 
@@ -132,6 +142,28 @@ class ExportPanel:
         path = self.out_dir / "userframes.csv"
         path.write_bytes(data)
         return path, data
+
+    def export_step(self, sol, client=None) -> tuple[Path, bytes]:
+        """v8 T17: the selected result's tool (its optimized values, else the nominal) as STEP."""
+        from core.step_export import tool_step
+
+        tool = self.s.tool
+        if tool is None:
+            raise ValueError("no tool loaded")
+        try:
+            import cadquery  # noqa: F401
+        except ImportError as err:
+            raise ValueError(
+                "STEP export needs CadQuery (pip install cadquery); URDF export works without"
+            ) from err
+        path = tool_step(
+            tool,
+            sol.tool_values,
+            self.out_dir / f"{tool.name}_tool.step",
+            self.tube_od(),
+            flange=self.flange.value,
+        )
+        return path, path.read_bytes()
 
     def export_urdf(self, sol, client=None) -> tuple[Path, bytes]:
         s = self.s

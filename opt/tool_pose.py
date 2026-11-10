@@ -54,6 +54,7 @@ def optimize_pose(
         )
 
     def evaluate(v: ExtensionValues, label: str, f: float) -> float:
+        v = ev.snap(v)  # v8 T17: bend angle steps
         say(label, f)
         ok, sol, res = ev.plan(v, cancelled, refine=False)
         reached = n_targets - len(sol.unreached) if sol else 0

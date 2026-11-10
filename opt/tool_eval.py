@@ -85,6 +85,7 @@ class _Evaluator:
         return checker
 
     def plan(self, v: ExtensionValues, cancelled=None, refine: bool | None = None):
+        v = self.snap(v)
         checker = self.checker(v)
         pose = self.ee.extension.type in ("pose", "bent2")  # any TCP offset: shared flange map
         from opt.reachability import map_for_tcps
@@ -117,7 +118,17 @@ class _Evaluator:
             return False, *min(out, key=lambda sr: (len(sr[0].unreached), sr[0].cost))
         return False, None, {}
 
+    def snap(self, v: ExtensionValues) -> ExtensionValues:
+        """v8 T17: bend angles on the chosen step (inside their ranges)."""
+        if not self.st.bend_step:
+            return v
+        from core.step_export import ANGLE_KEYS, snap_values
+
+        x = self.ee.extension
+        return snap_values(v, self.st.bend_step, {k: getattr(x, k) for k in ANGLE_KEYS})
+
     def cost_at_stations(self, v: ExtensionValues, sol: Solution) -> tuple[float, Solution, dict]:
+        v = self.snap(v)
         checker = self.checker(v)
         xy = np.array([s.xyz[:2] for s in sol.stations])
         sites = self.sites or FloorSites(self.T_base0, self.fp, self.st.planner.footprint_margin, 0.0)
