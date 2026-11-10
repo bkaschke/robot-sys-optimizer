@@ -75,9 +75,7 @@ def test_tool_optimizer_pareto_designs():
         ds = tool.result.designs
         assert ds and all(d.solution.label.startswith("Pareto ") for d in ds)
         keys = ("length", "stations", "cycle")
-        vs = [
-            vector(measures(d.solution, d.point_results, s.tool_model.length(d.values)), keys) for d in ds
-        ]
+        vs = [vector(measures(d.solution, d.point_results, s.tool_model.length(d.values)), keys) for d in ds]
         assert not any(dominates(a, b) for a in vs for b in vs)
         assert any(r.label.startswith("Pareto ") for r in s.results)
         tool.objective.value = "Weighted cost"
