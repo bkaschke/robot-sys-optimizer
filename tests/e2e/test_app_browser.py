@@ -1,0 +1,149 @@
+"""v8 T20: the app in headless Edge: clicks, Alt+click Move, gizmo drag, stay-out zone pick,
+dark-mode log colours. One app + one browser for the module (the scene takes ~10 s to stream).
+
+The 3D points are projected to the canvas with the client's camera (viser reports it), and the
+mouse events go through Chrome DevTools (``tests/e2e/cdp.py``)."""
+
+import time
+
+import numpy as np
+import pytest
+import viser
+
+from tests.e2e import cdp
+
+pytestmark = [pytest.mark.e2e, pytest.mark.skipif(not cdp.available(), reason="needs Edge + websockets")]
+
+PORT, DEBUG = 8961, 9361
+SHIFT, CTRL, ALT = 8, 2, 1
+
+
+@pytest.fixture(scope="module")
+def live():
+    from app import build_app
+
+    server = viser.ViserServer(host="127.0.0.1", port=PORT, verbose=False)
+    app = build_app(server)
+    assert app["project"].load_example("rail_long_part")
+    with cdp.Browser(f"http://127.0.0.1:{PORT}/", port=DEBUG) as b:
+        t_end = time.time() + 60
+        while not server.get_clients() and time.time() < t_end:
+            time.sleep(0.25)
+        client = next(iter(server.get_clients().values()))
+        time.sleep(12)  # scene + meshes stream in
+        rects = b.eval(
+            "[...document.querySelectorAll('canvas')].map(c=>{const r=c.getBoundingClientRect();"
+            "return [r.left,r.top,r.width,r.height]})"
+        )
+        canvas = max(rects, key=lambda r: r[2] * r[3])
+        yield app, server, client, b, canvas
+    server.stop()
+
+
+def screen(client, canvas, p):
+    """World point -> page pixels (pinhole camera from the client's reported camera)."""
+    cam = client.camera
+    pos, look, up = np.asarray(cam.position), np.asarray(cam.look_at), np.asarray(cam.up_direction)
+    f = look - pos
+    f /= np.linalg.norm(f)
+    r = np.cross(f, up)
+    r /= np.linalg.norm(r)
+    u = np.cross(r, f)
+    d = np.asarray(p, float) - pos
+    x, y, z = d @ r, d @ u, d @ f
+    t = np.tan(cam.fov / 2)
+    nx, ny = x / (z * t * cam.aspect), y / (z * t)
+    return canvas[0] + (nx + 1) / 2 * canvas[2], canvas[1] + (1 - ny) / 2 * canvas[3]
+
+
+def part_top(app):
+    s = app["session"]
+    m, Tp = s.part_mesh(), s.part.T_world_part
+    c = m.bounds.mean(axis=0)
+    c[2] = m.bounds[1, 2]
+    return Tp[:3, :3] @ c + Tp[:3, 3]
+
+
+def settle(t=1.5):
+    time.sleep(t)
+
+
+def test_surface_selection_plain_shift_ctrl(live):
+    app, _server, client, b, canvas = live
+    tg = app["targets"]
+    tg.surf.tool.value = "Fill +"
+    tg.select(np.zeros(0, int), "set")
+    x, y = screen(client, canvas, part_top(app))
+    b.click(x, y)
+    settle()
+    n = len(tg.selection)
+    assert n > 0  # plain click: the top face's region
+    b.click(x, y, CTRL)
+    settle()
+    assert len(tg.selection) == 0  # ctrl inverts Fill + to remove
+    b.click(x, y, SHIFT)
+    settle()
+    assert len(tg.selection) == n  # shift adds
+
+
+def test_alt_click_opens_move_and_cancel_restores(live):
+    app, _server, client, b, canvas = live
+    mover, s = app["objects"].mover, app["session"]
+    before = s.part.T_world_part.copy()
+    x, y = screen(client, canvas, part_top(app))
+    b.click(x, y, ALT)
+    settle()
+    assert mover.key is not None and "Part" in mover.key
+    s.part.T_world_part = before @ np.diag([1.0, 1, 1, 1])  # unchanged copy
+    mover.cancel()
+    assert mover.key is None and np.allclose(s.part.T_world_part, before)
+
+
+def test_gizmo_drag_moves_the_part(live):
+    app, _server, client, b, canvas = live
+    s, cell = app["session"], app["cell"]
+    objects = app["objects"]
+    objects.gizmo.value = "Part"  # Drag gizmo on: the part
+    settle()
+    before = s.part.T_world_part.copy()
+    origin = before[:3, 3]
+    g = cell.part_pose.gizmo
+    scale = float(getattr(g, "scale", 0.5))
+    a = screen(client, canvas, origin + np.array([0.0, 0.0, 0.75 * scale]))  # on the z arrow
+    to = screen(client, canvas, origin + np.array([0.0, 0.0, 0.75 * scale + 0.3]))
+    b.drag(a, to)
+    settle(2.0)
+    moved = s.part.T_world_part[:3, 3] - origin
+    objects.gizmo.value = "None" if "None" in objects.gizmo.options else objects.gizmo.options[0]
+    s.part.T_world_part = before
+    cell.refresh_part()
+    assert np.linalg.norm(moved) > 0.02, f"part did not move (gizmo scale {scale:.2f})"
+
+
+def test_stayout_zone_click_selects_it(live):
+    app, _server, client, b, canvas = live
+    st = app["stayouts"]
+    st.add_shape("box")
+    first = app["session"].stayouts[-1]
+    st.xyz.value = (0.0, -1500.0, 0.0)  # clear of the rail part (new zones start next to it)
+    st.add_shape("box")
+    first = next(z for z in app["session"].stayouts if z.name == first.name)
+    assert st.pick.value != first.name  # the newest is picked
+    c = np.array(first.pose.xyz) + np.array([0.0, 0.0, first.size[2] / 2])
+    settle(2.5)  # adding a zone redraws every zone: let the browser get the new meshes first
+    x, y = screen(client, canvas, c)
+    b.click(x, y)
+    settle()
+    assert st.pick.value == first.name
+
+
+def test_dark_mode_log_colours(live):
+    app, _server, _client, b, _canvas = live
+    from ui.log_panel import COLORS, log
+
+    app["dark_toggle"].value = True
+    log("e2e dark-mode check", "error")
+    settle()
+    html = b.eval("document.body.innerHTML")
+    assert COLORS["error"][1] in html.lower() or COLORS["error"][1].upper() in html
+    app["dark_toggle"].value = False

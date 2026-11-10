@@ -564,9 +564,14 @@ For carriers, pass `sites=CarrierSites(Carrier(base), part_mesh, T_world_part)` 
 ```bash
 PY=C:/Users/<you>/miniforge3/envs/rso/python.exe
 RUFF=C:/Users/<you>/miniforge3/envs/rso/Library/bin/ruff.exe
-$PY -m pytest -q                         # all tests (~8 min)
+$PY -m pytest -q                         # all tests (one process; can run out of memory)
+$PY scripts/test_batches.py              # the same, 4 files per process (~60 min)
+$PY scripts/test_batches.py --fast       # skip the slow tests (plans, tool optimizer, paths)
+$PY scripts/test_batches.py --e2e        # browser tests in headless Edge (tests/e2e, ~1 min)
 $RUFF check . && $RUFF format --check .   # lint + format
 ```
+
+- **Browser tests** (v8, `tests/e2e/`, marker `e2e`): the app runs in-process and headless Edge clicks into it through the DevTools protocol (`tests/e2e/cdp.py`): face selection with plain / Shift / Ctrl clicks, Alt+click → Move and Cancel, dragging the part's gizmo, picking a stay-out zone in 3D, the dark-mode log colours and the guide's search. They are skipped when Edge is not installed.
 
 - `CLAUDE.md` holds the conventions (frames, units, cost), the milestone status with each done-when check, and design notes per module.
 - `core/` and `opt/` must not import the GUI.

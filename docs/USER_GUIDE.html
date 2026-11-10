@@ -779,14 +779,28 @@ geo = optimize_tool(robot, ee, urdf, part_mesh, T_world_part, T_world_base, targ
 <h2 id="9-for-developers">9. For developers</h2>
 <pre><code class="language-bash">PY=C:/Users/&lt;you&gt;/miniforge3/envs/rso/python.exe
 RUFF=C:/Users/&lt;you&gt;/miniforge3/envs/rso/Library/bin/ruff.exe
-$PY -m pytest -q                         # all tests (~8 min)
+$PY -m pytest -q                         # all tests (one process; can run out of memory)
+$PY scripts/test_batches.py              # the same, 4 files per process (~60 min)
+$PY scripts/test_batches.py --fast       # skip the slow tests (plans, tool optimizer, paths)
+$PY scripts/test_batches.py --e2e        # browser tests in headless Edge (tests/e2e, ~1 min)
 $RUFF check . &amp;&amp; $RUFF format --check .   # lint + format
 </code></pre>
 <ul>
-<li><code>CLAUDE.md</code> holds the conventions (frames, units, cost), the milestone status with each done-when check, and design notes per module.</li>
-<li><code>core/</code> and <code>opt/</code> must not import the GUI.</li>
-<li><strong>Edit <code>docs/USER_GUIDE.md</code>, then run <code>$PY scripts/build_guide.py</code></strong> to regenerate the HTML. <code>tests/test_guide.py</code> fails if the HTML is out of date.</li>
-<li>Each milestone's acceptance test lives in <code>tests/</code> (for example <code>test_kinematics.py</code>, <code>test_feasibility.py</code>, <code>test_reachability.py</code>, <code>test_placement.py</code>, <code>test_tool_geometry.py</code>, <code>test_carriers.py</code>, <code>test_export.py</code>). The carrier builder is covered by <code>test_carrier_builder.py</code> and <code>test_examples.py</code>, the brush / single points / tessellation by <code>test_point_tools.py</code>.</li>
+<li>
+<p><strong>Browser tests</strong> (v8, <code>tests/e2e/</code>, marker <code>e2e</code>): the app runs in-process and headless Edge clicks into it through the DevTools protocol (<code>tests/e2e/cdp.py</code>): face selection with plain / Shift / Ctrl clicks, Alt+click → Move and Cancel, dragging the part's gizmo, picking a stay-out zone in 3D, the dark-mode log colours and the guide's search. They are skipped when Edge is not installed.</p>
+</li>
+<li>
+<p><code>CLAUDE.md</code> holds the conventions (frames, units, cost), the milestone status with each done-when check, and design notes per module.</p>
+</li>
+<li>
+<p><code>core/</code> and <code>opt/</code> must not import the GUI.</p>
+</li>
+<li>
+<p><strong>Edit <code>docs/USER_GUIDE.md</code>, then run <code>$PY scripts/build_guide.py</code></strong> to regenerate the HTML. <code>tests/test_guide.py</code> fails if the HTML is out of date.</p>
+</li>
+<li>
+<p>Each milestone's acceptance test lives in <code>tests/</code> (for example <code>test_kinematics.py</code>, <code>test_feasibility.py</code>, <code>test_reachability.py</code>, <code>test_placement.py</code>, <code>test_tool_geometry.py</code>, <code>test_carriers.py</code>, <code>test_export.py</code>). The carrier builder is covered by <code>test_carrier_builder.py</code> and <code>test_examples.py</code>, the brush / single points / tessellation by <code>test_point_tools.py</code>.</p>
+</li>
 </ul>
 <p>UR robot models © 2023 Universal Robots A/S. Use hereof is subject to Universal Robots A/S' Terms and Conditions for Use of Graphical Documentation (see <code>assets/robots/ur20/meshes/LICENSE.txt</code>).</p>
 
