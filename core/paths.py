@@ -48,7 +48,7 @@ from core.patterns import (
     PatternSettings,
 )
 
-ISSUES = ("unreachable", "config_flip", "jump", "collision", "reconfigure", "carrier_blocked")
+ISSUES = ("unreachable", "config_flip", "jump", "collision", "reconfigure", "carrier_blocked", "motion")
 HOME_STEP = np.radians(3.0)  # joint step of the moves to / from home
 RETREAT = 0.15  # m the tool backs off the surface before a planned joint move
 COPIES = 6  # other 2*pi copies of a joint move's end tried when no way is found

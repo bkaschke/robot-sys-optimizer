@@ -111,6 +111,11 @@ class SimPanel:
             True,
             hint="plan the mobile base / external axis moves between stops (collision checked)",
         )
+        self.motion = gui.add_checkbox(  # v8 T7
+            "Check moves between points",
+            True,
+            hint="collision check every 2° of joint motion between samples (flags 'motion')",
+        )
         for w in (self.pattern, self.no_cross):
             w.on_update(lambda e: self.show_pattern_fields())
         self.show_pattern_fields()
@@ -203,6 +208,11 @@ class SimPanel:
                     group_of={p.id: p.group for p in s.targets.points},
                     park=None if home is not None else s.home_q(),  # clear pose to go via
                 )
+                if self.motion.value:  # v8 T7: the arm sweeps between clear samples
+                    from core.motion_check import check_moves
+
+                    self._build_progress(1.0)
+                    check_moves(checker, self.plan, cancelled=self._cancel.is_set)
                 self.label = sol.label
                 self._targets_key = targets_key
                 self.home_blocked = []  # stops where the home pose itself collides
