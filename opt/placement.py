@@ -56,6 +56,7 @@ class PlannerSettings:
     first_k: int = 1  # v7 round 2 (rules planner): smallest station count tried
     skip_below_min: bool = False  # no plan when the map says max_stations stops cannot cover it
     cycle: object = None  # v8 T6: core.cycle_time.CycleSettings (None = defaults)
+    speed_zones: tuple = ()  # core.speed_zones.SpeedZone: reduced-speed zones (cycle estimate)
     wrap_limit_deg: float = 360.0  # v8 T18: joint-6 turn per stop before the wrap cost starts
     refine_method: str = "cmaes"  # v8 T10: "cmaes" | "tpe" | "gp" (opt.methods station_refine)
     exclude: tuple = ()  # station value dicts the set cover may not use (alternative covers)
@@ -257,7 +258,8 @@ def plan_stations(
                 groups = config_changes(seqs)
             Tst = [sites.T(v) for v in stations]
             penalty = float(np.mean([sites.accept(v)[1] for v in stations]))
-            cyc = cycle_estimate(seqs, results, stations, sites, checker.robot, st.cycle)["total"]
+            cyc = cycle_estimate(seqs, results, stations, sites, checker.robot, st.cycle, st.speed_zones, t)
+            cyc = cyc["total"]
             cost, breakdown = cost_breakdown(
                 list(results.values()),
                 len(unreached),

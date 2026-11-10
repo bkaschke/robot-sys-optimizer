@@ -16,7 +16,7 @@ from core.transforms import make_T, rpy_to_matrix
 from ui.session import Session
 from ui.widgets import GizmoStyle
 
-GIZMOS = ("none", "Robot base", "Part", "Tool mount", "Carrier body", "Stay-out zone")
+GIZMOS = ("none", "Robot base", "Part", "Tool mount", "Carrier body", "Stay-out zone", "Reduced-speed zone")
 MOVE = ("Robot / carrier", "Part")
 # the object tree: top-level entries and their fixed children ("*": one child per carrier body /
 # stay-out zone, rebuilt when that list changes)
@@ -25,6 +25,7 @@ TREE = {
     "External axis": "*bodies",
     "Part": ("Targets", "Selection"),
     "Stay-out zones": "*zones",
+    "Reduced-speed zones": "*slow",
     "Results": ("Stops and lines", "Ghost robots", "Station areas", "Paths"),
 }
 INDENT = " └ "  # child entries
@@ -36,7 +37,7 @@ class ObjectsPanel:
     def __init__(self, server: viser.ViserServer, session: Session):
         self.server, self.s = server, session
         self.cell = self.carrier = self.tool = self.targets = self.results = None  # set by app.py
-        self.sim = self.stayouts = None
+        self.sim = self.stayouts = self.slowzones = None
         self.mover = None  # ui.move_mode.MoveMode, set by app.py
         gui = server.gui
         self.show: dict = {}  # "Robot", "Robot/Tool", "External axis/<body>", ...
@@ -93,7 +94,9 @@ class ObjectsPanel:
         if top == "External axis" and self.carrier is not None:
             return list(self.carrier._body_handles)
         if top == "Stay-out zones":
-            return [z.name for z in self.s.stayouts]
+            return [z.name for z in self.s.stayouts if z.speed_pct is None]
+        if top == "Reduced-speed zones":
+            return [z.name for z in self.s.stayouts if z.speed_pct is not None]
         return []
 
     def start_move(self, key: str, event=None) -> bool:
@@ -168,6 +171,10 @@ class ObjectsPanel:
         if key.startswith("Stay-out zones/"):
             h = so._handles.get(key.split("/", 1)[1]) if so is not None else None
             return [h] if h is not None else []
+        if key.startswith("Reduced-speed zones/"):
+            sz = self.slowzones
+            h = sz._handles.get(key.split("/", 1)[1]) if sz is not None else None
+            return [h] if h is not None else []
         if key == "Results/Stops and lines":
             return list(r._handles) if r is not None else []
         if key == "Results/Ghost robots":
@@ -210,6 +217,8 @@ class ObjectsPanel:
             ed.drag.value = g == "Carrier body" and not self.carrier.locked and ed.index() is not None
         if self.stayouts is not None:
             self.stayouts.drag.value = g == "Stay-out zone" and self.stayouts.index() is not None
+        if self.slowzones is not None:
+            self.slowzones.drag.value = g == "Reduced-speed zone" and self.slowzones.index() is not None
 
     # --- jog -----------------------------------------------------------------------------------------
 

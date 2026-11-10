@@ -27,13 +27,23 @@ def path_length(xy: np.ndarray) -> float:
     return float(np.linalg.norm(np.diff(xy, axis=0), axis=1).sum()) if len(xy) > 1 else 0.0
 
 
-def cycle_estimate(seqs, results, stations: list[dict], sites, robot, cs=None) -> dict[str, float]:
+def cycle_estimate(
+    seqs, results, stations: list[dict], sites, robot, cs=None, zones=None, t=None
+) -> dict[str, float]:
     """v8 T6: estimated cycle time of a plan (core.cycle_time.plan_estimate) with the carrier's
-    travel metric between consecutive stops and the robot's joint speed limits."""
+    travel metric between consecutive stops and the robot's joint speed limits. ``zones``
+    (core.speed_zones) + ``t`` (opt.placement.Targets, world points): moves to points inside
+    a reduced-speed zone are slower."""
     from core.cycle_time import CycleSettings, plan_estimate
 
     moves = [float(sites.travel(a, b)) for a, b in zip(stations[:-1], stations[1:], strict=True)]
-    return plan_estimate(seqs, results, moves, cs or CycleSettings(), robot.model.velocityLimit)
+    share = None
+    if zones and t is not None:
+        from core.speed_zones import share_at
+
+        f = share_at(zones, t.P_world)
+        share = {int(i): float(v) for i, v in zip(t.ids, f, strict=True) if v < 1.0}
+    return plan_estimate(seqs, results, moves, cs or CycleSettings(), robot.model.velocityLimit, share)
 
 
 def wrap_excess(seqs, results, limit_deg: float = 360.0, joint: int = 5) -> float:

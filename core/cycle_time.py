@@ -62,22 +62,33 @@ def plan_estimate(
     stop_moves: list[float],
     cs: CycleSettings,
     v_limits=None,
+    share: dict[int, float] | None = None,
 ) -> dict[str, float]:
     """Estimate for a plan: ``seqs`` = {stop: [[point ids in order], ...]} (opt.zoning
     .stop_sequences), ``stop_moves`` = carrier travel between consecutive stops (m, the
-    carrier's metric). Returns {"joint", "carrier", "settle", "total"} in seconds."""
-    joint = 0.0
+    carrier's metric). ``share`` (point id -> speed share, core.speed_zones): a move to a
+    point inside a reduced-speed zone takes 1 / share as long (the extra time is "reduced").
+    Returns {"joint", "carrier", "settle", ["reduced",] "total"} in seconds."""
+    joint = extra = 0.0
     for groups in seqs.values():
         prev = None
         for members in groups:
             for p in members:
                 q = np.asarray(results[p].q, float)
                 if prev is not None:
-                    joint += joint_move_time(np.mod(q - prev + np.pi, 2 * np.pi) - np.pi, cs, v_limits)
+                    t = joint_move_time(np.mod(q - prev + np.pi, 2 * np.pi) - np.pi, cs, v_limits)
+                    joint += t
+                    f = 1.0 if share is None else float(share.get(p, 1.0))
+                    if f < 1.0:
+                        extra += t * (1.0 / max(f, 1e-3) - 1.0)
                 prev = q
     carrier = sum(trapezoid(d, cs.carrier_speed, cs.carrier_acc) for d in stop_moves)
     settle = cs.settle_s * len(seqs)
-    return {"joint": joint, "carrier": carrier, "settle": settle, "total": joint + carrier + settle}
+    out = {"joint": joint, "carrier": carrier, "settle": settle}
+    if extra > 0:
+        out["reduced"] = extra
+    out["total"] = joint + carrier + settle + extra
+    return out
 
 
 def path_time(plan, cs: CycleSettings, v_limits=None, slow=None) -> dict[str, float]:

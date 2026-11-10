@@ -4,6 +4,11 @@ STL/OBJ/PLY meshes in the world that the arm, the tool and the carrier keep clea
 Edits go straight into ``session.stayouts`` (validated as schema.Primitive). The zones are
 drawn as see-through red volumes under /cell/stayout; *Drag with gizmo* places the selected
 zone in 3D. Box / cylinder frames sit at the centre of the bottom face (as carrier bodies).
+
+``StayoutPanel(slow=True)`` is the *Reduced-speed zones* panel: the same editor for the
+zones with a speed (``Primitive.speed_pct``, core.speed_zones). Both kinds live in
+``session.stayouts`` (each panel lists and edits only its own), slow zones never collide,
+and they are drawn yellow under /cell/slowzone.
 """
 
 from __future__ import annotations
@@ -23,21 +28,27 @@ ROOT = "/cell/stayout"
 NONE = "(none)"
 COLOR, PICKED = (230, 50, 50), (255, 120, 60)
 SLOW = (240, 190, 40)  # v8 T18: reduced-speed zone
+DEFAULT_PCT = 25.0  # a new reduced-speed zone's speed (%)
 
 
 class StayoutPanel:
-    def __init__(self, server: viser.ViserServer, session: Session):
-        self.server, self.s = server, session
+    def __init__(self, server: viser.ViserServer, session: Session, slow: bool = False):
+        self.server, self.s, self.slow = server, session, slow
+        self.root = "/cell/slowzone" if slow else ROOT
         self._handles: dict = {}
         self.gizmo = None
         self._gizmo_zone: str | None = None  # the zone the current gizmo belongs to (T12)
         self._busy = False
         self.on_alt_click = None  # (zone name, event) -> None: Move mode (app.py, T11)
         gui = server.gui
-        self.folder = gui.add_folder("Stay-out zones", expand_by_default=False)
+        title = "Reduced-speed zones" if slow else "Stay-out zones"
+        self.folder = gui.add_folder(title, expand_by_default=False)
         with self.folder:
             gui.add_markdown(
-                "_Volumes the arm, the tool and the carrier keep clear of (planner, check, paths). "
+                "_Volumes where the robot moves slower: a move whose TCP ends inside takes longer "
+                "(cycle time of plans and paths). They never block anything._"
+                if slow
+                else "_Volumes the arm, the tool and the carrier keep clear of (planner, check, paths). "
                 "The red floor areas of the External axis tab are carrier-only floor keep-outs._"
             )
             self.pick = gui.add_dropdown("Zone", (NONE,))
@@ -50,13 +61,14 @@ class StayoutPanel:
             self.cyl = gui.add_vector2("Cylinder radius / height (mm)", (250.0, 1000.0), step=10.0)
             self.xyz = gui.add_vector3("Position (mm)", (0.0, 0.0, 0.0), step=10.0)
             self.rpy = gui.add_vector3("Rotation rpy (deg)", (0.0, 0.0, 0.0), step=5.0)
-            self.speed = gui.add_number(  # v8 T18
-                "Reduced speed (%)",
-                0.0,
-                min=0.0,
+            self.speed = gui.add_number(
+                "Speed (%)",
+                DEFAULT_PCT,
+                min=1.0,
                 max=100.0,
                 step=5.0,
-                hint="0 = a stay-out zone; 1 to 100 = the arm may enter at this share of its speed",
+                hint="share of the programmed speed inside the zone",
+                visible=slow,
             )
             self.drag = gui.add_checkbox("Drag with gizmo", False)
             self.remove = gui.add_button("Remove zone", color="red")
@@ -77,14 +89,20 @@ class StayoutPanel:
 
     @property
     def zones(self) -> list[Primitive]:
-        return self.s.stayouts
+        """This panel's zones: stay-outs, or the reduced-speed zones (``slow``)."""
+        return [z for z in self.s.stayouts if (z.speed_pct is not None) == self.slow]
+
+    def _store(self, zones: list[Primitive]) -> None:
+        """Replace this panel's zones in ``session.stayouts`` (the other kind is kept)."""
+        others = [z for z in self.s.stayouts if (z.speed_pct is not None) != self.slow]
+        self.s.stayouts = others + list(zones)
 
     def index(self) -> int | None:
         names = [z.name for z in self.zones]
         return names.index(self.pick.value) if self.pick.value in names else None
 
     def _unique(self, stem: str) -> str:
-        names = {z.name for z in self.zones}
+        names = {z.name for z in self.s.stayouts}  # unique over both kinds
         k = 1
         while f"{stem}{k}" in names:
             k += 1
@@ -97,21 +115,25 @@ class StayoutPanel:
                 primitive_mesh(z, self.s.resolve)  # fail here on a broken mesh file
         except (ValueError, OSError, ValidationError) as err:
             msg = err.errors()[0]["msg"] if isinstance(err, ValidationError) else str(err)
-            notify(event, "Invalid stay-out zone", msg)
+            notify(event, "Invalid zone", msg)
             return False
-        self.s.stayouts = zones
+        self._store(zones)
         self.refresh(pick)
         return True
 
     def add_shape(self, shape: str, event=None) -> bool:
-        name = self._unique("zone")
+        name = self._unique("slow" if self.slow else "zone")
         size = {"size": (0.5, 0.5, 1.0)} if shape == "box" else {"radius": 0.25, "height": 1.0}
         # each new zone a bit further along x, so zones never start on top of each other (T12)
-        z = Primitive(shape=shape, name=name, attach="fixed", pose=Pose(xyz=self._new_xyz()), **size)
+        xyz = Pose(xyz=self._new_xyz())
+        z = Primitive(shape=shape, name=name, attach="fixed", pose=xyz, speed_pct=self._pct(), **size)
         return self._commit([*self.zones, z], name, event)
 
     def _new_xyz(self) -> tuple[float, float, float]:
-        return (1.0 + 0.7 * len(self.zones), 1.0, 0.0)
+        return (1.0 + 0.7 * len(self.zones), -1.0 if self.slow else 1.0, 0.0)
+
+    def _pct(self) -> float | None:
+        return DEFAULT_PCT if self.slow else None
 
     def select(self, name: str) -> bool:
         """Make ``name`` the selected zone (dropdown, a click on the zone in 3D, the Objects
@@ -137,7 +159,12 @@ class StayoutPanel:
         path.write_bytes(data)
         name = self._unique(safe_name(Path(filename).stem).replace(".", "_")[:40] or "mesh")
         z = Primitive(
-            shape="mesh", name=name, attach="fixed", mesh=self.s.relative(path), units=self.units.value
+            shape="mesh",
+            name=name,
+            attach="fixed",
+            mesh=self.s.relative(path),
+            units=self.units.value,
+            speed_pct=self._pct(),
         )
         return self._commit([*self.zones, z], name, event)
 
@@ -155,7 +182,7 @@ class StayoutPanel:
         upd = {
             "name": self.name.value.strip() or z.name,
             "pose": Pose(xyz=tuple(v / 1000 for v in self.xyz.value), rpy=tuple(np.radians(self.rpy.value))),
-            "speed_pct": float(self.speed.value) if self.speed.value > 0 else None,
+            "speed_pct": min(max(float(self.speed.value), 1.0), 100.0) if self.slow else None,
         }
         if z.shape == "box":
             upd["size"] = tuple(max(v, 1.0) / 1000 for v in self.box.value)
@@ -197,11 +224,12 @@ class StayoutPanel:
                     self.cyl.value = (z.radius * 1000, z.height * 1000)
                 self.xyz.value = tuple(v * 1000 for v in z.pose.xyz)
                 self.rpy.value = tuple(float(v) for v in np.degrees(z.pose.rpy))
-                self.speed.value = float(z.speed_pct or 0.0)
+                if self.slow:
+                    self.speed.value = float(z.speed_pct or DEFAULT_PCT)
         finally:
             self._busy = False
-        n = len(self.zones)
-        self.info.content = f"{n} stay-out zone{'s' if n != 1 else ''}" if n else "_No stay-out zones._"
+        n, kind = len(self.zones), "reduced-speed zone" if self.slow else "stay-out zone"
+        self.info.content = f"{n} {kind}{'s' if n != 1 else ''}" if n else f"_No {kind}s._"
         self.draw()
 
     def draw(self) -> None:
@@ -217,10 +245,10 @@ class StayoutPanel:
                 continue
             T = pose_to_matrix(z.pose)
             h = self._handles[z.name] = self.server.scene.add_mesh_simple(
-                f"{ROOT}/{z.name}",
+                f"{self.root}/{z.name}",
                 m.vertices,
                 m.faces,
-                color=PICKED if k == i else (SLOW if z.speed_pct is not None else COLOR),
+                color=PICKED if k == i else (SLOW if self.slow else COLOR),
                 opacity=0.35,
                 side="double",
                 wxyz=matrix_to_wxyz(T[:3, :3]),
@@ -242,7 +270,8 @@ class StayoutPanel:
             return
         T = pose_to_matrix(self.zones[i].pose)
         if self.gizmo is None:
-            self.gizmo = self.server.scene.add_transform_controls("/stayout_edit/gizmo", scale=0.4)
+            name_ = "/slowzone_edit/gizmo" if self.slow else "/stayout_edit/gizmo"
+            self.gizmo = self.server.scene.add_transform_controls(name_, scale=0.4)
             self._gizmo_zone = name
             GizmoStyle.register(self.gizmo, 0.4)
             try:  # T10: the gizmo reaches outside the zone
@@ -270,7 +299,7 @@ class StayoutPanel:
         zones[i] = zones[i].model_copy(
             update={"pose": Pose(xyz=tuple(float(v) for v in T[:3, 3]), rpy=tuple(matrix_to_rpy(T[:3, :3])))}
         )
-        self.s.stayouts = zones
+        self._store(zones)
         self._busy = True
         try:
             self.xyz.value = tuple(v * 1000 for v in T[:3, 3])

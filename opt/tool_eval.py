@@ -154,7 +154,9 @@ class _Evaluator:
         groups = zone_counts(zones)[0] if zones else config_changes(seqs)
         from opt.cost import cycle_estimate
 
-        cyc = cycle_estimate(seqs, res, stations, sites, checker.robot, self.st.planner.cycle)["total"]
+        pl = self.st.planner
+        cyc = cycle_estimate(seqs, res, stations, sites, checker.robot, pl.cycle, pl.speed_zones, self.t)
+        cyc = cyc["total"]
         cost, terms = cost_breakdown(
             list(res.values()),
             len(unreached),

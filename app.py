@@ -124,12 +124,14 @@ def build_app(
         state["targets"].refresh()
         state["carrier"].load(session.base)
         state["stayouts"].refresh()
+        state["slowzones"].refresh()
         state["carrier"].refresh()
         state["results"].refresh()
         restore_work()
         state["workflow"].refresh(force=True)
         state["sim"].reset("another project was opened")
         state["tool_opt"].update_hint()
+        state["cable"].follow_robot()  # the robot view was rebuilt: redraw the hose on it
 
     def restore_work() -> None:
         """Bring back where the user left off: selection, then panel settings."""
@@ -183,6 +185,7 @@ def build_app(
         workflow.header("Cell")
         cell = CellTab(server, session, jog_container=objects.arm_slot)
         stayouts = StayoutPanel(server, session)  # arm, tool and carrier keep clear (v3 item 5)
+        slowzones = StayoutPanel(server, session, slow=True)  # the robot only moves slower there
     with tab_handles["External Axis"]:
         workflow.header("External Axis")
         carrier = CarrierPanel(server, session, set_base=cell.set_base, dof_container=objects.carrier_slot)
@@ -229,12 +232,15 @@ def build_app(
                 tool._after(full=True)
 
         tool_opt = ToolOptPanel(server, session, apply_values, on_solution=new_results)
+        from ui.tool_ext_mirror import ExtensionMirror
+
+        tool_ext_copy = ExtensionMirror(server, tool, tool_opt.ext_slot)  # 3 Tool -> Extension, here too
         from ui.cycle_ui import CyclePanel
 
         cycle = CyclePanel(server, session)  # v8 T6
         from ui.safety_ui import CablePanel
 
-        cable = CablePanel(server, session)  # v8 T18
+        cable = CablePanel(server, session, cell)  # v8 T18 (+ the hose drawn on the robot)
         stations.cable = tool_opt.cable = cable
         from ui.compare import ComparePanel
 
@@ -319,14 +325,20 @@ def build_app(
     results.move_carrier = carrier.set_values
     results.set_q = cell.set_q
     workflow.cell, workflow.carrier, workflow.results = cell, carrier, results
+    from ui.staleness import step_state
+
+    tool_opt.confirm_tool = lambda: workflow.confirm("Tool Setup")
+    tool_opt.tool_state = lambda: step_state(session, "Tool Setup")
+    workflow.listeners.append(tool_opt.update_confirm)  # its Confirm tool follows the step's state
     objects.cell, objects.carrier, objects.tool = cell, carrier, tool
     objects.targets, objects.results, objects.sim = targets, results, sim
-    objects.stayouts = stayouts
+    objects.stayouts, objects.slowzones = stayouts, slowzones
     from ui.move_mode import MoveMode
 
     objects.mover = MoveMode(server, objects.gizmo, on_commit=lambda: workflow.refresh(force=True))
     cell.on_part_alt_click = lambda e: objects.start_move("Part", e)
     stayouts.on_alt_click = lambda name, e: objects.start_move(f"Stay-out zone/{name}", e)
+    slowzones.on_alt_click = lambda name, e: objects.start_move(f"Reduced-speed zone/{name}", e)
     objects.rebuild_tree()
 
     fresh: set[str] = set()  # result labels seen up to date (ui.staleness)
@@ -355,6 +367,7 @@ def build_app(
         workflow.hooks.append(tool_opt.update_hint)  # pose-limits hint follows the tool type
         workflow.hooks.append(sim.check_targets)  # paths are cleared when the targets change
         workflow.hooks.append(clear_stale)  # and plans when the part, tool or targets change
+        workflow.hooks.append(cable.follow_robot)  # the hose follows a robot change
         workflow.start_watch()
     server.gui.add_markdown(UR_NOTICE)
 
@@ -363,6 +376,7 @@ def build_app(
         cell=cell,
         carrier=carrier,
         stayouts=stayouts,
+        slowzones=slowzones,
         objects=objects,
         sim=sim,
         tool=tool,
@@ -376,6 +390,7 @@ def build_app(
         compare=compare,
         pareto=pareto,
         cable=cable,
+        tool_ext_copy=tool_ext_copy,
         safety=safety,
         project=project,
         dark_toggle=dark_toggle,

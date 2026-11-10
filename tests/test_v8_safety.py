@@ -87,8 +87,8 @@ def test_safety_view_and_wrap_term_on_the_rail():
         assert safety._handles and "Suggested fence" in safety.info.content
         safety.show.value = False
         assert not safety._handles
-        app["stayouts"].add_shape("box")
-        sp = app["stayouts"]
+        app["slowzones"].add_shape("box")
+        sp = app["slowzones"]
         sp.speed.value = 30.0
         assert app["session"].stayouts[-1].speed_pct == 30.0 and not app["session"].obstacles()
     finally:

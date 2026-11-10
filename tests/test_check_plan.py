@@ -52,6 +52,7 @@ def test_check_uses_the_plan_stops(app):
     assert np.allclose(s.q, r.q)
 
 
+@pytest.mark.slow  # uses the plan made by test_check_uses_the_plan_stops
 def test_arrows_step_and_move_the_robot(app):
     s, opt = app["session"], app["optimize"]
     sol = app["results"].selected()
