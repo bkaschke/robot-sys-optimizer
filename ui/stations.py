@@ -69,7 +69,15 @@ class StationsPanel:
                 "External Axis tab for several stations._"
             )
             self.step = gui.add_number("Candidate grid (mm)", 100.0, min=25.0, max=500.0, step=25.0)
-            self.refine = gui.add_checkbox("Refine with exact check (CMA-ES)", True)
+            from ui.method_picker import MethodPicker
+
+            # v8 T10: was the checkbox "Refine with exact check (CMA-ES)"; old saved values map on
+            self.refine = MethodPicker(gui, "station_refine", "Refinement")
+            self.objective_m = MethodPicker(gui, "station_objective", "Objective")  # v8 T11 / T12
+            from ui.pareto_ui import pareto_keys_widgets
+
+            self.pareto_keys = pareto_keys_widgets(gui, ("stations", "cycle", "clearance"))
+            self.objective_m.dropdown.on_update(lambda _e: self._objective_fields())
             self.areas = gui.add_checkbox(
                 "Connected station areas", True, hint="each stop's points one area on the part (no overlap)"
             )
@@ -111,6 +119,11 @@ class StationsPanel:
         self.quick_run.on_click(lambda e: self.start(e, quick=True))
         self.quick_stop.on_click(lambda e: self._cancel.set())
 
+    def _objective_fields(self) -> None:
+        on = self.objective_m.key == "pareto" and self.objective_m.visible
+        for cb in self.pareto_keys.values():
+            cb.visible = on
+
     def options(self) -> dict:
         """Planner options shared with the tool-geometry panel."""
         req = self.costs.requirements()
@@ -149,7 +162,8 @@ class StationsPanel:
         settings = PlannerSettings(
             max_stations=1 if static else int(self.max_stations.value),
             candidate_step=self.step.value / 1000,
-            refine=self.refine.value,
+            refine=self.refine.key != "none",
+            refine_method=self.refine.key,
             zoning=self.options()["zoning"],
             areas=self.options()["areas"],
             require_all=self.options()["require_all"],
@@ -180,6 +194,9 @@ class StationsPanel:
         from ui import jobs
 
         spec = {"settings": settings, "weights": weights, "rules": None, "workers": jobs.CHECK_WORKERS}
+        if not quick and not rules:  # v8 T11 / T12: the Objective dropdown (Cost based mode)
+            spec["objective"] = self.objective_m.key
+            spec["pareto_keys"] = tuple(k for k, cb in self.pareto_keys.items() if cb.value)
         if rules:
             spec["rules"] = {"objective": self.objective.value, "sing_pct": float(self.sing_pct.value)}
         self._cancel.clear()
@@ -221,6 +238,13 @@ class StationsPanel:
                 s.max_manip = float(data)
             elif kind == "warn":
                 log(f"{what}: {data}.", "warn")
+            elif kind == "pareto":  # v8 T11: the front replaces the list
+                s.results, s.result_points = [], {}
+                for sol, res in data:
+                    s.stamps[sol.label] = stamp
+                    s.result_points[sol.label] = res
+                    s.results.append(sol)
+                self.on_solution()
 
         from ui import jobs
         from ui.plan_job import payload_for

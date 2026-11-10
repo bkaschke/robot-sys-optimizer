@@ -43,6 +43,9 @@ def show(panel) -> None:
     panel.rules_folder.visible = on
     panel.costs.folder.visible = not on
     panel.refine.visible = not on  # rules mode never refines (no cost to optimize)
+    if hasattr(panel, "objective_m"):  # v8: cost-based objectives only
+        panel.objective_m.visible = not on
+        panel._objective_fields()
     panel.zoning.visible = not on  # rule 5: zones always on
     panel.zoning_note.visible = not on and panel.zoning.value == panel.zoning.options[1]
 

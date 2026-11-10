@@ -50,6 +50,19 @@ class ToolOptPanel:
                 step=5,
                 hint="candidate tool geometries to try",
             )
+            from ui.method_picker import MethodPicker
+
+            self.shape = MethodPicker(gui, "tool_shape", "Shape search")  # v8 T10
+            self.objective = MethodPicker(gui, "tool_objective", "Objective")  # v8 T11 / T12
+            from ui.pareto_ui import pareto_keys_widgets
+
+            self.pareto_keys = pareto_keys_widgets(gui, ("length", "stations", "cycle"))
+
+            def keys_visible(_e=None) -> None:
+                for cb in self.pareto_keys.values():
+                    cb.visible = self.objective.key == "pareto"
+
+            self.objective.dropdown.on_update(keys_visible)
             from ui.costs_ui import CostPanel
 
             self.costs = CostPanel(server, session, field="tool_weights")  # its own costs (v6)
@@ -151,7 +164,11 @@ class ToolOptPanel:
                 "See the user guide, Adding a robot.",
             )
         opts = self.planner_options() if self.planner_options else {"zoning": False}
-        st = GeometrySettings(L_tol=self.tol.value / 1000, shape_evals=int(self.shape_evals.value))
+        st = GeometrySettings(
+            L_tol=self.tol.value / 1000, shape_evals=int(self.shape_evals.value), shape_method=self.shape.key
+        )
+        st.objective = self.objective.key
+        st.pareto_keys = tuple(k for k, cb in self.pareto_keys.items() if cb.value) or ("length",)
         req = self.costs.requirements()
         st.planner.zoning = opts["zoning"] or req["require_one_config"]
         st.planner.require_all = req["require_all"]

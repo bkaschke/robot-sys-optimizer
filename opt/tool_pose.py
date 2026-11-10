@@ -71,10 +71,18 @@ def optimize_pose(
         evaluate(v0, "nominal pose", 0.05)
         if active and st.shape_evals > 0:
             u0 = (np.array([getattr(v0, k) for k in active]) - bounds[:, 0]) / (bounds[:, 1] - bounds[:, 0])
-            if len(u0) == 1:  # CMA-ES needs >= 2 dims: pad with a coordinate values() ignores
-                u0 = np.append(u0, 0.5)
-            opts = {"bounds": [0, 1], "maxfevals": st.shape_evals, "verbose": -9, "seed": 3, "popsize": 6}
-            es = cma.CMAEvolutionStrategy(np.clip(u0, 0, 1), 0.25, opts)
+            if st.shape_method in ("tpe", "gp"):  # v8 T10
+                from opt.refine_bayes import make_search
+
+                n = len(u0)
+                es = make_search(
+                    st.shape_method, np.clip(u0, 0, 1), np.zeros(n), np.ones(n), st.shape_evals, 3
+                )
+            else:
+                if len(u0) == 1:  # CMA-ES needs >= 2 dims: pad with a coordinate values() ignores
+                    u0 = np.append(u0, 0.5)
+                opts = {"bounds": [0, 1], "maxfevals": st.shape_evals, "verbose": -9, "seed": 3, "popsize": 6}
+                es = cma.CMAEvolutionStrategy(np.clip(u0, 0, 1), 0.25, opts)
             k = 0
             while not es.stop():
                 us = es.ask()

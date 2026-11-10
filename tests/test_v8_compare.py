@@ -33,7 +33,7 @@ def test_compare_two_robots_matches_normal_plans():
         st, cmp_, s = app["stations"], app["compare"], app["session"]
         for name, cb in cmp_.pick.items():
             cb.value = name in ("ur20", "ur10e")
-        st.refine.value = False  # keep it short
+        st.refine.value = "none"  # keep it short
         confirm_all(st)
         cmp_.start(block=True)
         rows = {r["robot"]: r for r in cmp_.rows}

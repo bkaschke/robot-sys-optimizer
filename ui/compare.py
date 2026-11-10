@@ -162,7 +162,8 @@ class ComparePanel:
         settings = PlannerSettings(
             max_stations=1 if s.sites() is None else int(st.max_stations.value),
             candidate_step=st.step.value / 1000,
-            refine=st.refine.value,
+            refine=st.refine.key != "none",
+            refine_method=st.refine.key,
             zoning=o["zoning"],
             areas=o["areas"],
             require_all=o["require_all"],

@@ -86,6 +86,7 @@ def build_checker(s, robot, sites, workers: int, say, emit):
 
 def station_job(payload: dict, emit, cancelled) -> dict:
     """Plan stations (normal, quick or rules only, from ``spec``)."""
+    from core.feasibility import CancelledError
     from core.robot import Robot
     from core.schema import length_ref
     from opt.placement import plan_stations
@@ -135,6 +136,8 @@ def station_job(payload: dict, emit, cancelled) -> dict:
             cancelled,
         )
         return {"best": out[0][0] if out else None, "rules_status": status}
+    pareto = spec.get("objective") == "pareto"
+    fin: list = []
     out = plan_stations(
         rmap,
         checker,
@@ -145,11 +148,38 @@ def station_job(payload: dict, emit, cancelled) -> dict:
         settings,
         L,
         L_ref,
-        on_solution=streamed,
+        on_solution=None if pareto else streamed,
         progress=say,
         cancelled=cancelled,
         sites=sites,
+        finisher=fin,
     )
+    if pareto and out and fin:  # v8 T11: the trade-off plans instead of the cheapest one
+        from opt.pareto import station_front
+
+        finish, used_sites = fin[0]
+        keys = spec.get("pareto_keys") or ("stations", "cycle", "clearance")
+        try:
+            plans = station_front(
+                finish,
+                used_sites,
+                t,
+                out,
+                keys,
+                settings.refine_radius,
+                settings.refine_evals,
+                1,
+                say,
+                cancelled,
+            )
+        except CancelledError:
+            plans = out
+        n = len(plans)
+        for i, (sol, _res) in enumerate(plans):
+            sol.label = f"Pareto {i + 1}/{n}: {sol.label}"
+            sol.planner = "pareto"
+        emit("pareto", plans)
+        return {"best": plans[0][0] if plans else None, "rules_status": None}
     return {"best": out[0][0] if out else None, "rules_status": None}
 
 

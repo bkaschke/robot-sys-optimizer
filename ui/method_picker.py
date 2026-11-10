@@ -33,7 +33,10 @@ class MethodPicker:
         return self.dropdown.value
 
     @value.setter
-    def value(self, v: str) -> None:
+    def value(self, v) -> None:
+        if isinstance(v, bool):  # a checkbox's saved value (before v8): on = default, off = "None"
+            keys = [m.key for m in METHODS[self.slot]]
+            v = keys[0] if v or "none" not in keys else "none"
         self.dropdown.value = by_name(self.slot, v).name
         self.refresh()
 

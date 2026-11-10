@@ -217,6 +217,8 @@ def build_app(
             """A plan or tool result arrived: list it, and inspect the selected plan."""
             state["results"].refresh()
             optimize.refresh_inspect(INSPECT_SOURCES[1])
+            if "pareto" in state:
+                state["pareto"].refresh()
 
         stations = StationsPanel(server, session, on_solution=new_results)
 
@@ -251,6 +253,17 @@ def build_app(
 
         tolerance = TolerancePanel(server, session, results.selected)  # v8 T5
         tolerance.on_done = lambda: targets.heat.draw()  # v8 T8: Colour part by -> tolerance
+        from ui.pareto_ui import ParetoView
+
+        pareto = ParetoView(  # v8 T11: Results -> Pareto front
+            server,
+            session,
+            tool_length=lambda sol: (
+                session.tool_model.length(sol.tool_values)
+                if sol.tool_values is not None and session.tool_model is not None
+                else None
+            ),
+        )
     state["results"] = results
     tool_opt.planner_options = stations.options
     workflow.gate(stations.run, stations.gate_md)  # optimizers need a confirmed setup (T5)
@@ -342,6 +355,7 @@ def build_app(
         tolerance=tolerance,
         cycle=cycle,
         compare=compare,
+        pareto=pareto,
         project=project,
         dark_toggle=dark_toggle,
         guide=guide,

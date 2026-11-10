@@ -41,6 +41,9 @@ class GeometrySettings:
     L_tol: float = 0.001  # m
     coarse_samples: int = 6
     shape_evals: int = 30
+    shape_method: str = "cmaes"  # v8 T10: "cmaes" | "tpe" | "gp" (opt.methods tool_shape)
+    objective: str = "weighted"  # v8 T11: "weighted" | "pareto" (opt.methods tool_objective)
+    pareto_keys: tuple = ("length", "stations", "cycle")
     planner: PlannerSettings = field(default_factory=lambda: PlannerSettings(refine_evals=12))
 
 
@@ -101,6 +104,7 @@ class GeometryResult:
 
 
 class _Evaluator:
+    seen: list = []  # (values, solution, results, feasible, tool length) of every evaluation
     """Builds per-geometry scenes; the head meshes are loaded once and the ee swapped."""
 
     def __init__(
@@ -177,6 +181,8 @@ class _Evaluator:
             sites=self.sites,
         )
         full = [(s, r) for s, r in out if not s.unreached and len(s.stations) <= self.max_stations]
+        for s_, r_ in out:  # v8 T11: every plan is a candidate for a Pareto front
+            self.seen.append((v, s_, r_, not s_.unreached, self.tm.length(v)))
         if full:
             return True, *min(full, key=lambda sr: sr[0].cost)
         if out:
@@ -234,10 +240,42 @@ class _Evaluator:
                 "cycle_s": round(cyc, 1),
             }
         )
+        self.seen.append((v, new, res, not new.unreached, self.tm.length(v)))
         return cost, new, res
 
 
-def optimize_tool(
+def optimize_tool(*args, **kw) -> GeometryResult:
+    """Tool geometry optimization (see the module docstring); with ``st.objective ==
+    "pareto"`` (v8 T11) the designs offered are the Pareto front of every evaluated design
+    (``st.pareto_keys``) instead of the best three by cost."""
+    st = kw.get("st") or GeometrySettings()
+    seen: list = []
+    r = _optimize_tool(*args, **{**kw, "seen": seen})
+    if st.objective == "pareto" and seen:
+        from opt.pareto import front, measures
+
+        f = front(seen, st.pareto_keys, lambda it: measures(it[1], it[2], it[4]))
+        n = len(f)
+        r.designs = [
+            Design(
+                v,
+                sol.model_copy(
+                    update={
+                        "tool_values": v,
+                        "label": f"Pareto {i + 1}/{n}: tool {1000 * length:.0f} mm: {sol.label}",
+                        "planner": "tool",
+                    }
+                ),
+                res,
+                bool(ok),
+            )
+            for i, (v, sol, res, ok, length) in enumerate(f)
+        ]
+        r.message += f"; Pareto front: {n} design(s)"
+    return r
+
+
+def _optimize_tool(
     robot: Robot,
     ee: EndEffector,
     urdf: Path | None,
@@ -253,6 +291,7 @@ def optimize_tool(
     cancelled: Callable[[], bool] | None = None,
     sites=None,
     obstacles: list | None = None,
+    seen: list | None = None,
 ) -> GeometryResult:
     st = st or GeometrySettings()
     say = progress or (lambda m, f: None)
@@ -272,6 +311,7 @@ def optimize_tool(
     )
     ev.cancelled = cancelled
     ev.obstacles = list(obstacles or [])
+    ev.seen = seen if seen is not None else []  # v8 T11: every evaluated design
     x = ee.extension
     if x.type == "pose":  # v2: head pose x y z rx ry rz, best overall cost (opt.tool_pose)
         from opt.tool_pose import POSE_KEYS, optimize_pose, pose_label
@@ -407,11 +447,16 @@ def _shape_search(ev, st, v_best, sol, active, values, say, best: list) -> None:
     x = ev.ee.extension
     lo_hi = [getattr(x, k) for k in active]
     u0 = np.array([(getattr(v_best, k) - a) / (b - a) for k, (a, b) in zip(active, lo_hi, strict=True)])
-    if len(u0) == 1:  # CMA-ES does not support 1-D: pad with a coordinate values() ignores
-        u0 = np.append(u0, 0.5)
-    es = cma.CMAEvolutionStrategy(
-        u0, 0.25, {"bounds": [0, 1], "maxfevals": st.shape_evals, "verbose": -9, "seed": 2, "popsize": 6}
-    )
+    if st.shape_method in ("tpe", "gp"):  # v8 T10
+        from opt.refine_bayes import make_search
+
+        es = make_search(st.shape_method, u0, np.zeros(len(u0)), np.ones(len(u0)), st.shape_evals, 2)
+    else:
+        if len(u0) == 1:  # CMA-ES does not support 1-D: pad with a coordinate values() ignores
+            u0 = np.append(u0, 0.5)
+        es = cma.CMAEvolutionStrategy(
+            u0, 0.25, {"bounds": [0, 1], "maxfevals": st.shape_evals, "verbose": -9, "seed": 2, "popsize": 6}
+        )
     evals = 0
     while not es.stop():
         us = es.ask()
