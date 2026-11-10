@@ -228,6 +228,11 @@ def build_app(
         from ui.cycle_ui import CyclePanel
 
         cycle = CyclePanel(server, session)  # v8 T6
+        from ui.compare import ComparePanel
+
+        compare = ComparePanel(  # v8 T9
+            server, session, stations, use_robot=lambda name: setattr(cell.robot_choice, "value", name)
+        )
     with tab_handles["Results"]:
         workflow.results_header()
         results = ResultsTab(server, session, set_base=cell.set_base)
@@ -257,6 +262,7 @@ def build_app(
     workflow.gate((ex.csv, ex.uframes, ex.urdf, ex.report), ex.gate_md, result_reason(results.selected))
     workflow.gate(sim.build_btn, sim.gate_md, plan_reason(sim.selected))
     workflow.gate(tool_opt.run, tool_opt.gate_md)
+    workflow.gate(compare.run, compare.gate_md)
     workflow.gate(tolerance.run, tolerance.gate_md, plan_reason(results.selected))
 
     def selected_results() -> dict:
@@ -335,6 +341,7 @@ def build_app(
         tool_opt=tool_opt,
         tolerance=tolerance,
         cycle=cycle,
+        compare=compare,
         project=project,
         dark_toggle=dark_toggle,
         guide=guide,

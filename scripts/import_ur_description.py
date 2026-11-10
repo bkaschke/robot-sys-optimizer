@@ -59,11 +59,23 @@ def main() -> None:
         r'filename="meshes/\1"',
         urdf,
     )
+    # some models reuse another type's meshes (the UR30 uses UR20 links): meshes_<type>/...
+    shared = sorted(set(re.findall(r'filename="(?:package|file)://[^"]*?/meshes/([^/"]+)/', urdf)))
+    for other in shared:
+        urdf, k = re.subn(
+            r'filename="(?:package|file)://[^"]*?/meshes/' + re.escape(other) + r'/([^"]+)"',
+            lambda m, o=other: f'filename="meshes_{o}/{m.group(1)}"',
+            urdf,
+        )
+        n += k
     if n == 0 or "file://" in urdf or "package://" in urdf:
         sys.exit("mesh path rewrite failed; check the generated URDF")
 
     (out / f"{args.ur_type}.urdf").write_text(urdf, encoding="utf-8")
-    shutil.copytree(src / "meshes" / args.ur_type, out / "meshes", dirs_exist_ok=True)
+    if (src / "meshes" / args.ur_type).is_dir():
+        shutil.copytree(src / "meshes" / args.ur_type, out / "meshes", dirs_exist_ok=True)
+    for other in shared:
+        shutil.copytree(src / "meshes" / other, out / f"meshes_{other}", dirs_exist_ok=True)
     shutil.copy(src / "LICENSE", out / "LICENSE_ur_description_BSD3.txt")
     print(f"wrote {out} ({n} mesh references)")
 
