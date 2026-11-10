@@ -233,6 +233,17 @@ class SimPanel:
         self.progress.value = 100.0 * f
         self.info.content = f"_Building paths… {100 * f:.0f} % · {took(self._t0)}_"
 
+    def _cycle_line(self, plan) -> str:
+        """v8 T6: cycle time of the built paths (Optimize -> Cycle time speeds)."""
+        from core.cycle_time import CycleSettings, path_time
+
+        robot = self.s.robot
+        self.cycle = c = path_time(
+            plan, self.s.cycle or CycleSettings(), robot.model.velocityLimit if robot else None
+        )
+        parts = ", ".join(f"{k} {v:.0f} s" for k, v in c.items() if k != "total" and v > 0.05)
+        return f"  \nCycle time: **{c['total']:.0f} s** ({parts})."
+
     def _after_build(self) -> None:
         plan = self.plan
         c = plan.counts()
@@ -243,6 +254,7 @@ class SimPanel:
             f"({self.pattern.value.lower()}{', home between stops' if self.home.value else ''}"
             f"{', carrier moves planned' if self.drive.value else ''}).  \n"
             f"Flagged samples: **{problems}**."
+            + self._cycle_line(plan)
             + (
                 "  \n_Reconfigure = the plan switches joint configuration there: plan with Joint "
                 "configuration = zones to keep paths continuous._"

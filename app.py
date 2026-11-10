@@ -225,6 +225,9 @@ def build_app(
                 tool._after(full=True)
 
         tool_opt = ToolOptPanel(server, session, apply_values, on_solution=new_results)
+        from ui.cycle_ui import CyclePanel
+
+        cycle = CyclePanel(server, session)  # v8 T6
     with tab_handles["Results"]:
         workflow.results_header()
         results = ResultsTab(server, session, set_base=cell.set_base)
@@ -330,6 +333,7 @@ def build_app(
         stations=stations,
         tool_opt=tool_opt,
         tolerance=tolerance,
+        cycle=cycle,
         project=project,
         dark_toggle=dark_toggle,
         guide=guide,

@@ -207,6 +207,9 @@ class _Evaluator:
 
         seqs = stop_sequences(checker, self.t, assignment, res, zones)
         groups = zone_counts(zones)[0] if zones else config_changes(seqs)
+        from opt.cost import cycle_estimate
+
+        cyc = cycle_estimate(seqs, res, stations, sites, checker.robot, self.st.planner.cycle)["total"]
         cost, terms = cost_breakdown(
             list(res.values()),
             len(unreached),
@@ -218,6 +221,7 @@ class _Evaluator:
             groups=groups,
             wrist_flips=zone_counts(zones)[1],
             motion=arm_motion(seqs, res),
+            cycle_s=cyc,
         )
         new = sol.model_copy(
             update={
@@ -227,6 +231,7 @@ class _Evaluator:
                 "breakdown": terms,
                 "tool_values": v,
                 "zones": zones,
+                "cycle_s": round(cyc, 1),
             }
         )
         return cost, new, res

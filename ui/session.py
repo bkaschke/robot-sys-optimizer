@@ -63,6 +63,7 @@ class Session:
     stamps: dict = field(default_factory=dict)  # result key -> setup fingerprint (ui.staleness)
     steps: dict = field(default_factory=dict)  # confirmed setup step -> fingerprint
     tolerance: object = None  # v8 T5: last opt.tolerance.ToleranceResult (not saved)
+    cycle: object = None  # v8 T6: core.cycle_time.CycleSettings (Optimize -> Cycle time)
     before_save: list = field(default_factory=list)  # GUI hooks that copy their state in here
 
     # --- assets ---------------------------------------------------------------

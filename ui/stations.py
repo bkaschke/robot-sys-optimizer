@@ -154,6 +154,7 @@ class StationsPanel:
             areas=self.options()["areas"],
             require_all=self.options()["require_all"],
             require_one_config=self.options()["require_one_config"],
+            cycle=getattr(s, "cycle", None),  # v8 T6
         )
         if quick:
             settings = PlannerSettings(
@@ -164,6 +165,7 @@ class StationsPanel:
                 areas=False,
                 patience=1,
                 quick_first=True,
+                cycle=settings.cycle,
             )
         run, stop, progress, status = (
             (self.quick_run, self.quick_stop, self.quick_progress, self.quick_status)

@@ -38,6 +38,7 @@ def card(s, sol) -> str:
     planner = PLANNERS.get(sol.planner, sol.planner or ("Tool optimizer" if sol.tool_values else "—"))
     rules = f"✘ {len(sol.violations)} broken" if sol.violations else "✔ met"
     run = f"{sol.run_s:.0f} s" if sol.run_s is not None else "—"
+    cyc = f"{sol.cycle_s:.0f} s (estimate)" if sol.cycle_s is not None else "—"
     return (
         f"**Selected plan:** {sol.label}\n\n"
         "| | | | |\n|---|---|---|---|\n"
@@ -45,5 +46,5 @@ def card(s, sol) -> str:
         f"| Points reached | **{n - len(sol.unreached)}/{n}** | Worst clearance | {worst_c} |\n"
         f"| Closest joint limit | {lim} | Lowest manipulability | {low_mu} |\n"
         f"| Planner | {planner} | Rules | {rules} |\n"
-        f"| Run time | {run} | | |\n"
+        f"| Run time | {run} | Cycle time | {cyc} |\n"
     )

@@ -42,6 +42,17 @@ SAVED: dict[str, tuple[str, ...]] = {
     "tool_opt.costs": ("require_all", "require_config"),
     "tool_opt": ("max_stations", "tol", "shape_evals"),
     "tolerance": ("part_mm", "part_deg", "station_mm", "samples", "seed"),
+    "cycle": (
+        "joint_speed",
+        "joint_acc",
+        "process_speed",
+        "approach_speed",
+        "linear_acc",
+        "carrier_speed",
+        "carrier_acc",
+        "lift_speed",
+        "settle_s",
+    ),
     "results": ("choice", "show_lines", "show_ghosts", "show_areas"),
     "results.export": ("screenshot",),
     "sim": (

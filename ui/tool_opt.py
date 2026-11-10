@@ -158,6 +158,7 @@ class ToolOptPanel:
         st.planner.require_one_config = req["require_one_config"]
         self._require_all = req["require_all"]
         st.planner.areas = opts.get("areas", True)
+        st.planner.cycle = getattr(s, "cycle", None)  # v8 T6
         spec = {
             "weights": self.costs.commit(),  # the tool optimizer's own cost weights
             "max_stations": int(self.max_stations.value),

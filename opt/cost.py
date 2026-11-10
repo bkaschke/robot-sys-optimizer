@@ -27,6 +27,15 @@ def path_length(xy: np.ndarray) -> float:
     return float(np.linalg.norm(np.diff(xy, axis=0), axis=1).sum()) if len(xy) > 1 else 0.0
 
 
+def cycle_estimate(seqs, results, stations: list[dict], sites, robot, cs=None) -> dict[str, float]:
+    """v8 T6: estimated cycle time of a plan (core.cycle_time.plan_estimate) with the carrier's
+    travel metric between consecutive stops and the robot's joint speed limits."""
+    from core.cycle_time import CycleSettings, plan_estimate
+
+    moves = [float(sites.travel(a, b)) for a, b in zip(stations[:-1], stations[1:], strict=True)]
+    return plan_estimate(seqs, results, moves, cs or CycleSettings(), robot.model.velocityLimit)
+
+
 def cost_breakdown(
     point_results: list,
     n_unreached: int,
@@ -40,6 +49,7 @@ def cost_breakdown(
     groups: int = 0,
     wrist_flips: int = 0,
     motion: float = 0.0,
+    cycle_s: float = 0.0,
 ) -> tuple[float, dict[str, float]]:
     ok = [r for r in point_results if r.status != "unreachable"]
     mu = np.array([r.manipulability / max_manip for r in ok]) if ok else np.zeros(0)
@@ -57,6 +67,7 @@ def cost_breakdown(
         "group": float(groups),
         "wrist_flip": float(wrist_flips),
         "motion": float(motion),
+        "cycle": float(cycle_s) / 60.0,  # v8 T6: per minute
     }
     w = weights.model_dump()
     weighted = {k: w[k] * v for k, v in terms.items()}

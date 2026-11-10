@@ -246,6 +246,7 @@ class Weights(_Model):
     group: float = Field(default=1.0, ge=0)  # per extra joint-configuration group at a stop
     motion: float = Field(default=1.0, ge=0)  # mean largest joint move between neighbouring points / 90 deg
     wrist_flip: float = Field(default=1.0, ge=0)  # per joint 4 / 6 jump > 180 deg inside a group
+    cycle: float = Field(default=0.0, ge=0)  # v8 T6: per minute of estimated cycle time
 
     @model_validator(mode="before")
     @classmethod
@@ -304,6 +305,7 @@ class Solution(_Model):
     # and how long that run took (s); shown on the Results summary card
     planner: str = ""
     run_s: float | None = None
+    cycle_s: float | None = None  # v8 T6: estimated cycle time (core.cycle_time.plan_estimate)
 
     @model_validator(mode="after")
     def _station_refs(self) -> Solution:
