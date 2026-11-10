@@ -11,13 +11,11 @@ import viser
 
 from core.feasibility import CancelledError
 from core.ik import make_ik
-from core.robot import Robot
 from core.schema import ExtensionValues, Optimizer
-from opt.tool_geometry import GeometryResult, GeometrySettings, optimize_tool
+from opt.tool_geometry import GeometryResult, GeometrySettings
 from ui.log_panel import log
 from ui.session import Session
 from ui.staleness import stamp_for
-from ui.stations import part_footprint, world_targets
 from ui.widgets import notify
 
 
@@ -153,21 +151,6 @@ class ToolOptPanel:
                 "See the user guide, Adding a robot.",
             )
         opts = self.planner_options() if self.planner_options else {"zoning": False}
-        robot = Robot(s.robot.spec)
-        ee = s.tool
-        urdf = s.resolve(ee.urdf) if ee.urdf else None
-        args = (
-            robot,
-            ee,
-            urdf,
-            s.part_mesh(),
-            s.part.T_world_part.copy(),
-            s.T_world_base.copy(),
-            world_targets(s),
-            part_footprint(s),
-            self.costs.commit(),  # the tool optimizer's own cost weights
-            int(self.max_stations.value),
-        )
         st = GeometrySettings(L_tol=self.tol.value / 1000, shape_evals=int(self.shape_evals.value))
         req = self.costs.requirements()
         st.planner.zoning = opts["zoning"] or req["require_one_config"]
@@ -175,10 +158,11 @@ class ToolOptPanel:
         st.planner.require_one_config = req["require_one_config"]
         self._require_all = req["require_all"]
         st.planner.areas = opts.get("areas", True)
-        sites = s.sites()
-        obstacles = s.obstacle_entries()  # stay-out zones
-        if sites is None:
-            args = (*args[:-1], 1)  # static base: one station
+        spec = {
+            "weights": self.costs.commit(),  # the tool optimizer's own cost weights
+            "max_stations": int(self.max_stations.value),
+            "st": st,
+        }
         if self.on_start is not None:
             self.on_start()
         self._cancel.clear()
@@ -192,17 +176,25 @@ class ToolOptPanel:
             self.info.content = f"_{msg}_"
             self.progress.value = 100.0 * f
 
+        from ui import jobs
+        from ui.plan_job import payload_for
+
+        in_process = block or not jobs.USE_WORKER
+        payload = payload_for(s, spec, live=in_process)
+
+        def on_msg(kind: str, data) -> None:
+            if kind == "progress":
+                say(*data)
+
         def work() -> None:
             try:
-                self.result = optimize_tool(
-                    *args,
-                    st=st,
-                    progress=say,
-                    cancelled=self._cancel.is_set,
-                    sites=sites,
-                    obstacles=obstacles,
+                self.result = jobs.call(
+                    "ui.plan_job:tool_job", payload, on_msg, self._cancel.is_set, in_process
                 )
                 self._show()
+            except jobs.JobCancelledError as err:  # the worker was ended after Cancel
+                self.info.content = f"**Cancelled** ({err})."
+                log(f"Tool optimization cancelled: {err}.", "warn", self._t0)
             except CancelledError:  # Cancel while a reachability map was being built
                 self.info.content = "**Cancelled** (while building the reachability map)."
                 log("Tool optimization cancelled (while building the reachability map).", "warn")

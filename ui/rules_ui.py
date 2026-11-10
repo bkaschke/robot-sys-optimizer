@@ -47,11 +47,12 @@ def show(panel) -> None:
     panel.zoning_note.visible = not on and panel.zoning.value == panel.zoning.options[1]
 
 
-def run(panel, rmap, checker, args: dict, streamed, say, cancelled) -> tuple[list, str]:
-    """The rules-mode plan (in the planner thread). Returns ([(Solution, results)] or [],
-    status markdown)."""
-    objective = panel.objective.value
-    checker.settings.min_manip = float(panel.sing_pct.value) / 100.0 * float(rmap.max_manip)
+def run(
+    objective: str, sing_pct: float, rmap, checker, args: dict, streamed, say, cancelled
+) -> tuple[list, str]:
+    """The rules-mode plan (planner thread or worker, ``ui.plan_job``). Returns
+    ([(Solution, results)] or [], status markdown)."""
+    checker.settings.min_manip = float(sing_pct) / 100.0 * float(rmap.max_manip)
     base = args["settings"]
 
     def run_k(k: int, exclude: tuple | None):

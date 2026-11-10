@@ -11,13 +11,10 @@ import numpy as np
 import viser
 
 from core import targets as tg
-from core.collision import CollisionScene
-from core.feasibility import CancelledError, FeasibilityChecker
+from core.feasibility import CancelledError
 from core.ik import make_ik
-from core.robot import Robot
-from core.schema import Optimizer, TargetGroup, length_ref
-from opt.placement import PlannerSettings, Targets, plan_stations
-from opt.reachability import map_for_tool
+from core.schema import Optimizer, TargetGroup
+from opt.placement import PlannerSettings, Targets
 from ui.log_panel import log, plan_log
 from ui.session import Session
 from ui.staleness import stamp_for
@@ -177,16 +174,10 @@ class StationsPanel:
 
         rules = not quick and rules_ui.rules_mode(self)
         what = "Quick station plan" if quick else ("Rules-only station plan" if rules else "Station planning")
-        robot = Robot(s.robot.spec)
-        tcp = s.tool.tcps[0].name
-        t = world_targets(s)
-        fp = part_footprint(s)
-        mesh = s.part_mesh()
-        obstacles = s.obstacle_entries()  # stay-out zones
-        T_base0, T_part = s.T_world_base.copy(), s.part.T_world_part.copy()
         weights = self.costs.commit()
-        L = s.tool_model.length()
-        L_ref = length_ref(s.tool.extension)
+        spec = {"settings": settings, "weights": weights, "rules": None}
+        if rules:
+            spec["rules"] = {"objective": self.objective.value, "sing_pct": float(self.sing_pct.value)}
         self._cancel.clear()
         run.visible, stop.visible, progress.visible = False, True, True
         if self.on_start is not None:
@@ -217,52 +208,29 @@ class StationsPanel:
             status.content = f"_{msg}_"
             progress.value = 100.0 * f
 
+        def on_msg(kind: str, data) -> None:  # messages from the job (thread or worker)
+            if kind == "progress":
+                say(*data)
+            elif kind == "solution":
+                streamed(*data)
+            elif kind == "max_manip":
+                s.max_manip = float(data)
+
+        from ui import jobs
+        from ui.plan_job import payload_for
+
+        in_process = block or not jobs.USE_WORKER
+        payload = payload_for(s, spec, live=in_process)
+
         def work() -> None:
             try:
-                say("loading reachability map (first time per tool length: ~1 min)", 0.0)
-                rmap = map_for_tool(
-                    robot,
-                    s.tool_model.T_flange_tcp(tcp),
-                    cancelled=self._cancel.is_set,
-                    any_offset=s.tool.extension.type == "pose",  # pose tools: shared flange map
-                )
-                bb, wb = sites.scene_bodies() if sites is not None else ([], [])
-                scene = CollisionScene(
-                    robot,
-                    s.tool_model,
-                    mesh,
-                    T_base0,
-                    T_part,
-                    base_bodies=bb,
-                    world_bodies=wb,
-                    obstacles=obstacles,
-                )
-                checker = FeasibilityChecker(robot, make_ik(robot), s.tool_model, scene, T_base0, T_part)
-                s.max_manip = float(rmap.max_manip)  # the Results card: manipulability in % (not saved)
-                if rules:
-                    args = dict(
-                        t=t, T_base0=T_base0, fp=fp, weights=weights, settings=settings, L=L, L_ref=L_ref
+                out = jobs.call("ui.plan_job:station_job", payload, on_msg, self._cancel.is_set, in_process)
+                rules_status = out["rules_status"]
+                best = out["best"]
+                if best is not None:  # the worker's copy: use the streamed object of that label
+                    best = next(
+                        (r for r in s.results if r.label in (best.label, f"Quick: {best.label}")), best
                     )
-                    out, rules_status = rules_ui.run(
-                        self, rmap, checker, {**args, "sites": sites}, streamed, say, self._cancel.is_set
-                    )
-                else:
-                    out = plan_stations(
-                        rmap,
-                        checker,
-                        t,
-                        T_base0,
-                        fp,
-                        weights,
-                        settings,
-                        L,
-                        L_ref,
-                        on_solution=streamed,
-                        progress=say,
-                        cancelled=self._cancel.is_set,
-                        sites=sites,
-                    )
-                best = out[0][0] if out else None
                 for r in s.results:  # the run time, for the Results summary card
                     if r.run_s is None and r.tool_values is None:
                         r.run_s = round(time.monotonic() - self._t0, 1)
@@ -295,6 +263,9 @@ class StationsPanel:
             except CancelledError:  # Cancel while the reachability map was being built
                 status.content = "**Cancelled** (while building the reachability map)."
                 log(f"{what} cancelled (while building the reachability map).", "warn")
+            except jobs.JobCancelledError as err:  # the worker was ended after Cancel
+                status.content = f"**Cancelled** ({err}); {len(s.results)} plan(s) kept."
+                log(f"{what} cancelled: {err}.", "warn", self._t0)
             except Exception as err:  # report in the GUI instead of dying silently in a thread
                 status.content = f"⚠ planning failed: {err}"
                 log(f"{what} failed: {err}", "error")

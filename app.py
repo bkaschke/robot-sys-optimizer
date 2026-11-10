@@ -87,8 +87,22 @@ def build_app(
     state: dict = {"session": session}
     with server.gui.add_folder("Settings & help", expand_by_default=False):  # v7: out of the way
         dark_toggle = server.gui.add_checkbox("Dark mode", dark)
+        from ui import jobs
+
+        worker_box = server.gui.add_checkbox(
+            "Run planners in a separate process",
+            jobs.USE_WORKER,
+            hint="keeps the panel responsive; Cancel always ends the run; "
+            "the worker's memory is freed after 5 idle minutes",
+        )
+
+        def set_worker(_e=None) -> None:
+            jobs.USE_WORKER = bool(worker_box.value)
+
+        worker_box.on_update(set_worker)
         guide = add_guide_panel(server, guide_port)
     dark_toggle.on_update(lambda e: apply_theme(server, dark_toggle.value))
+    state["worker_box"] = worker_box
 
     def on_loaded() -> None:
         state["cell"].refresh()
@@ -318,6 +332,9 @@ def main() -> None:
     parser.add_argument("--open", default=None, metavar="FOLDER", help="open this project folder (no popup)")
     args = parser.parse_args()
 
+    from ui import jobs
+
+    jobs.USE_WORKER = True  # v8 T1: planners run in a worker process in the real app
     server = viser.ViserServer(host=args.host, port=args.port, label="Robot Cell Optimizer")
     guide = None
     try:
@@ -356,6 +373,7 @@ def main() -> None:
         while True:
             time.sleep(1.0)
     except KeyboardInterrupt:
+        jobs.runner().stop()
         server.stop()
         if guide is not None:
             guide.stop()
