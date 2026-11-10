@@ -13,8 +13,9 @@ from ui import tool_extension
 
 
 class ExtensionMirror:
-    def __init__(self, server, tool_tab, container):
-        self.server, self.tab = server, tool_tab
+    def __init__(self, server, tool_tab, container, opt=None):
+        """``opt``: the ToolOptPanel; its *Confirm tool* is repeated here, under the fields."""
+        self.server, self.tab, self.opt = server, tool_tab, opt
         self._busy = False
         self._dyn: list = []
         self._nominal: dict = {}
@@ -25,6 +26,16 @@ class ExtensionMirror:
                 "and the tool's rough placement. Edits here change the tool._"
             )
             tool_extension.build(gui, self)
+            self.confirm_md = gui.add_markdown("", visible=False)
+            self.confirm_btn = gui.add_button(
+                "Confirm tool",
+                color="green",
+                visible=False,
+                hint="confirm step 3 Tool with these extension settings (the planners need it confirmed)",
+            )
+        if opt is not None:
+            opt.confirm_widgets.append((self.confirm_md, self.confirm_btn))
+            self.confirm_btn.on_click(opt.confirm_now)
         for w in tool_extension.widgets(self):
             w.on_update(self._edit)
         tool_tab.refresh_listeners.append(self.refresh)
@@ -38,6 +49,12 @@ class ExtensionMirror:
             self.tab._after(full=True)  # the Tool tab refreshes, and with it this copy
         else:
             self.refresh()
+        self._changed()
+
+    def _changed(self) -> None:
+        """The tool changed here: show *Confirm tool* at once (the watcher would take a second)."""
+        if self.opt is not None:
+            self.opt.update_confirm()
 
     def _on_nominal(self, key: str, scale: float):
         def handler(event) -> None:
@@ -47,6 +64,7 @@ class ExtensionMirror:
             if self.tab._commit(lambda d: d["extension"]["nominal"].update({key: val}), event):
                 self.tab.set_nominal_slider(key, val)
                 self.tab._after()
+                self._changed()
 
         return handler
 

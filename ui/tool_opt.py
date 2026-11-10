@@ -134,12 +134,8 @@ class ToolOptPanel:
                 )
                 self.update_confirm()
 
-        @self.confirm_btn.on_click
-        def _(e) -> None:
-            if self.confirm_tool is not None:
-                self.confirm_tool()
-                notify(e, "Confirmed", "step 3 Tool is confirmed with the applied design", ok=True)
-            self.update_confirm()
+        self.confirm_widgets = [(self.confirm_md, self.confirm_btn)]  # + the extension copy's
+        self.confirm_btn.on_click(self.confirm_now)
 
         @self.save_lib.on_click
         def _(e) -> None:
@@ -149,15 +145,24 @@ class ToolOptPanel:
                 return notify(e, "Save failed", str(err))
             notify(e, "Saved", str(path), ok=True)
 
+    def confirm_now(self, event=None) -> None:
+        """*Confirm tool*: confirm step 3 Tool from the Optimize tab."""
+        if self.confirm_tool is not None:
+            self.confirm_tool()
+            notify(event, "Confirmed", "step 3 Tool is confirmed with the current tool", ok=True)
+        self.update_confirm()
+
     def update_confirm(self) -> None:
-        """Show *Confirm tool* while step 3 Tool is not confirmed in its current state (after
-        **Apply to tool**, or any tool edit); the line says what the step's state is."""
+        """Show every *Confirm tool* (under Apply to tool and in the Tool extension copy) while
+        step 3 Tool is not confirmed in its current state (after **Apply to tool**, or any tool
+        edit); the line says what the step's state is."""
         state = self.tool_state() if self.tool_state is not None else "confirmed"
         show = state != "confirmed" and self.s.tool is not None
-        self.confirm_btn.visible = self.confirm_md.visible = show
-        if show:
-            why = "changed since you confirmed it" if state == "changed" else "not confirmed yet"
-            self.confirm_md.content = f"_Step **3 Tool**: {why}. Confirm it here or in the Tool tab._"
+        why = "changed since you confirmed it" if state == "changed" else "not confirmed yet"
+        for md, btn in self.confirm_widgets:
+            btn.visible = md.visible = show
+            if show:
+                md.content = f"_Step **3 Tool**: {why}. Confirm it here or in the Tool tab._"
 
     def tube_od(self) -> float | None:
         """The chosen standard tube OD (mm), or None (the tool's own radius)."""

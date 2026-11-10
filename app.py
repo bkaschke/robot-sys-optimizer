@@ -235,7 +235,9 @@ def build_app(
         tool_opt = ToolOptPanel(server, session, apply_values, on_solution=new_results)
         from ui.tool_ext_mirror import ExtensionMirror
 
-        tool_ext_copy = ExtensionMirror(server, tool, tool_opt.ext_slot)  # 3 Tool -> Extension, here too
+        tool_ext_copy = ExtensionMirror(
+            server, tool, tool_opt.ext_slot, tool_opt
+        )  # 3 Tool -> Extension, here too
         from ui.cycle_ui import CyclePanel
 
         cycle = CyclePanel(server, session)  # v8 T6

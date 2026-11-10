@@ -182,6 +182,11 @@ def test_tool_geometry_confirm_and_extension_copy():
         # an edit in the copy changes the tool and the Tool tab
         copy.radius.value = 33.0
         assert s.tool.extension.radius == pytest.approx(0.033) and tool.radius.value == pytest.approx(33.0)
+        # ... and its own Confirm tool shows at once, right under the copied fields
+        assert copy.confirm_btn.visible and "changed" in copy.confirm_md.content
+        opt.confirm_now()
+        assert step_state(s, "Tool Setup") == "confirmed"
+        assert not copy.confirm_btn.visible and not opt.confirm_btn.visible
         # an edit in the Tool tab shows in the copy
         tool.radius.value = 37.0
         assert copy.radius.value == pytest.approx(37.0)
