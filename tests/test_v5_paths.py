@@ -8,6 +8,7 @@ import viser
 from core.export import station_pose
 from core.paths import CSV_COLUMNS, ordered_sequences, path_csv, trace
 from core.patterns import PATTERNS, PatternSettings, crossing_lifts, order_points
+from tests.helpers import confirm_all
 
 GRID = np.array([(x, y, 0.0) for y in np.arange(0, 0.2, 0.02) for x in np.arange(0, 0.3, 0.02)])
 UP = np.tile((0, 0, 1.0), (len(GRID), 1))
@@ -71,6 +72,7 @@ def _plan(app, example: str):
     assert app["project"].load_example(example)
     stp = app["stations"]
     stp.zoning.value = stp.zoning.options[1]  # zones: one configuration per group
+    confirm_all(stp)
     stp.start(block=True)
     sol = min(s.results, key=lambda r: (len(r.unreached), r.cost))
     assert not sol.unreached and len(sol.stations) >= 2
@@ -159,6 +161,7 @@ def test_lifted_moves_leave_the_surface(app, rail, monkeypatch):
     assert plan.length() == 0.0  # lifted moves are not surface path
 
 
+@pytest.mark.slow
 def test_gui_pattern_fields_and_playback_moves_the_carrier(app, rail):
     s, sol, _ = rail
     sim = app["sim"]

@@ -28,6 +28,10 @@ def main(name: str) -> None:
     try:
         app = build_app(server)
         assert app["project"].load_example(name), f"no example {name}"
+        from ui.staleness import STEP_COMPONENTS, confirm_step
+
+        for step in STEP_COMPONENTS:  # the planner needs a confirmed setup (v7 round 2, T5)
+            confirm_step(app["session"], step)
         pr = cProfile.Profile()
         t0 = time.time()
         pr.enable()

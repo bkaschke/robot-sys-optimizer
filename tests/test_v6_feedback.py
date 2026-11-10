@@ -9,6 +9,7 @@ from core.export import station_pose
 from core.feasibility import PointResult
 from core.paths import PathSample, _Tracer, trace
 from opt.tool_geometry import top_designs
+from tests.helpers import confirm_all
 
 
 @pytest.fixture(scope="module")
@@ -151,11 +152,13 @@ def test_colliding_surface_move_becomes_a_joint_move():
     assert tr.around([hit, ok], 0, None, np.zeros(6), rb) == [hit, ok]
 
 
+@pytest.mark.slow
 def test_carrier_drives_between_stops_without_home(app):
     s = app["session"]
     assert app["project"].load_example("rail_long_part")
     stp = app["stations"]
     stp.zoning.value = stp.zoning.options[1]
+    confirm_all(stp)
     stp.start(block=True)
     sol = min(s.results, key=lambda r: (len(r.unreached), r.cost))
     assert len(sol.stations) >= 2

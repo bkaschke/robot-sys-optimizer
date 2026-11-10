@@ -182,6 +182,7 @@ def test_missing_mesh_is_reported():
 # --- planner with a multi-body mobile robot -------------------------------------------------------
 
 
+@pytest.mark.slow
 def test_plan_with_custom_amr():
     from core.collision import CollisionScene
     from core.feasibility import FeasibilityChecker

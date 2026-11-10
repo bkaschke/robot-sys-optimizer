@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 import viser
 
+from tests.helpers import confirm_all
 from ui.optimize import CHECK_FROM, INSPECT_SOURCES
 
 
@@ -20,9 +21,11 @@ def app():
     server.stop()
 
 
+@pytest.mark.slow
 def test_check_uses_the_plan_stops(app):
     s, opt = app["session"], app["optimize"]
     assert app["project"].load_example("mobile_amr")
+    confirm_all(app["stations"])
     app["stations"].start(block=True)
     sol = app["results"].selected()
     assert sol is not None and not sol.unreached
@@ -67,6 +70,7 @@ def test_arrows_step_and_move_the_robot(app):
     assert int(opt.pick.value) == len(opt._results()) - 2
 
 
+@pytest.mark.slow
 def test_switch_between_plans(app):
     s, res, sim = app["session"], app["results"], app["sim"]
     assert len(s.results) >= 2, "the mobile example offers plans for several stop counts"

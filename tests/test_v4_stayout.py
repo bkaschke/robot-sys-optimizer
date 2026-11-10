@@ -9,6 +9,7 @@ from core.collision import CollisionScene
 from core.robot import Robot
 from core.schema import Pose, Primitive
 from core.stayout import carrier_clear, obstacles, scene_entries
+from tests.helpers import confirm_all
 from ui.staleness import solution_changes
 
 
@@ -46,9 +47,11 @@ def app():
     server.stop()
 
 
+@pytest.mark.slow
 def test_planner_keeps_carrier_and_arm_clear(app):
     s = app["session"]
     assert app["project"].load_example("rail_long_part")
+    confirm_all(app["stations"])
     app["stations"].start(block=True)
     sol0 = min(s.results, key=lambda r: (len(r.unreached), r.cost))
     c = s.carrier()
@@ -57,6 +60,7 @@ def test_planner_keeps_carrier_and_arm_clear(app):
     centre = body.T[:3, 3] + np.array([0.0, 0.0, 0.3])
     s.stayouts = [_box_at(centre, 0.4, "on_the_rail")]  # right where the first carriage stood
     assert "stay-out zones" in solution_changes(s, sol0)  # the old plan is now out of date
+    confirm_all(app["stations"])
     app["stations"].start(block=True)
     sol = min(s.results, key=lambda r: (len(r.unreached), r.cost))
     obs = s.obstacles()

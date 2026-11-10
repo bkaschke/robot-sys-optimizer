@@ -6,6 +6,7 @@ import pytest
 import viser
 
 from opt.areas import _proposals, components, grow, neighbour_graph, split_stops
+from tests.helpers import confirm_all
 
 LINE = np.array([(x, 0.0, 0.0) for x in np.linspace(-3, 3, 25)])
 
@@ -59,11 +60,13 @@ def _pieces(s, sol):
     ]
 
 
+@pytest.mark.slow
 def test_mobile_plans_have_one_area_per_stop(app):
     s = app["session"]
     assert app["project"].load_example("mobile_amr")
     stp = app["stations"]
     assert stp.areas.value
+    confirm_all(stp)
     stp.start(block=True)
     multi = [r for r in s.results if len(r.stations) >= 3]
     assert multi
@@ -109,10 +112,12 @@ def test_mobile_plans_have_one_area_per_stop(app):
     assert r._areas
 
 
+@pytest.mark.slow
 def test_areas_off_keeps_the_planner_assignment(app):
     s = app["session"]
     assert app["project"].load_example("mobile_amr")
     app["stations"].areas.value = False
+    confirm_all(app["stations"])
     app["stations"].start(block=True)
     assert max(max(_pieces(s, sol)) for sol in s.results) > 1  # interleaved without it
     app["stations"].areas.value = True

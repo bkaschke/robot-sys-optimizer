@@ -29,7 +29,7 @@ from core.transforms import make_T
 from opt.cost import cost_breakdown, path_length
 from opt.reachability import coverage_matrix
 from opt.set_cover import _solve, greedy_cover, min_stations, set_cover  # noqa: F401
-from opt.station_checks import _nn, _robust, order_by, path_travel, sites_start, verify  # noqa: F401
+from opt.station_checks import CheckMemo, _nn, _robust, order_by, path_travel, sites_start, verify  # noqa: F401
 
 
 @dataclass
@@ -54,6 +54,9 @@ class PlannerSettings:
     require_all: bool = False  # must be met: every point reached
     require_one_config: bool = False  # must be met: no configuration change inside a group (zoning)
     patience: int = 2  # stop adding stops after this many counts without a better plan
+    first_k: int = 1  # v7 round 2 (rules planner): smallest station count tried
+    skip_below_min: bool = False  # no plan when the map says max_stations stops cannot cover it
+    exclude: tuple = ()  # station value dicts the set cover may not use (alternative covers)
     # coarse to fine (opt.sampling): set cover and refinement on a spread-out subsample of the
     # targets (a quarter, 60..150 points; all of them below 60); verification uses every point
     sample: bool = True
@@ -224,6 +227,10 @@ def refine_station(
 # --- driver ----------------------------------------------------------------------------------------
 
 
+def _same_stop(v: dict, e: dict) -> bool:
+    return all(abs(float(x) - float(e.get(k, np.inf))) < 1e-6 for k, x in v.items())
+
+
 def plan_stations(
     rmap,
     checker: FeasibilityChecker,
@@ -267,6 +274,9 @@ def plan_stations(
     keep = prune(covered, mu / rmap.max_manip, st.max_candidates)
     cand = [cand[i] for i in keep]
     covered, mu_n = covered[keep], mu[keep] / rmap.max_manip
+    if st.exclude:  # alternative set covers (opt.rules_plan): leave these stops out
+        drop = [i for i, v in enumerate(cand) if any(_same_stop(v, e) for e in st.exclude)]
+        covered[drop], mu_n[drop] = False, 0.0
     from opt.sampling import farthest_points, repair_cover, sample_size
 
     n_t = len(t.ids)
@@ -277,10 +287,15 @@ def plan_stations(
     cov_s, mu_s = covered[:, S], mu_n[:, S]
     out = []
     prev, checker.cancelled = checker.cancelled, cancelled  # every exact check polls Cancel
+    prev_memo, checker.memo = checker.memo, CheckMemo()  # exact checks reused within this plan
     try:
-        k_min = min(min_stations(cov_s, st.time_limit_s, cancelled), st.max_stations)
+        k_true = min_stations(cov_s, st.time_limit_s, cancelled)
+        if st.skip_below_min and k_true > st.max_stations:
+            say("too few stations for the map", 1.0)
+            return []
+        k_min = min(k_true, st.max_stations)
         start = sites_start(sites, T_world_base0)
-        ks = list(range(k_min, st.max_stations + 1))
+        ks = list(range(max(k_min, st.first_k), st.max_stations + 1))
         zoning = st.zoning or st.require_one_config
 
         def make_job(k: int):
@@ -436,6 +451,6 @@ def plan_stations(
         say("cancelled", 1.0)
         return sorted(out, key=lambda sr: (bool(sr[0].violations), sr[0].cost))
     finally:
-        checker.cancelled = prev
+        checker.cancelled, checker.memo = prev, prev_memo
     say("done", 1.0)
     return sorted(out, key=lambda sr: (bool(sr[0].violations), sr[0].cost))

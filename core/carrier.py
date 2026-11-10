@@ -102,7 +102,9 @@ def body_list(base: Base) -> list[Primitive]:
     """The carrier's bodies with unique names. Legacy chassis/riser/track are converted:
     the riser sits on the chassis top, the track is centred on the rail travel range."""
     if base.bodies:
-        out = list(base.bodies)
+        from core.carrier_axis import stretched
+
+        out = stretched(base, list(base.bodies))  # v7 round 2: bodies that follow an axis length
     else:
         out = []
         if base.chassis is not None:

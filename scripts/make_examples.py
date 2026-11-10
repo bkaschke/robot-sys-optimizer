@@ -53,12 +53,13 @@ def rail_base() -> Base:
         carrier="rail",
         pose=Pose(xyz=(0.0, 0.15, 0.0)),
         bodies=[
-            Primitive(name="track", shape="box", size=(7.0, 0.3, 0.1), attach="fixed"),
+            Primitive(name="track", shape="box", size=(6.6, 0.3, 0.1), attach="fixed", stretch="x"),
             Primitive(name="carriage", shape="box", size=(0.5, 0.5, 0.15), pose=Pose(xyz=(0, 0, 0.1))),
             Primitive(name="riser", shape="cylinder", radius=0.15, height=0.45, pose=Pose(xyz=(0, 0, 0.25))),
         ],
         T_mount=Pose(xyz=(0.0, 0.0, 0.7)),
         joints=CarrierJoints(x=(-3.0, 3.0)),
+        axis_length_m={"x": 6.6},  # v7 round 2: travel +-(3.3 - 0.25 carriage - 0.05 end stop)
         keepouts=[WALL],
         standoff_m=Standoffs(carrier_part_min=0.3, carrier_part_preferred=0.4, carrier_env_min=0.1),
     )
@@ -145,7 +146,12 @@ def gantry_base() -> Base:
     ]
     beams = [
         Primitive(
-            name=f"beam_{t}", shape="box", size=(5.8, 0.2, 0.25), pose=Pose(xyz=(0, y, 0.0)), attach="fixed"
+            name=f"beam_{t}",
+            shape="box",
+            size=(5.4, 0.2, 0.25),
+            pose=Pose(xyz=(0, y, 0.0)),
+            attach="fixed",
+            stretch="x",
         )
         for t, y in (("a", -1.8), ("b", 1.8))
     ]
@@ -162,12 +168,14 @@ def gantry_base() -> Base:
                 size=(0.3, 3.4, 0.25),
                 pose=Pose(xyz=(0, 0, 0.0)),
                 attach="x_axis",
+                stretch="y",
             ),
             Primitive(name="carriage", shape="box", size=(0.5, 0.5, 0.25), pose=Pose(xyz=(0, 0, -0.25))),
             Primitive(name="drop", shape="cylinder", radius=0.12, height=0.6, pose=Pose(xyz=(0, 0, -0.85))),
         ],
         T_mount=Pose(xyz=(0.0, 0.0, -0.85), rpy=(np.pi, 0.0, 0.0)),  # inverted under the drop
         joints=CarrierJoints(x=(-2.4, 2.4), y=(-1.4, 1.4)),
+        axis_length_m={"x": 5.4, "y": 3.4},  # v7 round 2: the same travel, from the lengths
         standoff_m=Standoffs(carrier_part_min=0.3, carrier_part_preferred=0.4, carrier_env_min=0.1),
     )
 
@@ -178,7 +186,12 @@ def floor_xy_base() -> Base:
     the carriage. Works the -y side of the wall and its end."""
     rails = [
         Primitive(
-            name=f"x_rail_{t}", shape="box", size=(6.0, 0.15, 0.08), pose=Pose(xyz=(0, y, 0)), attach="fixed"
+            name=f"x_rail_{t}",
+            shape="box",
+            size=(6.1, 0.15, 0.08),
+            pose=Pose(xyz=(0, y, 0)),
+            attach="fixed",
+            stretch="x",
         )
         for t, y in (("a", -0.75), ("b", 0.75))
     ]
@@ -200,6 +213,8 @@ def floor_xy_base() -> Base:
         ],
         T_mount=Pose(xyz=(0.0, 0.0, 0.78)),
         joints=CarrierJoints(x=(-2.8, 2.8), y=(-0.35, 0.35)),
+        # v7 round 2: x travel from the X rail length; the bridge spans the rails, so y stays set
+        axis_length_m={"x": 6.1},
         standoff_m=Standoffs(carrier_part_min=0.3, carrier_part_preferred=0.4, carrier_env_min=0.1),
     )
 

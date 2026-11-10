@@ -128,6 +128,7 @@ def test_one_station_cannot_cover_the_rail(rail_scene):
     assert sum(r.status != "unreachable" for r in res) < len(t.ids)
 
 
+@pytest.mark.slow
 def test_planner_finds_two_stations_full_coverage(rail_scene):
     rmap, checker, t, fp = rail_scene
     streamed = []

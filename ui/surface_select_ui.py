@@ -239,3 +239,12 @@ class SurfaceTools:
                 self.dab(locs[0], self._sign(mod))
         elif t in POINT_TOOLS:
             self.tab.tools.on_click(t, mesh, o, d, event)
+        else:  # Off, Box, By normal: a click does nothing; say how to select
+            from ui.log_panel import log
+
+            how = {
+                "Box +": "drag a rectangle with the Box tool",
+                "Box −": "drag a rectangle with the Box tool",
+                "By normal": "use *Select by normal*",
+            }.get(t, "choose a *Tool* (e.g. **Fill +**) under Targets → Select surface & points")
+            log(f"Click on the part: nothing selected; {how}.", "info")

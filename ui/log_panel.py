@@ -9,6 +9,8 @@ notification, so errors shown as toasts also land here.
 
 from __future__ import annotations
 
+import html
+import re
 import threading
 import time
 from collections import Counter
@@ -16,6 +18,16 @@ from collections import Counter
 import viser
 
 ICONS = {"error": "✘", "warn": "⚠", "done": "✔", "info": "•"}
+# row colours per level (light theme, dark theme), v7 round 2 T7
+COLORS = {
+    "error": ("#d32f2f", "#ef5350"),
+    "warn": ("#b26a00", "#ffb74d"),
+    "done": ("#2e7d32", "#66bb6a"),
+    "info": ("#6b6b6b", "#a0a0a0"),
+}
+_BOLD = re.compile(r"\*\*(.+?)\*\*")
+_ITALIC = re.compile(r"(?<![\w])_(.+?)_(?![\w])")
+_CODE = re.compile(r"`([^`]+)`")
 MAX_KEEP = 300  # entries kept
 MAX_SHOW = 60  # entries shown (newest first)
 WIDTH, HEIGHT = 620.0, 210.0
@@ -25,6 +37,7 @@ MIN_HEIGHT = 64.0  # minimized: the newest message only
 REASONS = {
     "no_ik": "out of reach: no arm pose reaches it at any allowed tool angle",
     "joint_limits": "only reachable beyond the joint limits (incl. the margin)",
+    "singular": "only reachable close to a singularity",
     "collision": "every arm pose collides (part, carrier, stay-out zone or floor)",
     "": "not covered by any stop",
 }
@@ -32,6 +45,35 @@ REASONS = {
 _lock = threading.Lock()
 _entries: list[tuple[float, str, str]] = []
 _panel: LogPanel | None = None
+_dark = False
+
+
+def set_dark(on: bool) -> None:
+    """Dark theme colours (app.apply_theme calls this when the theme changes)."""
+    global _dark
+    _dark = bool(on)
+    if _panel is not None:
+        _panel.render()
+
+
+def to_html(msg: str) -> str:
+    """A log message as safe HTML: everything escaped first, then the little markdown the log
+    uses (**bold**, _italic_, `code`) turned into tags."""
+    text = html.escape(msg, quote=True)
+    text = _BOLD.sub(r"<b>\1</b>", text)
+    text = _CODE.sub(r"<code>\1</code>", text)
+    return _ITALIC.sub(r"<i>\1</i>", text)
+
+
+def row_html(t: float, level: str, msg: str, dark: bool | None = None) -> str:
+    """One coloured log row (the colour of its level, light or dark theme)."""
+    color = COLORS.get(level, COLORS["info"])[int(_dark if dark is None else dark)]
+    stamp = time.strftime("%H:%M:%S", time.localtime(t))
+    return (
+        f'<div style="color:{color};margin:1px 0;font-size:0.85em;line-height:1.35">'
+        f'<span style="opacity:0.7;font-family:monospace">{stamp}</span> {ICONS.get(level, "•")} '
+        f"{to_html(msg)}</div>"
+    )
 
 
 def took(since: float) -> str:
@@ -93,7 +135,7 @@ class LogPanel:
         self.panel = gui.add_panel()
         with self.panel.add_tab("Log"):
             self.setup = gui.add_markdown("")
-            self.body = gui.add_markdown("")
+            self.body = gui.add_html("")  # coloured rows (T7)
             self.clear_btn = gui.add_button("Clear log", hint="remove all messages")
             self.min_btn = gui.add_button("Minimize log", hint="show only the newest message")
         self.clear_btn.on_click(lambda e: clear())
@@ -134,21 +176,21 @@ class LogPanel:
     def render(self) -> None:
         rows = entries()[::-1][: 1 if self.minimized else MAX_SHOW]
         if not rows:
-            self.body.content = "_No messages yet._"
+            self.body.content = '<div style="opacity:0.6;font-size:0.85em"><i>No messages yet.</i></div>'
             return
-        self.body.content = "  \n".join(
-            f"`{time.strftime('%H:%M:%S', time.localtime(t))}` {ICONS[lv]} {msg}" for t, lv, msg in rows
-        )
+        self.body.content = "".join(row_html(t, lv, msg) for t, lv, msg in rows)
 
 
-def plan_log(s, best, cancelled: bool = False, since: float | None = None) -> None:
+def plan_log(
+    s, best, cancelled: bool = False, since: float | None = None, what: str = "Station planning"
+) -> None:
     """Station plan finished: its best solution, and why its unreached points failed."""
     if best is None:
-        log("Station planning finished: **no solution found**.", "warn", since)
+        log(f"{what} finished: **no solution found**.", "warn", since)
         return
     head = "cancelled, best so far" if cancelled else "finished, best"
     log(
-        f"Station planning {head}: **{best.label}**, cost {best.cost:.2f} ({len(s.results)} plan(s) listed).",
+        f"{what} {head}: **{best.label}**, cost {best.cost:.2f} ({len(s.results)} plan(s) listed).",
         "warn" if cancelled else "done",
         since,
     )

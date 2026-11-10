@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 import viser
 
+from tests.helpers import confirm_all
 from ui.session import Session, load_project, save_project
 
 
@@ -33,6 +34,7 @@ def app():
     assert state["carrier"].commit()
     st = state["stations"]
     st.max_stations.value = 4
+    confirm_all(st)
     st.start(block=True)
     yield state
     server.stop()

@@ -72,7 +72,8 @@
           ]
         },
         "mesh": null,
-        "units": "m"
+        "units": "m",
+        "stretch": ""
       },
       {
         "shape": "box",
@@ -98,7 +99,8 @@
           ]
         },
         "mesh": null,
-        "units": "m"
+        "units": "m",
+        "stretch": ""
       },
       {
         "shape": "box",
@@ -124,7 +126,8 @@
           ]
         },
         "mesh": null,
-        "units": "m"
+        "units": "m",
+        "stretch": ""
       },
       {
         "shape": "box",
@@ -150,12 +153,13 @@
           ]
         },
         "mesh": null,
-        "units": "m"
+        "units": "m",
+        "stretch": ""
       },
       {
         "shape": "box",
         "size": [
-          5.8,
+          5.4,
           0.2,
           0.25
         ],
@@ -176,12 +180,13 @@
           ]
         },
         "mesh": null,
-        "units": "m"
+        "units": "m",
+        "stretch": "x"
       },
       {
         "shape": "box",
         "size": [
-          5.8,
+          5.4,
           0.2,
           0.25
         ],
@@ -202,7 +207,8 @@
           ]
         },
         "mesh": null,
-        "units": "m"
+        "units": "m",
+        "stretch": "x"
       },
       {
         "shape": "box",
@@ -228,7 +234,8 @@
           ]
         },
         "mesh": null,
-        "units": "m"
+        "units": "m",
+        "stretch": "y"
       },
       {
         "shape": "box",
@@ -254,7 +261,8 @@
           ]
         },
         "mesh": null,
-        "units": "m"
+        "units": "m",
+        "stretch": ""
       },
       {
         "shape": "cylinder",
@@ -276,7 +284,8 @@
           ]
         },
         "mesh": null,
-        "units": "m"
+        "units": "m",
+        "stretch": ""
       }
     ],
     "joints": {
@@ -316,7 +325,13 @@
     "fixed_standoff_m": null,
     "facings": [],
     "part_sides": [],
-    "align_to_part": false
+    "align_to_part": false,
+    "axis_length_m": {
+      "x": 5.4,
+      "y": 3.4
+    },
+    "end_stop_m": 0.05,
+    "manual_travel": false
   },
   "stayouts": [],
   "end_effector": {
@@ -2006,9 +2021,9 @@
     "q": [
       0.0,
       -1.5707963267948966,
-      1.5707963267948966,
+      0.0,
       -1.5707963267948966,
-      -1.5707963267948966,
+      0.0,
       0.0
     ],
     "selection_mesh": null,

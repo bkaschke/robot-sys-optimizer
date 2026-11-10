@@ -37,6 +37,10 @@ def _yaw_about_world_z(R: np.ndarray) -> np.ndarray:
     return rpy_to_matrix((0.0, 0.0, yaw))
 
 
+# click modifiers the Targets tools understand (plain, Shift = add, Ctrl / Cmd = invert + / -)
+CLICK_MODIFIERS = (None, "shift", "cmd/ctrl", "cmd/ctrl+shift")
+
+
 class CellTab:
     def __init__(self, server: viser.ViserServer, session: Session, jog_container=None):
         self.server = server
@@ -49,6 +53,7 @@ class CellTab:
         self.part_listeners: list = []  # called after the part mesh/units change
         self.pose_listeners: list = []  # called after the part is moved (gizmo or fields)
         self.on_part_click = None  # set by the Targets tab: fn(event)
+        self.on_part_alt_click = None  # Alt+click on the part (Move mode, app.py)
         self._jog_latest = Latest(self._on_slider)  # slider drags: newest value only
 
         with server.gui.add_folder("Robot"):
@@ -94,6 +99,7 @@ class CellTab:
                 "Units", tuple(UNIT_SCALE), initial_value="mm", hint="units of the current part mesh"
             )
             self.part_pose = PoseWidgets(server, PART_NODE, np.eye(4), self._on_part_pose)
+        self.part_click_blocked = False  # True only while Move mode moves the part (T11)
 
         self._wire()
         self.refresh()
@@ -320,9 +326,39 @@ class CellTab:
         self.part_handle = self.server.scene.add_mesh_simple(  # double-sided: never see-through
             f"{PART_NODE}/mesh", m.vertices, m.faces, color=PART_COLOR, side="double"
         )
-        self.part_handle.on_click(self._part_clicked)
+        from ui.widgets import GizmoStyle
+
+        GizmoStyle.fit(self.part_pose.gizmo, float(np.max(m.bounds[1] - m.bounds[0])))  # T10
+        self.sync_part_click()
         for fn in self.part_listeners:
             fn()
+
+    def sync_part_click(self) -> None:
+        """The part takes clicks (face selection, single points, picking), with or without
+        Shift / Ctrl: viser 1.1.1 only reports the modifier combinations a handler registers
+        (a plain ``on_click`` gets plain clicks only), so each one the selection tools use is
+        registered. Alt+click starts Move mode. The clicks pause only while Move mode moves
+        the part itself (its gizmo then gets the pointer)."""
+        h = self.part_handle
+        if h is None:
+            return
+        want = not self.part_click_blocked
+        has = bool(h._impl.click_cb)
+        if want and not has:
+            for mod in CLICK_MODIFIERS:
+                h.on_click(modifier=mod)(self._part_clicked)
+            h.on_click(modifier="alt")(self._part_alt_clicked)  # T11: Alt+click = Move
+        elif has and not want:
+            h.remove_click_callback("all")
+
+    def block_part_clicks(self, on: bool) -> None:
+        """Move mode on the part: clicks pause so the gizmo can be grabbed anywhere on it."""
+        self.part_click_blocked = bool(on)
+        self.sync_part_click()
+
+    def _part_alt_clicked(self, event) -> None:
+        if self.on_part_alt_click is not None:
+            self.on_part_alt_click(event)
 
     def _part_clicked(self, event) -> None:
         if self.on_part_click is not None:

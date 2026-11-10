@@ -20,46 +20,15 @@ from core.carrier import migrate
 from core.schema import Base, CarrierJoints, Keepout, Pose, Primitive, Standoffs
 from core.standoff import Zones, footprint
 from core.transforms import make_T, matrix_to_wxyz, pose_to_matrix
-from ui import carrier_mobile
+from ui import carrier_axis, carrier_mobile
 from ui.carrier_bodies import BodyEditor
 from ui.session import Session
 from ui.widgets import Latest, notify
 
 ROOT = "/cell/carrier"
 
-DEFAULTS = {
-    "rail": Base(
-        mode="movable",
-        carrier="rail",
-        pose=Pose(xyz=(0, -0.8, 0)),
-        track=Primitive(shape="box", size=(7.0, 0.3, 0.1)),
-        chassis=Primitive(shape="box", size=(0.5, 0.5, 0.15)),
-        riser=Primitive(shape="cylinder", radius=0.15, height=0.55),
-        T_mount=Pose(xyz=(0, 0, 0.7)),
-        joints=CarrierJoints(x=(-3.0, 3.0)),
-        standoff_m=Standoffs(carrier_part_min=0.3, carrier_part_preferred=0.4),
-    ),
-    "gantry": Base(
-        mode="movable",
-        carrier="gantry",
-        pose=Pose(xyz=(0, 0, 2.5)),
-        chassis=Primitive(shape="box", size=(0.4, 0.4, 0.15)),
-        T_mount=Pose(rpy=(np.pi, 0, 0)),
-        joints=CarrierJoints(x=(-1.5, 1.5), y=(-1.0, 1.0)),
-        standoff_m=Standoffs(carrier_part_min=0.3, carrier_part_preferred=0.4),
-    ),
-    "mobile": Base(
-        mode="movable",
-        carrier="mobile",
-        chassis=Primitive(shape="box", size=(1.2, 0.8, 0.4)),
-        riser=Primitive(shape="cylinder", radius=0.15, height=0.3),
-        T_mount=Pose(xyz=(0.2, 0, 0.7)),
-        joints=CarrierJoints(x=(-4.0, 4.0), y=(-4.0, 4.0), yaw_deg=(-180, 180)),
-        standoff_m=Standoffs(carrier_part_min=0.3, carrier_part_preferred=0.5),
-        localization_m=0.01,
-        localization_deg=1.0,
-    ),
-}
+from ui.carrier_defaults import DEFAULTS  # noqa: E402,F401 (re-exported)
+
 BODY_COLOR, FIXED_COLOR, PICKED_COLOR = (120, 130, 150), (150, 140, 120), (90, 140, 220)
 
 
@@ -109,6 +78,7 @@ class CarrierPanel:
             self.ty = gui.add_vector2("Travel y (mm)", (-1000.0, 1000.0), step=10.0)
             self.tyaw = gui.add_vector2("Yaw range (deg)", (-180.0, 180.0), step=5.0)
             self.lift = gui.add_vector2("Lift range (mm, 0 0 = none)", (0.0, 0.0), step=10.0)
+            carrier_axis.build(gui, self)  # v7 round 2: rail / gantry lengths (T13)
             carrier_mobile.build_align(gui, self)
         self.editor = BodyEditor(server, self)
         self.safety_folder = gui.add_folder("Standoff and safety", expand_by_default=False)
@@ -135,7 +105,7 @@ class CarrierPanel:
             self.commit(e)
 
         self.locked = False
-        for w in (self.mode, self.kind, *carrier_mobile.widgets(self)):
+        for w in (self.mode, self.kind, *carrier_mobile.widgets(self), *carrier_axis.widgets(self)):
             w.on_update(lambda e: self.update_visibility())
         self.load(session.base)
         self.refresh()
@@ -156,6 +126,7 @@ class CarrierPanel:
         self.tyaw.visible = movable and kind == "mobile"
         self.loc.visible = movable and kind == "mobile"
         carrier_mobile.show(self, movable, kind)
+        carrier_axis.show(self, movable, kind)
         _label(
             self.tx,
             "Planner search x (mm)"
@@ -210,6 +181,7 @@ class CarrierPanel:
             self.loc.value = (b.localization_m * 1000, b.localization_deg)
             carrier_mobile.load(self, b)
             self.bodies = list(b.bodies)
+            carrier_axis.load(self, b)
             self.mount_pose = b.T_mount
             self._dof_sig = None  # next refresh re-reads the slider values from the base pose
         finally:
@@ -249,6 +221,7 @@ class CarrierPanel:
             localization_m=self.loc.value[0] / 1000,
             localization_deg=self.loc.value[1],
             **carrier_mobile.collect(self, kind),
+            **carrier_axis.collect(self, kind),
         )
 
     def realign(self) -> None:
@@ -273,7 +246,7 @@ class CarrierPanel:
 
     def commit(self, event=None) -> bool:
         try:
-            base = self.collect()
+            base = carrier_axis.apply(self, self.collect())  # stretched bodies, computed travel
             if base.mode == "movable":
                 c = self._carrier(base)
                 for k in range(len(c.specs)):
@@ -283,6 +256,8 @@ class CarrierPanel:
             notify(event, "Invalid base settings", msg)
             return False
         self.s.base = base
+        self.editor.sync()  # stretched body sizes
+        self.update_visibility()
         self.realign()  # no-op unless the track follows the part
         self.refresh()
         return True

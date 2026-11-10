@@ -39,6 +39,7 @@ class ExportPanel:
             )
             self.urdf = gui.add_button("Optimized tool URDF (zip)")
             self.report = gui.add_button("HTML report")
+            self.gate_md = gui.add_markdown("", visible=False)  # why the exports are disabled (T16)
             self.info = gui.add_markdown("_Files are saved to the project folder's export/ directory._")
         self.csv.on_click(lambda e: self._run(e, self.export_csv))
         self.uframes.on_click(lambda e: self._run(e, self.export_userframes))

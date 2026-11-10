@@ -10,6 +10,7 @@ from scipy.spatial.transform import Rotation
 
 from core.transforms import make_T, rpy_to_matrix
 from core.userframe import MATRIX_COLUMNS, base_to_part, orientation, userframe_csv
+from tests.helpers import confirm_all
 
 
 def test_conventions_rebuild_the_rotation():
@@ -43,9 +44,11 @@ def app():
     server.stop()
 
 
+@pytest.mark.slow
 def test_userframes_put_the_targets_where_the_robot_reaches(app):
     s = app["session"]
     assert app["project"].load_example("rail_long_part")
+    confirm_all(app["stations"])
     app["stations"].start(block=True)
     sol = app["results"].selected()
     ex = app["results"].export

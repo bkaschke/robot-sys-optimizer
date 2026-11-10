@@ -7,6 +7,7 @@ import viser
 
 from core import targets as tg
 from opt.sampling import farthest_points, repair_cover, sample_size
+from tests.helpers import confirm_all
 
 
 def test_sample_size_and_spread():
@@ -40,6 +41,7 @@ def app():
     server.stop()
 
 
+@pytest.mark.slow
 def test_dense_targets_plan_on_a_subsample_and_verify_all(app, monkeypatch):
     import opt.placement as pl
 
@@ -61,6 +63,7 @@ def test_dense_targets_plan_on_a_subsample_and_verify_all(app, monkeypatch):
     )
     stp = app["stations"]
     stp.max_stations.value = 4
+    confirm_all(stp)
     stp.start(block=True)
     assert sizes and max(sizes) <= 150 and max(sizes) < n  # the coarse search
     best = min(s.results, key=lambda r: (len(r.unreached), r.cost))

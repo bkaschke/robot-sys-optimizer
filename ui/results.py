@@ -43,6 +43,7 @@ class ResultsTab:
         self._areas: list = []  # station areas painted on the part
         self._busy = False
         gui = server.gui
+        self.card = gui.add_markdown("")  # v7 round 2 (T17): summary card of the selected plan
         self.choice = gui.add_dropdown("Solution", ("(none)",))
         self.nav = gui.add_button_group("Switch plan", ("◀ previous", "next ▶"))
         self.follow = gui.add_checkbox(
@@ -219,6 +220,9 @@ class ResultsTab:
         self.compare.content = self._compare_table()
         self._drop()
         sol = self.selected()
+        from ui.summary_card import card
+
+        self.card.content = card(self.s, sol)
         if sol is None:
             self.summary.content = "_No results yet: run the station planner (Optimize tab)._"
             self.breakdown.content = ""

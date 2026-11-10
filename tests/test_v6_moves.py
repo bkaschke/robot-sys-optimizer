@@ -10,6 +10,7 @@ from core.carrier import Carrier
 from core.golden_parts import tall_wall
 from core.joint_plan import densify, plan_joint_path
 from core.schema import Project
+from tests.helpers import confirm_all
 from ui.project_panel import EXAMPLES
 
 
@@ -62,11 +63,13 @@ def app():
     server.stop()
 
 
+@pytest.mark.slow
 def test_home_moves_are_clear_and_clear_paths(app):
     s = app["session"]
     assert app["project"].load_example("rail_long_part")
     stp = app["stations"]
     stp.zoning.value = stp.zoning.options[0]  # no zoning: configuration changes inside a stop
+    confirm_all(stp)
     stp.start(block=True)
     sol = min(s.results, key=lambda r: (len(r.unreached), r.cost))
     app["results"].choice.value = next(o for o in app["results"].choice.options if sol.label in o)

@@ -80,6 +80,10 @@ class ProjectPanel:
         self.s = session
         self.on_loaded = on_loaded
         self.remember = remember
+        # v7 round 2 (T9): the app starts on an empty cell that belongs to no folder yet;
+        # autosave waits until a project is opened, created or saved (never writes the
+        # empty start-up cell over workspace/default)
+        self.untitled = False
         self._saved_json: str | None = None
         self._last_save = time.monotonic()
         self._lock = threading.Lock()
@@ -232,6 +236,28 @@ class ProjectPanel:
         _notify(e, "New study", f"{what}: {path.parent}", ok=True)
         return dest
 
+    def new_cell(self, e=None) -> Path:
+        """A new empty cell in a new folder workspace/study_<date-time>: the default robot on a
+        static base, no part, tool, targets or plans (the start-up popup's *New empty cell*).
+        The current project, if it has a folder, is saved first."""
+        from ui.session import empty_cell
+
+        if not self.untitled:
+            try:
+                self.save_now()
+            except (OSError, ValidationError, ValueError):
+                pass
+        dest = WORKSPACE / f"study_{datetime.now():%Y%m%d_%H%M%S}"
+        hooks = self.s.before_save
+        self.s.__dict__.update(empty_cell().__dict__)
+        self.s.before_save = hooks
+        self.s.project_dir = dest
+        self.on_loaded()
+        path = self.save_now(dest)
+        self.status.content = f"_Started a new empty cell in `{self.folder.value}`._"
+        _notify(e, "New cell", str(path.parent), ok=True)
+        return dest
+
     # --- saving -------------------------------------------------------------------------------
 
     def save_now(self, project_dir: Path | None = None) -> Path:
@@ -240,6 +266,7 @@ class ProjectPanel:
             raise ValueError("examples/ holds read-only templates: use 'Save as example' to change one")
         with self._lock:
             path = save_project(self.s, project_dir)
+            self.untitled = False
             self._saved_json = path.read_text(encoding="utf-8")
             self._last_save = time.monotonic()
         if self.remember:
@@ -251,7 +278,7 @@ class ProjectPanel:
     def autosave_tick(self, force: bool = False) -> bool:
         """Save if autosave is on, the interval has passed (or ``force``), and the project
         changed since the last save. Returns True when it wrote the file."""
-        if not self.autosave.value:
+        if not self.autosave.value or self.untitled:
             return False
         if not force and time.monotonic() - self._last_save < self.autosave_min.value * 60:
             return False
@@ -294,6 +321,7 @@ class ProjectPanel:
         except (OSError, ValueError, ValidationError) as err:  # session untouched on failure
             _notify(e, "Load failed", str(err)[:500])
             return False
+        self.untitled = False
         self.on_loaded()
         with self._lock:
             self._saved_json = None  # compare against the next snapshot, not the old project

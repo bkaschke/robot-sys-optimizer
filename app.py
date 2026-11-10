@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import threading
 import time
+from pathlib import Path
 
 import numpy as np
 import viser
@@ -16,11 +18,12 @@ from ui.cell import CellTab
 from ui.guide import GuideServer, add_guide_panel
 from ui.log_panel import LogPanel, log
 from ui.objects import ObjectsPanel
+from ui.open_popup import OpenPopup
 from ui.optimize import INSPECT_SOURCES, OptimizeTab
 from ui.placement import PlacementPanel
 from ui.project_panel import ProjectPanel
 from ui.results import ResultsTab
-from ui.session import PartState, Session, last_project
+from ui.session import PartState, Session, empty_cell
 from ui.simulate import SimPanel
 from ui.staleness import drop_stale_results
 from ui.stations import StationsPanel
@@ -42,6 +45,9 @@ UR_NOTICE = (
 
 def apply_theme(server: viser.ViserServer, dark: bool) -> None:
     server.gui.configure_theme(dark_mode=dark, control_width="medium", brand_color=(90, 140, 220))
+    from ui import log_panel
+
+    log_panel.set_dark(dark)  # the log's row colours follow the theme
     # grid lines: light on a dark background, grey on a light one
     cell, section = ((80, 84, 92), (120, 126, 138)) if dark else ((200, 200, 200), (140, 140, 140))
     server.scene.add_grid(
@@ -135,6 +141,11 @@ def build_app(
         objects = ObjectsPanel(server, session)
     tree.dock_left()
     tree.set_width(290)
+    jog = server.gui.add_panel()  # Jog at the bottom of the left column (v7 round 2, T6)
+    with jog.add_tab("Jog"):
+        objects.build_jog()
+    jog.dock_below(tree)  # viser: the anchor must be docked first
+    objects.jog_panel = jog
     log_panel = LogPanel(server)  # errors, finished runs, setup status, unreached points
     workflow = Workflow(server, session)
     state["workflow"] = workflow
@@ -189,6 +200,7 @@ def build_app(
     with tab_handles["Results"]:
         workflow.results_header()
         results = ResultsTab(server, session, set_base=cell.set_base)
+        optimize.build_inspect()  # v7 round 2 (T18): Inspect result lives in Results
         sim = SimPanel(  # paths along the selected solution + playback (v2 phase 5)
             server,
             session,
@@ -201,6 +213,15 @@ def build_app(
         )
     state["results"] = results
     tool_opt.planner_options = stations.options
+    workflow.gate(stations.run, stations.gate_md)  # optimizers need a confirmed setup (T5)
+    workflow.gate(stations.quick_run, stations.quick_gate_md)
+    from ui.workflow import feasibility_reason, plan_reason, result_reason
+
+    workflow.gate(optimize.run, optimize.gate_md, feasibility_reason)  # T16: disabled buttons say why
+    ex = results.export
+    workflow.gate((ex.csv, ex.uframes, ex.urdf, ex.report), ex.gate_md, result_reason(results.selected))
+    workflow.gate(sim.build_btn, sim.gate_md, plan_reason(sim.selected))
+    workflow.gate(tool_opt.run, tool_opt.gate_md)
 
     def selected_results() -> dict:
         sol = results.selected()
@@ -227,6 +248,11 @@ def build_app(
     objects.cell, objects.carrier, objects.tool = cell, carrier, tool
     objects.targets, objects.results, objects.sim = targets, results, sim
     objects.stayouts = stayouts
+    from ui.move_mode import MoveMode
+
+    objects.mover = MoveMode(server, objects.gizmo, on_commit=lambda: workflow.refresh(force=True))
+    cell.on_part_alt_click = lambda e: objects.start_move("Part", e)
+    stayouts.on_alt_click = lambda name, e: objects.start_move(f"Stay-out zone/{name}", e)
     objects.rebuild_tree()
 
     fresh: set[str] = set()  # result labels seen up to date (ui.staleness)
@@ -286,9 +312,10 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=8080)
     parser.add_argument("--dark", action="store_true", help="start in dark mode (also a checkbox in the GUI)")
     parser.add_argument("--guide-port", type=int, default=None, help="user guide port (default: --port + 1)")
-    parser.add_argument(
-        "--fresh", action="store_true", help="start with the default cell, not the last project"
-    )
+    # v7 round 2 (T9): the app always opens empty with a project popup; --fresh is kept so old
+    # shortcuts keep working (it does nothing now), --open skips the popup
+    parser.add_argument("--fresh", action="store_true", help="(no effect; the app always starts empty)")
+    parser.add_argument("--open", default=None, metavar="FOLDER", help="open this project folder (no popup)")
     args = parser.parse_args()
 
     server = viser.ViserServer(host=args.host, port=args.port, label="Robot Cell Optimizer")
@@ -299,16 +326,32 @@ def main() -> None:
     except OSError as err:  # the app still works; the panel keeps the download button
         print(f"User guide server not started: {err}")
     state = build_app(
-        server, dark=args.dark, guide_port=guide.port if guide else None, remember=True, autosave_thread=True
+        server,
+        session=empty_cell(),
+        dark=args.dark,
+        guide_port=guide.port if guide else None,
+        remember=True,
+        autosave_thread=True,
     )
-    last = None if args.fresh else last_project()
-    if last is not None:
-        if state["project"]._load(None, last):
-            print(f"Reopened last project: {last}", flush=True)
-        else:
-            print(f"Could not reopen {last}; starting with the default cell", flush=True)
+    project = state["project"]
+    project.untitled = True  # the empty start-up cell has no folder: no autosave until one opens
+    opened = False
+    if args.open:
+        opened = project._load(None, Path(args.open).expanduser().resolve())
+        print(f"Opened {args.open}" if opened else f"Could not open {args.open}", flush=True)
         if args.dark:
             state["dark_toggle"].value = True  # the flag wins over the saved setting
+    shown = [opened]  # the popup: first browser only, and not after --open
+    lock = threading.Lock()
+
+    @server.on_client_connect
+    def _(client) -> None:
+        with lock:
+            if shown[0]:
+                return
+            shown[0] = True
+        state["popup"] = OpenPopup(client.gui, project)
+
     try:
         while True:
             time.sleep(1.0)

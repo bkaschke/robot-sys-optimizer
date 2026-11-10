@@ -55,6 +55,9 @@ class StationsPanel:
         self.on_start: Callable[[], None] | None = None  # set by app.py: e.g. clear old paths
         gui = server.gui
         with gui.add_folder("Station planner"):
+            from ui import rules_ui
+
+            rules_ui.build(gui, self)  # v7 round 2 (T15): Mode = Cost based / Rules only
             opt = self._optimizer()
             self.max_stations = gui.add_number(
                 "Max stations",
@@ -89,12 +92,27 @@ class StationsPanel:
             from ui.costs_ui import CostPanel
 
             self.costs = CostPanel(server, session)
+            rules_ui.show(self)
             self.run = gui.add_button("Plan stations", color="green")
+            self.gate_md = gui.add_markdown("", visible=False)  # why Run is disabled (T5)
             self.stop = gui.add_button("Cancel", visible=False)
             self.progress = gui.add_progress_bar(0.0, visible=False)
             self.status = gui.add_markdown("_Results appear in the Results tab as they finish._")
+        # v7 round 2 (T14): a fast first look, without refinement, zones or station areas
+        with gui.add_folder("Quick station plan"):
+            gui.add_markdown(
+                "_Uses *Max stations* of the Station planner. No refinement, no zones, no station "
+                "areas: a first look in seconds._"
+            )
+            self.quick_run = gui.add_button("Quick plan", color="green")
+            self.quick_gate_md = gui.add_markdown("", visible=False)
+            self.quick_stop = gui.add_button("Cancel", visible=False)
+            self.quick_progress = gui.add_progress_bar(0.0, visible=False)
+            self.quick_status = gui.add_markdown("")
         self.run.on_click(lambda e: self.start(e))
         self.stop.on_click(lambda e: self._cancel.set())
+        self.quick_run.on_click(lambda e: self.start(e, quick=True))
+        self.quick_stop.on_click(lambda e: self._cancel.set())
 
     def options(self) -> dict:
         """Planner options shared with the tool-geometry panel."""
@@ -108,10 +126,16 @@ class StationsPanel:
     def _optimizer(self) -> Optimizer:
         return self.s.extra.get("optimizer") or Optimizer()
 
-    def start(self, event=None, block: bool = False) -> None:
+    def start(self, event=None, block: bool = False, quick: bool = False) -> None:
+        """Plan stations in a thread. ``quick`` (T14): the quick plan (no refinement, zones or
+        station areas; results labelled "Quick: ...")."""
         s = self.s
         if self._thread is not None and self._thread.is_alive():
             return notify(event, "Busy", "Planning is already running")
+        from ui.workflow import setup_reason
+
+        if reason := setup_reason(s):
+            return notify(event, "Setup not confirmed", reason)
         if s.tool_model is None or s.part is None or not s.targets.points:
             return notify(event, "Cannot plan", "Need a tool, a part and targets")
         if s.robot is None:
@@ -134,6 +158,25 @@ class StationsPanel:
             require_all=self.options()["require_all"],
             require_one_config=self.options()["require_one_config"],
         )
+        if quick:
+            settings = PlannerSettings(
+                max_stations=settings.max_stations,
+                candidate_step=settings.candidate_step,
+                refine=False,
+                zoning=False,
+                areas=False,
+                patience=1,
+                quick_first=True,
+            )
+        run, stop, progress, status = (
+            (self.quick_run, self.quick_stop, self.quick_progress, self.quick_status)
+            if quick
+            else (self.run, self.stop, self.progress, self.status)
+        )
+        from ui import rules_ui
+
+        rules = not quick and rules_ui.rules_mode(self)
+        what = "Quick station plan" if quick else ("Rules-only station plan" if rules else "Station planning")
         robot = Robot(s.robot.spec)
         tcp = s.tool.tcps[0].name
         t = world_targets(s)
@@ -145,7 +188,7 @@ class StationsPanel:
         L = s.tool_model.length()
         L_ref = length_ref(s.tool.extension)
         self._cancel.clear()
-        self.run.visible, self.stop.visible, self.progress.visible = False, True, True
+        run.visible, stop.visible, progress.visible = False, True, True
         if self.on_start is not None:
             self.on_start()
         s.results, s.result_points = [], {}
@@ -153,6 +196,9 @@ class StationsPanel:
         stamp = stamp_for(s, "plan")  # the setup this run plans for (out-of-date tracking)
 
         def streamed(sol, res) -> None:
+            if quick and not sol.label.startswith("Quick: "):
+                sol.label = f"Quick: {sol.label}"  # in place: the planner's list has the same object
+            sol.planner = sol.planner or ("quick" if quick else "cost")
             # a refined plan replaces the quick plan with the same number of stations
             for old in [
                 r for r in s.results if len(r.stations) == len(sol.stations) and r.tool_values is None
@@ -168,8 +214,8 @@ class StationsPanel:
             self.on_solution()
 
         def say(msg: str, f: float) -> None:
-            self.status.content = f"_{msg}_"
-            self.progress.value = 100.0 * f
+            status.content = f"_{msg}_"
+            progress.value = 100.0 * f
 
         def work() -> None:
             try:
@@ -192,45 +238,69 @@ class StationsPanel:
                     obstacles=obstacles,
                 )
                 checker = FeasibilityChecker(robot, make_ik(robot), s.tool_model, scene, T_base0, T_part)
-                out = plan_stations(
-                    rmap,
-                    checker,
-                    t,
-                    T_base0,
-                    fp,
-                    weights,
-                    settings,
-                    L,
-                    L_ref,
-                    on_solution=streamed,
-                    progress=say,
-                    cancelled=self._cancel.is_set,
-                    sites=sites,
-                )
+                s.max_manip = float(rmap.max_manip)  # the Results card: manipulability in % (not saved)
+                if rules:
+                    args = dict(
+                        t=t, T_base0=T_base0, fp=fp, weights=weights, settings=settings, L=L, L_ref=L_ref
+                    )
+                    out, rules_status = rules_ui.run(
+                        self, rmap, checker, {**args, "sites": sites}, streamed, say, self._cancel.is_set
+                    )
+                else:
+                    out = plan_stations(
+                        rmap,
+                        checker,
+                        t,
+                        T_base0,
+                        fp,
+                        weights,
+                        settings,
+                        L,
+                        L_ref,
+                        on_solution=streamed,
+                        progress=say,
+                        cancelled=self._cancel.is_set,
+                        sites=sites,
+                    )
                 best = out[0][0] if out else None
-                self.status.content = (
-                    f"Best: **{best.label}**, cost {best.cost:.2f}.  \n"
-                    "Next: **Results → Paths & simulation → Build paths**, or *Inspect result* (above) "
-                    "to step through the points."
-                    if best
-                    else "_No solution found._"
-                )
-                plan_log(s, best, self._cancel.is_set(), self._t0)
+                for r in s.results:  # the run time, for the Results summary card
+                    if r.run_s is None and r.tool_values is None:
+                        r.run_s = round(time.monotonic() - self._t0, 1)
+                if rules:
+                    status.content = rules_status
+                    for line in best.violations if best is not None else []:
+                        log(f"Rules-only plan: {line}.", "warn")
+                elif quick:
+                    status.content = (
+                        f"Best: **{best.label}**, cost {best.cost:.2f}: _not optimized; run **Plan "
+                        "stations** to optimize._"
+                        if best
+                        else "_No solution found._"
+                    )
+                else:
+                    status.content = (
+                        f"Best: **{best.label}**, cost {best.cost:.2f}.  \n"
+                        "Next: **Results → Paths & simulation → Build paths**, or *Results → Inspect result* "
+                        "to step through the points."
+                        if best
+                        else "_No solution found._"
+                    )
+                plan_log(s, best, self._cancel.is_set(), self._t0, what=what)
                 if self._cancel.is_set():
-                    self.status.content = "**Cancelled.** " + (
+                    status.content = "**Cancelled.** " + (
                         f"Best so far: **{best.label}**, cost {best.cost:.2f}"
                         if best
                         else "_No plan finished._"
                     )
             except CancelledError:  # Cancel while the reachability map was being built
-                self.status.content = "**Cancelled** (while building the reachability map)."
-                log("Station planning cancelled (while building the reachability map).", "warn")
+                status.content = "**Cancelled** (while building the reachability map)."
+                log(f"{what} cancelled (while building the reachability map).", "warn")
             except Exception as err:  # report in the GUI instead of dying silently in a thread
-                self.status.content = f"⚠ planning failed: {err}"
-                log(f"Station planning failed: {err}", "error")
+                status.content = f"⚠ planning failed: {err}"
+                log(f"{what} failed: {err}", "error")
                 raise
             finally:
-                self.run.visible, self.stop.visible, self.progress.visible = True, False, False
+                run.visible, stop.visible, progress.visible = True, False, False
 
         self._t0 = time.monotonic()
         self._thread = threading.Thread(target=work, daemon=True)

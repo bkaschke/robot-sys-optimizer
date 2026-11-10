@@ -13,6 +13,7 @@ import pytest
 import viser
 
 from core.transforms import make_T
+from tests.helpers import confirm_all
 from ui.widgets import Latest
 
 
@@ -30,6 +31,7 @@ def app():
 def planned(app):
     """The rail example, planned once with the panel defaults."""
     assert app["project"].load_example("rail_long_part")
+    confirm_all(app["stations"])
     app["stations"].start(block=True)
     s = app["session"]
     assert s.results and not s.results[0].unreached, app["stations"].status.content

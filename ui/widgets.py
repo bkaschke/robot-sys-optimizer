@@ -76,6 +76,20 @@ class GizmoStyle:
             return False
 
     @classmethod
+    def fit(cls, handle, extent: float) -> float:
+        """Size ``handle`` to its object (v7 round 2, T10): base scale 0.6 x the object's
+        largest extent, clamped to 0.25..2 m, so the handles reach outside the body (the
+        *Gizmo size* slider still multiplies it). Returns the base scale."""
+        base = float(min(max(0.6 * float(extent), 0.25), 2.0))
+        cls._items = [(h, b) for h, b in cls._items if h is not handle] + [(handle, base)]
+        cls._style(handle, base)
+        return base
+
+    @classmethod
+    def base_of(cls, handle) -> float | None:
+        return next((b for h, b in cls._items if h is handle), None)
+
+    @classmethod
     def apply(cls, size: float | None = None, on_top: bool | None = None) -> None:
         if size is not None:
             cls.size = float(size)

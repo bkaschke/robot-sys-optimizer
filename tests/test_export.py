@@ -34,6 +34,7 @@ from core.tool import ToolModel, load_tool
 from core.transforms import make_T, rpy_to_matrix
 from opt.placement import PlannerSettings, Targets, plan_stations
 from opt.reachability import map_for_tool
+from tests.helpers import confirm_all
 
 REPO = Path(__file__).resolve().parents[1]
 V_OPT = ExtensionValues(L=0.3, theta_deg=20.0)
@@ -191,6 +192,7 @@ def test_report_is_self_contained(plate_plan, sander):
 # --- GUI ----------------------------------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 def test_gui_exports(tmp_path):
     import viser
 
@@ -206,6 +208,7 @@ def test_gui_exports(tmp_path):
         s.targets = s.targets.model_copy(update={"groups": [TargetGroup(name="top", tilt_deg=10.0)]})
         s.targets = append_points(s.targets, pts, np.tile([0, 0, 1.0], (3, 1)), "top")
         tab.refresh()
+        confirm_all(state["stations"])
         state["stations"].start(block=True)  # static base: one station
         res = state["results"]
         assert res.selected() is not None and len(res.selected().stations) == 1

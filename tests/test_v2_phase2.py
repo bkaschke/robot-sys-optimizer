@@ -8,6 +8,7 @@ import pytest
 import viser
 
 from core.transforms import make_T
+from tests.helpers import confirm_all
 from ui.staleness import components, solution_changes, stamp_for, step_state
 
 
@@ -95,9 +96,11 @@ def test_fields_follow_mode_and_axis_type(app):
 # --- out-of-date results -----------------------------------------------------------------------
 
 
+@pytest.mark.slow
 def test_results_go_out_of_date_and_exports_ask(app):
     s, wf, res = app["session"], app["workflow"], app["results"]
     assert app["project"].load_example("rail_long_part")
+    confirm_all(app["stations"])
     app["stations"].start(block=True)
     sol = res.selected()
     assert sol is not None and s.stamps[sol.label]

@@ -20,6 +20,7 @@ from core.transforms import make_T
 from opt.placement import PlannerSettings, Targets, plan_stations
 from opt.reachability import map_for_tool
 from opt.sites import CarrierSites
+from tests.helpers import confirm_all
 from tests.test_carriers import REPO, TASKS, rail_base
 
 # --- core ---------------------------------------------------------------------------------------
@@ -199,6 +200,7 @@ class FakeClick:
     client = None
 
 
+@pytest.mark.slow
 def test_gui_zoning_option_results_and_save(tmp_path):
     import viser
 
@@ -218,6 +220,7 @@ def test_gui_zoning_option_results_and_save(tmp_path):
         stations = st["stations"]
         stations.zoning.value = ZONING[1]
         assert st["tool_opt"].planner_options()["zoning"] is True
+        confirm_all(stations)
         stations.start(block=True)
         sol = s.results[0]
         assert sol.zones and "Zones" in st["results"].summary.content

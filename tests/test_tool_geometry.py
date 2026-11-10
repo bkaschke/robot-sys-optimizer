@@ -27,6 +27,7 @@ from core.transforms import make_T
 from opt.placement import Targets
 from opt.reachability import OffsetMap, ReachMap, is_straight, map_for_tool
 from opt.tool_geometry import GeometrySettings, optimize_tool
+from tests.helpers import confirm_all
 
 REPO = Path(__file__).resolve().parents[1]
 CLEARANCE = 0.01
@@ -59,6 +60,7 @@ def hole_scene():
     return part, T_part, t, fp
 
 
+@pytest.mark.slow
 def test_minimal_L_in_deep_hole(robot, hole_scene):
     part, T_part, t, fp = hole_scene
     res = optimize_tool(robot, _probe(), None, part, T_part, np.eye(4), t, fp, Weights(), 1)
@@ -84,6 +86,7 @@ def test_minimal_L_in_deep_hole(robot, hole_scene):
         assert (r.status != "unreachable") == ok, (L, r.reason)
 
 
+@pytest.mark.slow
 def test_unreachable_range_reported(robot, hole_scene):
     part, T_part, t, fp = hole_scene
     ee = _probe()
@@ -134,6 +137,7 @@ def test_offset_map_moves_tcp_along_axis(robot):
 # --- stage B ----------------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 def test_shape_stage_respects_bounds_and_never_worsens(robot):
     ee = load_tool("orbital_sander")  # bent extension: theta in [0, 45] deg
     T_part = make_T(p=(0.9, 0.0, 0.3))
@@ -165,6 +169,7 @@ def test_shape_stage_respects_bounds_and_never_worsens(robot):
     assert res.solution.tool_values == res.values
 
 
+@pytest.mark.slow
 def test_gui_finds_and_applies_shortest_tool():
     import viser
 
@@ -187,6 +192,7 @@ def test_gui_finds_and_applies_shortest_tool():
         tab.refresh()
         panel = state["tool_opt"]
         panel.max_stations.value = 1
+        confirm_all(panel)
         panel.start(block=True)
         assert panel.result.feasible, panel.info.content
         assert abs(panel.result.values.L - 0.26) <= 0.005
@@ -199,6 +205,7 @@ def test_gui_finds_and_applies_shortest_tool():
         server.stop()
 
 
+@pytest.mark.slow
 def test_shape_stage_single_variable_does_not_crash(robot):
     """Regression (found in the M10 smoke run): with only theta active, CMA-ES got a 1-D
     problem, which it does not support; it crashed depending on the random step sizes."""

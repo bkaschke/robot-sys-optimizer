@@ -326,4 +326,22 @@ in a browser.
 
 | Task | State | Notes |
 |---|---|---|
-| T1–T19 | not started | |
+| T1 | done | `_feasible(skip=)`; same configurations / q / clearance as before (test); `collides` calls on the rail points cut by more than half |
+| T2 | done | clearance only for kept solutions: `part_clearance` calls = configurations found (≤ 8 per point) |
+| T3 | done | `opt.station_checks.CheckMemo` on `checker.memo` during one `plan_stations`; plans equal with / without it (test) |
+| T4 | done | rail_long_part **52.0 s → 8.1 s** (zoning 46.1 s → 2.3 s; `collides` 26 278 → 6 800 calls); mobile_amr **~58 s → 13.2 s**. `test_v5_speed.py` has no time limits to tighten |
+| T5 | done | `ui.workflow.setup_reason`; `tests/helpers.confirm_all` added before every planner / tool-optimizer start in the tests; `examples/headless_plan.py` calls `plan_stations` directly (no GUI gate), unchanged |
+| T6 | done | dock call checked by a test (monkeypatched `dock_below`); the layout itself is browser-only (headless screenshot showed it) |
+| T7 | done | |
+| T8 | done | buttons directly under *Generate on selection* |
+| T9 | done | headless Edge screenshot shows the popup on the empty cell; `run_app.bat` only passes `%*` through |
+| T10 | done | gizmos sized to the object (cause 2); part clicks pause only during Move mode on the part (cause 1 as first done, off whenever the Part gizmo showed, broke surface selection: fixed after the user's report). Shift/Ctrl clicks now registered (viser only reports registered modifiers). **Needs a browser retry** |
+| T11 | done | Alt+click on the part and stay-out zones, *Move object* + **Move…** for every object; Esc not available. Deviation: the per-panel gizmo checkboxes are not routed through `move_mode`; one Move… list instead of a button per tree entry |
+| T12 | done | not reproducible headless (the old code passed the scripted steps); hardened: offset start poses, click selects, one gizmo per zone ignoring other zones' drags |
+| T13 | done | `core/schema_base.py` (schema.py 532 → 357 lines), `core/carrier_axis.py`, `ui/carrier_axis.py`, `ui/carrier_defaults.py`; example lengths keep their old travel |
+| T14 | done | |
+| T15 | done | rule 6 needs 95 % on the rail example in the test (its points reach 98 % of the max); `verify` keeps the furthest stage as reason |
+| T16 | done | Export, Build paths, Check all targets |
+| T17 | done | manipulability % only after a plan in this session (max not saved) |
+| T18 | done | |
+| T19 | done | `@pytest.mark.slow` + `--fast` |

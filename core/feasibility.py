@@ -7,7 +7,7 @@ pose with a feasible branch wins, and among its branches the one with the best
     reachable   feasible with comfortable margins
     marginal    feasible but clearance < margin + 5 mm or a joint within 15 deg of its limit
     unreachable with the first stage that no candidate got past as reason:
-                no_ik -> joint_limits -> collision
+                no_ik -> joint_limits -> singular (only with CheckSettings.min_manip) -> collision
 
 Target frame convention (spin reference): target z = outward normal n; target x = part
 frame +x projected onto the tangent plane (+y if n is nearly parallel to x). A TCP
@@ -29,7 +29,7 @@ from core.schema import TargetGroup
 from core.tool import ToolModel
 from core.transforms import make_T
 
-STAGES = ("no_ik", "joint_limits", "collision")
+STAGES = ("no_ik", "joint_limits", "singular", "collision")
 MARGINAL_CLEARANCE = 0.005  # m above the clearance margin
 SPIN_STEP_DEG = 30.0
 TILT_AZIMUTHS = 6
@@ -39,6 +39,9 @@ TILT_AZIMUTHS = 6
 class CheckSettings:
     joint_margin_deg: float = 5.0
     clearance: float = 0.01
+    # v7 round 2 (T15, rules-only planner): arm poses with |det J| below this are skipped
+    # (stage "singular"); 0 = off, as in cost mode
+    min_manip: float = 0.0
 
 
 @dataclass
@@ -130,6 +133,7 @@ CHUNK = 32  # largest number of candidate poses per vectorized IK call
 class FeasibilityChecker:
     batch_ik = True  # vectorized IK for UR arms (False: the scalar path, for comparisons)
     cancelled = None  # optional () -> bool, polled once per candidate pose (Cancel within ~ms)
+    memo = None  # per-plan cache of exact checks (opt.station_checks.CheckMemo), else None
 
     def __init__(
         self,
@@ -152,6 +156,7 @@ class FeasibilityChecker:
 
     def set_base(self, T_world_base: np.ndarray) -> None:
         """Evaluate from another base pose (stations, refinement) without rebuilding."""
+        self.T_world_base = np.asarray(T_world_base, float)
         self.T_base_part = np.linalg.inv(T_world_base) @ self.T_world_part
         self.scene.set_base(T_world_base)
 
@@ -162,6 +167,15 @@ class FeasibilityChecker:
         ``clearance=False`` skips the part-clearance distance of the accepted solution (the
         collision check itself always runs): for screening and re-checks that only need
         "reachable or not"; the result's clearance is then inf."""
+        if self.memo is not None:
+            return self.memo.get(
+                self,
+                ("point", pid, max_poses, clearance),
+                lambda: self._check_point(pid, p, n, group, max_poses, clearance),
+            )
+        return self._check_point(pid, p, n, group, max_poses, clearance)
+
+    def _check_point(self, pid, p, n, group, max_poses, clearance) -> PointResult:
         stage = [0]
         for r in self._feasible(pid, p, n, group, max_poses, stage, clearance=clearance):
             return r
@@ -173,18 +187,39 @@ class FeasibilityChecker:
         """Best feasible solution for EACH joint configuration (core.configs labels), in one
         pass over the candidate poses (most preferred pose first, as check_point). Stops
         early once every configuration was found. Empty dict: unreachable."""
+        if self.memo is not None:
+            return self.memo.get(
+                self,
+                ("configs", pid, max_poses),
+                lambda: self._check_point_configs(pid, p, n, group, max_poses),
+            )
+        return self._check_point_configs(pid, p, n, group, max_poses)
+
+    def _check_point_configs(self, pid, p, n, group, max_poses) -> dict[str, PointResult]:
         from core.configs import config_label
 
         out: dict[str, PointResult] = {}
         n_max = getattr(self.ik, "n_branches", 4)
-        for r in self._feasible(pid, p, n, group, max_poses, [0], all_branches=True):
+        # branches of configurations already found are dropped before the collision check, and
+        # the clearance is measured only for the kept solutions (v7 round 2, T1 / T2)
+        skip = lambda q: config_label(self.ik, q) in out  # noqa: E731
+        for r in self._feasible(
+            pid, p, n, group, max_poses, [0], all_branches=True, clearance=False, skip=skip
+        ):
             lab = config_label(self.ik, r.q)
             if lab not in out:
                 r.config = lab
                 out[lab] = r
                 if len(out) == n_max:
                     break
+        for r in out.values():
+            r.clearance = self.scene.part_clearance(r.q, r.tcp)
+            r.status = self._status(r.clearance, r.limit_margin_deg)
         return out
+
+    def _status(self, clear: float, limit_margin_deg: float) -> str:
+        marginal = clear < self.settings.clearance + MARGINAL_CLEARANCE or limit_margin_deg < 15.0
+        return "marginal" if marginal else "reachable"
 
     def _ik_stream(self, poses):
         """(pose, joint solutions in (-pi, pi]) per candidate pose, in order. UR arms use the
@@ -211,11 +246,21 @@ class FeasibilityChecker:
             chunk = []
 
     def _feasible(
-        self, pid, p, n, group, max_poses, stage, all_branches: bool = False, clearance: bool = True
+        self,
+        pid,
+        p,
+        n,
+        group,
+        max_poses,
+        stage,
+        all_branches: bool = False,
+        clearance: bool = True,
+        skip: Callable[[np.ndarray], bool] | None = None,
     ):
         """Yield feasible PointResults: candidate poses in preference order; per pose, the
         branches best first (only the best one unless ``all_branches``). ``stage[0]`` is
-        set to the furthest check stage any candidate passed."""
+        set to the furthest check stage any candidate passed. Branches with ``skip(q)`` true
+        are dropped before the collision check."""
         tcps = group.tcps or list(self.T_flange_tcp)
         poses = (
             (tcp, spin, tilt, so, self.T_base_part @ T_part_tcp @ self._T_tcp_flange[tcp])
@@ -242,16 +287,23 @@ class FeasibilityChecker:
             else:
                 mus = np.array([self.robot.manipulability(q, offset) for q in Q])
             lms = np.min(np.minimum(Q - self.robot.lower, self.robot.upper - Q), axis=1)
+            if self.settings.min_manip > 0:  # rule: not close to a singularity
+                ok = mus >= self.settings.min_manip
+                if not ok.any():
+                    continue
+                Q, mus, lms = Q[ok], mus[ok], lms[ok]
+            stage[0] = max(stage[0], 3)
             # ties (mirror branches at equal quality) go to the lower branch index, not float noise
             for b in sorted(range(len(Q)), key=lambda b: (-round(float(mus[b] + 0.1 * lms[b]), 9), b)):
                 q, mu, lm = Q[b], float(mus[b]), float(lms[b])
+                if skip is not None and skip(q):
+                    continue
                 if self.scene.collides(q, tcp):
                     continue
                 clear = self.scene.part_clearance(q, tcp) if clearance else float("inf")
-                marginal = clear < self.settings.clearance + MARGINAL_CLEARANCE or np.degrees(lm) < 15.0
                 yield PointResult(
                     pid,
-                    "marginal" if marginal else "reachable",
+                    self._status(clear, float(np.degrees(lm))),
                     "",
                     q,
                     tcp,

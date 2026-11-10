@@ -4,6 +4,7 @@ meshes, gizmo size / always on top."""
 import pytest
 import viser
 
+from tests.helpers import confirm_all
 from ui.widgets import GizmoStyle
 
 
@@ -17,9 +18,11 @@ def app():
     server.stop()
 
 
+@pytest.mark.slow
 def test_paths_clear_on_new_runs_and_target_changes(app):
     s, sim = app["session"], app["sim"]
     assert app["project"].load_example("rail_long_part")
+    confirm_all(app["stations"])
     app["stations"].start(block=True)
     sim.build(block=True)
     assert sim.plan is not None and sim._handles
@@ -30,10 +33,12 @@ def test_paths_clear_on_new_runs_and_target_changes(app):
     assert sim.plan is None and not sim._handles and "targets changed" in sim.info.content
     sim.build(block=True)
     assert sim.plan is not None
+    confirm_all(app["stations"])
     app["stations"].start(block=True)  # a new plan: old paths go
     assert sim.plan is None and "station plan" in sim.info.content
     sim.build(block=True)
     app["tool_opt"].shape_evals.value = 0
+    confirm_all(app["tool_opt"])
     app["tool_opt"].start(block=True)
     assert sim.plan is None and "tool optimizer" in sim.info.content
 

@@ -105,6 +105,9 @@ class TargetsTab:
             )
             self.gen_group = gui.add_dropdown("Into group", ("default",))
             self.generate = gui.add_button("Generate on selection")
+            # v7 round 2 (T8, user request): the delete buttons sit right under Generate
+            self.delete = gui.add_button("Delete points on selected surface")
+            self.delete_all = gui.add_button("Delete all points")
             self.gen_info = gui.add_markdown("")
             self.tools = PointTools(server, self)  # undo + last-add info
         self.tools.build_refine()
@@ -121,8 +124,6 @@ class TargetsTab:
             self.count = gui.add_markdown("")
             self.assign = gui.add_button("Assign selected-surface points to group")
             self.flip = gui.add_button("Flip normals on selected surface")
-            self.delete = gui.add_button("Delete points on selected surface")
-            self.delete_all = gui.add_button("Delete all points")
             self.csv_units = gui.add_dropdown("CSV units", ("mm", "m"))
             self.csv = gui.add_upload_button("Import CSV (x,y,z,nx,ny,nz[,group])", mime_type="text/csv")
         with gui.add_folder("Display", expand_by_default=False):

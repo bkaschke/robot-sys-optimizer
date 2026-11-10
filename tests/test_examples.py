@@ -6,6 +6,7 @@ import pytest
 import viser
 
 from core.standoff import distance_3d
+from tests.helpers import confirm_all
 from ui.project_panel import list_examples
 
 
@@ -24,6 +25,7 @@ def test_examples_are_listed():
     )
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize(
     "name,kind,n_bodies",
     [
@@ -46,6 +48,7 @@ def test_example_loads_and_plans(app, name, kind, n_bodies):
 
     st = app["stations"]  # the panel defaults after opening the example (v1: max stations stayed 1)
     assert st.max_stations.value == 4
+    confirm_all(st)
     st.start(block=True)
     assert s.results, st.status.content
     best = min((r for r in s.results if not r.unreached), key=lambda r: len(r.stations))

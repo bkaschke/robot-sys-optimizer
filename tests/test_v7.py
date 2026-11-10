@@ -7,6 +7,7 @@ import viser
 from core import golden_parts as gp
 from core import targets as tg
 from core.facing import facing_sides
+from tests.helpers import confirm_all
 
 
 def _box():
@@ -119,6 +120,7 @@ def test_opw_parameters_must_match_the_urdf():
         OPWIK(robot)
 
 
+@pytest.mark.slow
 def test_plan_with_a_non_ur_robot(app):
     s, cell = app["session"], app["cell"]
     cell.robot_choice.value = "generic_6r"
@@ -131,6 +133,7 @@ def test_plan_with_a_non_ur_robot(app):
     tab.row.value = tab.col.value = 150.0
     assert tab.run_generate() > 0
     st = app["stations"]
+    confirm_all(st)
     st.start(block=True)  # builds (or loads) the generic arm's reachability map
     assert s.results, "the station planner refused or failed"
     best = s.results[0]

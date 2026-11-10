@@ -35,6 +35,62 @@ ICON = {
 }
 
 
+def setup_reason(s: Session) -> str:
+    """Why the optimizers must wait (markdown), or "" when setup steps 1-4 are confirmed.
+    The station planner, the quick planner and the tool optimizer need a confirmed setup; the
+    feasibility check and the heatmap stay usable (user decision, v7 round 2)."""
+    todo, changed = [], []
+    for i, st in enumerate(STEPS):
+        state = step_state(s, st)
+        name = f"**{i + 1} {TITLES[st]}**"
+        if state == "todo":
+            todo.append(name)
+        elif state == "changed":
+            changed.append(name)
+    parts = []
+    if todo:
+        parts.append(f"Confirm {', '.join(todo)} first")
+    if changed:
+        it = "them" if len(changed) > 1 else "it"
+        parts.append(f"{', '.join(changed)} changed since you confirmed {it} — confirm {it} again")
+    return "; ".join(parts)
+
+
+def feasibility_reason(s: Session) -> str:
+    """Why *Check all targets* is disabled (T16)."""
+    if s.robot is None:
+        return "Choose a robot first (**1 Robot & cell**)"
+    if s.part is None:
+        return "Load a part first (**1 Robot & cell**)"
+    if s.tool is None:
+        return "Choose a tool first (**3 Tool**)"
+    if not s.targets.points:
+        return "Add targets first (**4 Targets**)"
+    return ""
+
+
+def result_reason(selected):
+    """Reason function: no result selected in Results (Export, T16)."""
+
+    def fn(s: Session) -> str:
+        if selected() is None:
+            return "No result to export yet: run **5 Optimize → Plan stations** (or the tool optimizer) first"
+        return ""
+
+    return fn
+
+
+def plan_reason(selected):
+    """Reason function: no station plan selected (Build paths, T16)."""
+
+    def fn(s: Session) -> str:
+        if selected() is None:
+            return "No plan yet: run **5 Optimize → Plan stations**, then select it in Results"
+        return ""
+
+    return fn
+
+
 class Workflow:
     def __init__(self, server: viser.ViserServer, session: Session):
         self.server = server
@@ -49,6 +105,7 @@ class Workflow:
         self._todo: list[str] | None = None  # unconfirmed steps last reported to the log
         self._lock = threading.Lock()
         self.hooks: list = []  # extra callables run by the watcher (e.g. object visibility)
+        self.gates: list[tuple] = []  # (run button, reason markdown): disabled until setup is confirmed
 
     # --- widgets (created inside each tab, before its panel) ------------------------------------
 
@@ -62,6 +119,31 @@ class Workflow:
         if edit is not None:
             edit.on_click(lambda e: self.edit(step))
         self.headers[step] = (md, ok, edit)
+
+    def gate(self, button, md, reason=None) -> None:
+        """Disable ``button`` (a handle or a tuple of them) and say why in ``md`` while
+        ``reason(session)`` returns text; default: setup steps 1-4 not all confirmed (T5).
+        v7 round 2 T16: other buttons say why too (no result to export, no plan, no targets)."""
+        buttons = button if isinstance(button, tuple) else (button,)
+        self.gates.append((buttons, md, reason or setup_reason))
+        self._apply_gates()
+
+    def gate_reasons(self) -> tuple:
+        out = []
+        for _, _, fn in self.gates:
+            try:
+                out.append(fn(self.s))
+            except Exception:  # a mid-edit state: say nothing rather than break the watcher
+                out.append("")
+        return tuple(out)
+
+    def _apply_gates(self, reasons: tuple | None = None) -> None:
+        reasons = reasons if reasons is not None else self.gate_reasons()
+        for (buttons, md, _), reason in zip(self.gates, reasons, strict=True):
+            for b in buttons:
+                b.disabled = bool(reason)
+            md.content = f"⚠ {reason}." if reason else ""
+            md.visible = bool(reason)
 
     def optimize_header(self) -> None:
         self.opt_md = self.server.gui.add_markdown("")
@@ -93,7 +175,9 @@ class Workflow:
             sol = self.results.selected() if self.results is not None else None
             sol_changes = solution_changes(s, sol) if sol is not None else []
             feas = feasibility_changes(s) if s.feasibility else []
+            reasons = self.gate_reasons()
             key = (
+                reasons,
                 tuple(states.items()),
                 locked,
                 mounted,
@@ -104,6 +188,7 @@ class Workflow:
             if key == self._last and not force:
                 return
             self._last = key
+            self._apply_gates(reasons)
             for i, step in enumerate(STEPS):
                 if step not in self.headers:
                     continue

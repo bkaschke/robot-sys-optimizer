@@ -324,19 +324,45 @@ def load_project(session: Session, project_dir: Path) -> None:
 LAST_PROJECT = WORKSPACE / "last_project.txt"
 
 
+MAX_RECENT = 5
+
+
+def _recorded() -> list[Path]:
+    try:
+        lines = LAST_PROJECT.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    return [Path(x.strip()) for x in lines if x.strip()]
+
+
 def remember_last(project_dir: Path) -> None:
-    """Record the project folder so the app can reopen it on the next start."""
+    """Record the project folder (newest first, the last ``MAX_RECENT`` kept; v7 round 2 T9
+    extended the one-line file to a list, which old one-line files still read as)."""
+    d = Path(project_dir).resolve()
+    keep = [d, *[p for p in _recorded() if p != d]]
     try:
         LAST_PROJECT.parent.mkdir(parents=True, exist_ok=True)
-        LAST_PROJECT.write_text(str(Path(project_dir).resolve()), encoding="utf-8")
+        LAST_PROJECT.write_text("\n".join(str(p) for p in keep[: MAX_RECENT * 2]), encoding="utf-8")
     except OSError:
         pass
 
 
+def recent_projects() -> list[Path]:
+    """The last ``MAX_RECENT`` saved / loaded project folders that still have a project.json,
+    newest first."""
+    out = [p for p in _recorded() if (p / "project.json").is_file()]
+    return out[:MAX_RECENT]
+
+
 def last_project() -> Path | None:
     """The last saved/loaded project folder, if it still has a project.json."""
-    try:
-        d = Path(LAST_PROJECT.read_text(encoding="utf-8").strip())
-    except OSError:
-        return None
-    return d if (d / "project.json").is_file() else None
+    recent = recent_projects()
+    return recent[0] if recent else None
+
+
+def empty_cell() -> Session:
+    """The start-up cell (v7 round 2 T9): the default robot on a static base, no part, tool,
+    targets or plans."""
+    s = Session()
+    s.load_robot_from_registry("ur20")
+    return s

@@ -29,7 +29,9 @@ class StayoutPanel:
         self.server, self.s = server, session
         self._handles: dict = {}
         self.gizmo = None
+        self._gizmo_zone: str | None = None  # the zone the current gizmo belongs to (T12)
         self._busy = False
+        self.on_alt_click = None  # (zone name, event) -> None: Move mode (app.py, T11)
         gui = server.gui
         self.folder = gui.add_folder("Stay-out zones", expand_by_default=False)
         with self.folder:
@@ -95,8 +97,24 @@ class StayoutPanel:
     def add_shape(self, shape: str, event=None) -> bool:
         name = self._unique("zone")
         size = {"size": (0.5, 0.5, 1.0)} if shape == "box" else {"radius": 0.25, "height": 1.0}
-        z = Primitive(shape=shape, name=name, attach="fixed", pose=Pose(xyz=(1.0, 1.0, 0.0)), **size)
+        # each new zone a bit further along x, so zones never start on top of each other (T12)
+        z = Primitive(shape=shape, name=name, attach="fixed", pose=Pose(xyz=self._new_xyz()), **size)
         return self._commit([*self.zones, z], name, event)
+
+    def _new_xyz(self) -> tuple[float, float, float]:
+        return (1.0 + 0.7 * len(self.zones), 1.0, 0.0)
+
+    def select(self, name: str) -> bool:
+        """Make ``name`` the selected zone (dropdown, a click on the zone in 3D, the Objects
+        tree). False if there is no such zone."""
+        if name not in [z.name for z in self.zones]:
+            return False
+        self.refresh(name)
+        return True
+
+    def _alt(self, name: str, event) -> None:
+        if self.on_alt_click is not None:
+            self.on_alt_click(name, event)
 
     def add_mesh_bytes(self, filename: str, data: bytes, event=None) -> bool:
         from pathlib import Path
@@ -180,13 +198,14 @@ class StayoutPanel:
             quiet_remove(h)
         self._handles = {}
         i = self.index()
+        dragging = self.drag.value and i is not None
         for k, z in enumerate(self.zones):
             try:
                 m = primitive_mesh(z, self.s.resolve)
             except (ValueError, OSError):
                 continue
             T = pose_to_matrix(z.pose)
-            self._handles[z.name] = self.server.scene.add_mesh_simple(
+            h = self._handles[z.name] = self.server.scene.add_mesh_simple(
                 f"{ROOT}/{z.name}",
                 m.vertices,
                 m.faces,
@@ -196,20 +215,31 @@ class StayoutPanel:
                 wxyz=matrix_to_wxyz(T[:3, :3]),
                 position=T[:3, 3],
             )
+            if not (dragging and k == i):  # T10: the zone under the gizmo takes no clicks
+                h.on_click(lambda e, name=z.name: self.select(name))
+                h.on_click(modifier="alt")(lambda e, name=z.name: self._alt(name, e))
         self.place_gizmo()
 
     def place_gizmo(self) -> None:
         i = self.index()
+        name = self.zones[i].name if i is not None else None
+        if self.gizmo is not None and (not self.drag.value or name != self._gizmo_zone):
+            # a new gizmo per zone: late drag events of the old one cannot move another zone
+            quiet_remove(self.gizmo)
+            self.gizmo, self._gizmo_zone = None, None
         if not self.drag.value or i is None:
-            if self.gizmo is not None:
-                quiet_remove(self.gizmo)
-                self.gizmo = None
             return
         T = pose_to_matrix(self.zones[i].pose)
         if self.gizmo is None:
             self.gizmo = self.server.scene.add_transform_controls("/stayout_edit/gizmo", scale=0.4)
+            self._gizmo_zone = name
             GizmoStyle.register(self.gizmo, 0.4)
-            drag = Latest(self._from_gizmo)  # drags: newest pose only
+            try:  # T10: the gizmo reaches outside the zone
+                b = primitive_mesh(self.zones[i], self.s.resolve).bounds
+                GizmoStyle.fit(self.gizmo, float(np.max(b[1] - b[0])))
+            except (ValueError, OSError):
+                pass
+            drag = Latest(lambda: self._from_gizmo(name))  # drags: newest pose only
             self.gizmo.on_update(lambda e: None if self._busy else drag())
         self._busy = True
         try:
@@ -218,9 +248,11 @@ class StayoutPanel:
         finally:
             self._busy = False
 
-    def _from_gizmo(self) -> None:
+    def _from_gizmo(self, name: str | None = None) -> None:
+        """Gizmo -> pose of zone ``name`` (the zone the gizmo was made for), only while that
+        zone is still the selected one."""
         i = self.index()
-        if i is None or self.gizmo is None:
+        if i is None or self.gizmo is None or (name is not None and self.zones[i].name != name):
             return
         T = make_T(wxyz_to_matrix(self.gizmo.wxyz), self.gizmo.position)
         zones = list(self.zones)

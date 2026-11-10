@@ -1,11 +1,12 @@
 """Run the test suite in batches, one pytest process per batch (low peak memory).
 
-    python scripts/test_batches.py [--size 4] [pytest args...]
+    python scripts/test_batches.py [--size 4] [--fast] [pytest args...]
 
 The suite starts a full app in many test files; in one process its memory keeps growing,
 which the development PC could not always afford. Each batch is a fresh process, so memory
 is returned between batches. Prints one line per batch and a total; exit code 1 if any
-batch failed.
+batch failed. ``--fast`` skips the tests marked ``slow`` (full plans, tool optimization,
+path builds; v7 round 2): about 10 minutes instead of an hour.
 """
 
 from __future__ import annotations
@@ -22,6 +23,8 @@ ROOT = Path(__file__).resolve().parents[1]
 def main() -> int:
     args = sys.argv[1:]
     size, first = 4, ""
+    if "--fast" in args:  # v7 round 2 (T19): skip the slow tests
+        args = [a for a in args if a != "--fast"] + ["-m", "not slow"]
     while args[:1] in (["--size"], ["--from"]):
         if args[0] == "--size":
             size = int(args[1])
@@ -59,12 +62,13 @@ def main() -> int:
         counts = {key: int(n) for n, key in re.findall(r"(\d+) (passed|failed|error)", out)}
         for key in total:
             total[key] += counts.get(key, 0)
-        status = "ok" if r.returncode == 0 else "FAILED"
+        ok = r.returncode == 0 or (r.returncode == 5 and "deselected" in out)  # 5: all deselected
+        status = "ok" if ok else "FAILED"
         print(
             f"[{k}/{len(batches)}] {status} {counts} {time.perf_counter() - t:.0f} s  {' '.join(batch)}",
             flush=True,
         )
-        if r.returncode != 0:
+        if not ok:
             failed_batches.append(batch)
             for line in out.splitlines():
                 if line.startswith(("FAILED", "ERROR", "E ")):

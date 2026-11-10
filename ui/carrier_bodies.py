@@ -41,6 +41,8 @@ ATTACH = {
     "X axis / gantry bridge (moves in x only)": "x_axis",
 }
 ATTACH_LABEL = {v: k for k, v in ATTACH.items()}
+STRETCH = {"no": "", "x (rail / X rails)": "x", "y (gantry bridge)": "y"}
+STRETCH_LABEL = {v: k for k, v in STRETCH.items()}
 GIZMO = "/carrier_edit"
 
 
@@ -67,6 +69,9 @@ class BodyEditor:
             self.remove = gui.add_button("Remove body", color="red")
             self.name = gui.add_text("Name", "")
             self.attach = gui.add_dropdown("Attached to", tuple(ATTACH))
+            self.stretch = gui.add_dropdown(  # v7 round 2 (T13)
+                "Follows axis length", tuple(STRETCH), hint="rail / gantry: the body takes the axis length"
+            )
             self.box = gui.add_vector3("Box L W H (mm)", (500.0, 500.0, 200.0), step=10.0)
             self.cyl = gui.add_vector2("Cylinder radius / height (mm)", (100.0, 200.0), step=5.0)
             self.mesh_info = gui.add_markdown("")
@@ -107,7 +112,16 @@ class BodyEditor:
                 self.mount_on.value = moving[-1]
             k = self.index()
             b = self.bodies[k] if k is not None else None
-            for h in (self.name, self.attach, self.xyz, self.rpy, self.drag, self.dup, self.remove):
+            for h in (
+                self.name,
+                self.attach,
+                self.stretch,
+                self.xyz,
+                self.rpy,
+                self.drag,
+                self.dup,
+                self.remove,
+            ):
                 h.disabled = b is None
             self.box.visible = b is not None and b.shape == "box"
             self.cyl.visible = b is not None and b.shape == "cylinder"
@@ -115,6 +129,7 @@ class BodyEditor:
             if b is not None:
                 self.name.value = b.name
                 self.attach.value = ATTACH_LABEL[b.attach]
+                self.stretch.value = STRETCH_LABEL[b.stretch]
                 if b.shape == "box":
                     self.box.value = tuple(v * 1000 for v in b.size)
                 elif b.shape == "cylinder":
@@ -135,6 +150,7 @@ class BodyEditor:
         d.update(
             name=self.name.value.strip() or b.name,
             attach=ATTACH[self.attach.value],
+            stretch=STRETCH[self.stretch.value],
             pose=Pose(xyz=tuple(v / 1000 for v in self.xyz.value), rpy=tuple(np.radians(self.rpy.value))),
         )
         if b.shape == "box":
@@ -233,7 +249,7 @@ class BodyEditor:
                 self.sync()
                 self.p.draw()  # highlight the selected body
 
-        for h in (self.name, self.attach, self.box, self.cyl, self.xyz, self.rpy):
+        for h in (self.name, self.attach, self.stretch, self.box, self.cyl, self.xyz, self.rpy):
             h.on_update(self._edit)
 
         self.add_box.on_click(lambda e: self.add_shape("box", e))

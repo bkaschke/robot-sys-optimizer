@@ -7,6 +7,7 @@ import pytest
 import viser
 
 from core.schema import load_project
+from tests.helpers import confirm_all
 
 
 @pytest.fixture(scope="module")
@@ -28,9 +29,11 @@ def made():
         shutil.rmtree(d, ignore_errors=True)
 
 
+@pytest.mark.slow
 def test_new_part_same_cell(app, made):
     s, pp = app["session"], app["project"]
     assert pp.load_example("rail_long_part")
+    confirm_all(app["stations"])
     app["stations"].start(block=True)
     old_dir, base, tool, robot = s.project_dir, s.base, s.tool, s.robot_name
     groups = s.targets.groups
@@ -51,6 +54,7 @@ def test_new_part_same_cell(app, made):
     assert app["cell"].part_handle is None and app["results"].choice.options == ("(none)",)
 
 
+@pytest.mark.slow
 def test_new_empty_study_without_robot(app, made):
     s, pp, cell = app["session"], app["project"], app["cell"]
     dest = pp.new_study(keep_cell=False)
@@ -60,6 +64,7 @@ def test_new_empty_study_without_robot(app, made):
     assert cell.view is None and not cell.sliders and cell.robot_choice.value.startswith("(no robot")
     assert "No robot" in cell.readout.content
     # nothing crashes without a robot: planner / check / paths refuse politely
+    confirm_all(app["stations"])
     app["stations"].start(block=True)
     app["optimize"].start(block=True)
     app["sim"].build(block=True)

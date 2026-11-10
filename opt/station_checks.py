@@ -4,14 +4,54 @@ opt.placement, which re-exports these names)."""
 from __future__ import annotations
 
 import itertools
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 import numpy as np
 
-from core.feasibility import FeasibilityChecker, PointResult
+from core.feasibility import STAGES, FeasibilityChecker, PointResult
 
 if TYPE_CHECKING:
     from opt.placement import Targets
+
+
+class CheckMemo:
+    """Per-plan cache of exact point checks (``check_point``, ``check_point_configs``, and so
+    the localization re-checks of ``_robust``), keyed by the robot base pose rounded to 0.1 mm
+    / 0.01 deg, the point id and the call's options. Station counts and the refinement revisit
+    the same stops, so their checks are reused. ``plan_stations`` installs one on the checker
+    and removes it at the end: a memo never outlives one plan (the setup can change between
+    plans), and point ids stand for fixed points only within a plan.
+
+    Results are copied in and out, because zoning and the paths edit them in place."""
+
+    POS = 1e-4  # m
+    ROT = np.radians(0.01)  # rotation matrix entries ~ angle in rad
+
+    def __init__(self):
+        self.data: dict = {}
+        self.hits = self.misses = 0
+
+    def key(self, T: np.ndarray) -> tuple:
+        return (
+            tuple(np.round(T[:3, 3] / self.POS).astype(np.int64).tolist()),
+            tuple(np.round(T[:3, :3].ravel() / self.ROT).astype(np.int64).tolist()),
+        )
+
+    def get(self, checker: FeasibilityChecker, call: tuple, compute):
+        k = (self.key(checker.T_world_base), *call)
+        if k in self.data:
+            self.hits += 1
+        else:
+            self.misses += 1
+            self.data[k] = _copy(compute())
+        return _copy(self.data[k])
+
+
+def _copy(r):
+    if isinstance(r, dict):
+        return {lab: _copy(v) for lab, v in r.items()}
+    return replace(r, q=None if r.q is None else r.q.copy(), notes=list(r.notes))
 
 
 def _robust(checker, t: Targets, i: int, r: PointResult, v: dict, sites) -> tuple[bool, str]:
@@ -40,7 +80,11 @@ def verify(
 
     def attempt(i: int, k: int) -> bool:
         r = checker.check_point(int(t.ids[i]), t.P_part[i], t.N_part[i], t.groups[i])
-        if r.status != "unreachable":
+        if r.status == "unreachable":  # v7 round 2: keep why: the furthest check any stop got to
+            prev = why.get(i)
+            if prev is None or (prev in STAGES and STAGES.index(r.reason) > STAGES.index(prev)):
+                why[i] = r.reason
+        else:
             ok, reason = _robust(checker, t, i, r, stations[k], sites)
             if ok:
                 results[int(t.ids[i])], assignment[int(t.ids[i])] = r, k

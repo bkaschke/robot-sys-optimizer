@@ -10,6 +10,7 @@ import viser
 from core.configs import config_label
 from core.export import station_pose
 from core.paths import CSV_COLUMNS, path_csv, sequences, trace
+from tests.helpers import confirm_all
 
 
 @pytest.fixture(scope="module")
@@ -27,6 +28,7 @@ def _plan(app, zoning: bool):
     assert app["project"].load_example("rail_long_part")
     stp = app["stations"]
     stp.zoning.value = stp.zoning.options[1 if zoning else 0]
+    confirm_all(stp)
     stp.start(block=True)
     sol = min(s.results, key=lambda r: (len(r.unreached), r.cost))
     assert not sol.unreached
@@ -121,6 +123,7 @@ def test_path_csv(app, zoned):
     assert all(len(r.split(",")) == len(CSV_COLUMNS) for r in rows[1:])
 
 
+@pytest.mark.slow
 def test_gui_build_play_scrub_export(app, zoned):
     s, sol, _ = zoned
     sim = app["sim"]

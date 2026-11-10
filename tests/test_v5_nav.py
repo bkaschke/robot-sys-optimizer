@@ -8,6 +8,7 @@ from shapely.geometry import Point
 
 from core.schema import Pose, Primitive
 from opt.navigate import resample, route
+from tests.helpers import confirm_all
 
 
 def test_route_goes_around_a_disc():
@@ -38,9 +39,11 @@ def app():
     server.stop()
 
 
+@pytest.mark.slow
 def test_mobile_base_drives_around_a_stayout_zone(app):
     s = app["session"]
     assert app["project"].load_example("mobile_amr")
+    confirm_all(app["stations"])
     app["stations"].start(block=True)
     sol = min(s.results, key=lambda r: (len(r.unreached), r.cost))
     assert len(sol.stations) >= 2

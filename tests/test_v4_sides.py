@@ -8,6 +8,7 @@ import viser
 from core.standoff import footprint
 from core.transforms import make_T, rpy_to_matrix
 from opt.contour import ContourSites
+from tests.helpers import confirm_all
 
 
 @pytest.fixture(scope="module")
@@ -20,6 +21,7 @@ def app():
     server.stop()
 
 
+@pytest.mark.slow
 def test_several_robot_sides_on_one_contour(app):
     s, car = app["session"], app["carrier"]
     assert app["project"].load_example("mobile_amr")
@@ -33,6 +35,7 @@ def test_several_robot_sides_on_one_contour(app):
     for t in t_all:  # every sample keeps the gap, whichever side faces the part
         v = sites.full({"t": float(t)})
         assert sites.c.footprint(v).distance(sites.zones.part) == pytest.approx(0.4, abs=0.002)
+    confirm_all(app["stations"])
     app["stations"].start(block=True)
     sol = min(s.results, key=lambda r: (len(r.unreached), r.cost))
     assert not sol.unreached

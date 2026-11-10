@@ -9,6 +9,7 @@ import viser
 from core.schema import Optimizer, Weights
 from opt.cost import cost_breakdown
 from opt.zoning import violations
+from tests.helpers import confirm_all
 
 
 def test_legacy_config_weight_becomes_group_and_flip():
@@ -43,12 +44,14 @@ def app():
     server.stop()
 
 
+@pytest.mark.slow
 def test_thirty_stops_stop_early(app):
     s, stp = app["session"], app["stations"]
     assert app["project"].load_example("rail_long_part")
     assert stp.max_stations.max == 40
     stp.max_stations.value = 30
     t0 = time.time()
+    confirm_all(stp)
     stp.start(block=True)
     counts = sorted(len(r.stations) for r in s.results)
     assert counts[0] == 2 and len(counts) <= 1 + stp.costs.fields["stations"].value and max(counts) <= 4
@@ -56,12 +59,14 @@ def test_thirty_stops_stop_early(app):
     assert all(not r.violations for r in s.results)
 
 
+@pytest.mark.slow
 def test_costs_panel_feeds_the_plan_and_the_project(app):
     s, stp = app["session"], app["stations"]
     stp.max_stations.value = 3
     stp.costs.fields["stations"].value = 0.0
     stp.costs.fields["group"].value = 2.0
     assert s.extra["optimizer"].weights.stations == 0.0 and s.extra["optimizer"].weights.group == 2.0
+    confirm_all(stp)
     stp.start(block=True)
     assert all(r.breakdown["stations"] == 0.0 for r in s.results)
     stp.costs.set_weights(Weights())
@@ -71,11 +76,13 @@ def test_costs_panel_feeds_the_plan_and_the_project(app):
     stp.costs.require_config.value = False
 
 
+@pytest.mark.slow
 def test_requirement_rejects_plans_that_break_it(app):
     s, stp, r = app["session"], app["stations"], app["results"]
     stp.max_stations.value = 1  # the rail needs two stops: one stop cannot reach everything
     stp.costs.require_all.value = True
     try:
+        confirm_all(stp)
         stp.start(block=True)
     finally:
         stp.costs.require_all.value = False
@@ -87,6 +94,7 @@ def test_requirement_rejects_plans_that_break_it(app):
     stp.max_stations.value = 3
     stp.costs.require_all.value = True
     try:
+        confirm_all(stp)
         stp.start(block=True)
     finally:
         stp.costs.require_all.value = False

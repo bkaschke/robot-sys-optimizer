@@ -44,7 +44,7 @@
       {
         "shape": "box",
         "size": [
-          7.0,
+          6.6,
           0.3,
           0.1
         ],
@@ -65,7 +65,8 @@
           ]
         },
         "mesh": null,
-        "units": "m"
+        "units": "m",
+        "stretch": "x"
       },
       {
         "shape": "box",
@@ -91,7 +92,8 @@
           ]
         },
         "mesh": null,
-        "units": "m"
+        "units": "m",
+        "stretch": ""
       },
       {
         "shape": "cylinder",
@@ -113,7 +115,8 @@
           ]
         },
         "mesh": null,
-        "units": "m"
+        "units": "m",
+        "stretch": ""
       }
     ],
     "joints": {
@@ -161,7 +164,12 @@
     "fixed_standoff_m": null,
     "facings": [],
     "part_sides": [],
-    "align_to_part": false
+    "align_to_part": false,
+    "axis_length_m": {
+      "x": 6.6
+    },
+    "end_stop_m": 0.05,
+    "manual_travel": false
   },
   "stayouts": [],
   "end_effector": {
@@ -672,7 +680,14 @@
   },
   "results": [],
   "work": {
-    "q": null,
+    "q": [
+      0.0,
+      -1.5707963267948966,
+      0.0,
+      -1.5707963267948966,
+      0.0,
+      0.0
+    ],
     "selection_mesh": null,
     "selection": [],
     "feasibility": [],

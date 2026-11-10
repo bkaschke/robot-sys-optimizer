@@ -6,6 +6,7 @@ requires-python = ">=3.11,<3.14"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = ["slow: full plans, tool optimization, path builds (skipped by test_batches.py --fast)"]
 
 [tool.ruff]
 line-length = 110

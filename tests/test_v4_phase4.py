@@ -12,6 +12,7 @@ from core.schema import EndEffector, Extension, ExtensionValues, length_ref
 from core.tool import SPLINE_SEGMENTS, ToolModel
 from core.transforms import make_T, rpy_to_matrix
 from opt.reachability import OffsetMap, PoseOffsetMap, ReachMap
+from tests.helpers import confirm_all
 
 
 def _pose_tool(**nominal) -> ToolModel:
@@ -145,10 +146,12 @@ def _make_pose(app, z=(0.1, 0.5), ry=(-45.0, 45.0)):
     return s
 
 
+@pytest.mark.slow
 def test_pose_optimizer_best_cost(app):
     s = _make_pose(app)
     panel = app["tool_opt"]
     panel.shape_evals.value = 6
+    confirm_all(panel)
     panel.start(block=True)
     r = panel.result
     assert r.feasible and r.solution is not None and not r.solution.unreached, r.message

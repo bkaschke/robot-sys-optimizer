@@ -9,6 +9,7 @@ import viser
 
 from core import schema
 from core import targets as tg
+from tests.helpers import confirm_all
 from ui import session as session_mod
 
 
@@ -41,6 +42,7 @@ def worked(tmp_path_factory):
     t.run_generate()
     st["optimize"].start(block=True)
     st["stations"].max_stations.value = 1
+    confirm_all(st["stations"])
     st["stations"].start(block=True)
     st["cell"].set_q(np.radians([10, -80, 70, -80, -90, 15]))
     # settings to restore

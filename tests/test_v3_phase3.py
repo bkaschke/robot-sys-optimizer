@@ -11,6 +11,7 @@ from core.ik import best_copies, expand_to_limits, make_ik
 from core.ik.ur import solve_batch
 from core.robot import Robot
 from opt.contour import SIDES, ContourSites
+from tests.helpers import confirm_all
 
 
 @pytest.fixture(scope="module")
@@ -125,6 +126,7 @@ def test_contour_keeps_the_gap_and_faces_the_part(app):
         assert cosang > np.cos(np.radians(5))  # the chosen side looks at the part
 
 
+@pytest.mark.slow
 def test_contour_plan_full_coverage_fast_and_safe(app):
     s = app["session"]
     assert app["project"].load_example("mobile_amr")  # the example now uses the contour
@@ -135,6 +137,7 @@ def test_contour_plan_full_coverage_fast_and_safe(app):
     orig = st.on_solution
     st.on_solution = lambda: (seen.append(len(s.results)), orig())
     t0 = time.perf_counter()
+    confirm_all(st)
     st.start(block=True)
     dt = time.perf_counter() - t0
     st.on_solution = orig

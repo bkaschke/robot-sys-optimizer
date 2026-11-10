@@ -35,6 +35,7 @@ class OptimizeTab:
         show_q: Callable[[np.ndarray], None],
     ):
         self.s = session
+        self.server = server
         self.on_results = on_results
         self.show_q = show_q
         self._thread: threading.Thread | None = None
@@ -47,9 +48,23 @@ class OptimizeTab:
                 "Check from", CHECK_FROM, hint="each point from its stop in the selected plan, or from here"
             )
             self.run = gui.add_button("Check all targets", color="green")
+            self.gate_md = gui.add_markdown("", visible=False)  # why the check is disabled (T16)
             self.stop = gui.add_button("Cancel", visible=False)
             self.progress = gui.add_progress_bar(0.0, visible=False)
             self.summary = gui.add_markdown("_Not run yet._")
+
+        self.run.on_click(lambda e: self.start(e))
+        self.stop.on_click(lambda e: self._cancel.set())
+        # set by app.py: () -> (Solution | None, {point id: PointResult}) of the Results selection
+        self.solution_points: Callable[[], tuple] | None = None
+        self.move_to_point: Callable[[object, int], None] | None = None  # (solution, point id)
+        self.go_station: Callable[[object, int], None] | None = None  # (solution, station index)
+        self.station_of: dict[int, int] = {}  # plan check: point id -> stop it was checked from
+        self.checked_plan = None  # the solution whose stops the last check used
+
+    def build_inspect(self) -> None:
+        """The *Inspect result* folder; app.py builds it in the Results tab (v7 round 2, T18)."""
+        gui = self.server.gui
         with gui.add_folder("Inspect result", expand_by_default=False):
             self.source = gui.add_dropdown("Show", INSPECT_SOURCES, initial_value=INSPECT_SOURCES[1])
             self.pick = gui.add_slider("Point #", 0, 1, 1, 0)
@@ -60,18 +75,8 @@ class OptimizeTab:
             )
             self.detail = gui.add_markdown("")
             self.goto = gui.add_button("Move robot to this solution")
-
-        self.run.on_click(lambda e: self.start(e))
-        self.stop.on_click(lambda e: self._cancel.set())
         self.pick.on_update(lambda e: self._show_detail())
         self.source.on_update(lambda e: self.refresh_inspect())
-        # set by app.py: () -> (Solution | None, {point id: PointResult}) of the Results selection
-        self.solution_points: Callable[[], tuple] | None = None
-        self.move_to_point: Callable[[object, int], None] | None = None  # (solution, point id)
-        self.go_station: Callable[[object, int], None] | None = None  # (solution, station index)
-        self.station_of: dict[int, int] = {}  # plan check: point id -> stop it was checked from
-        self.checked_plan = None  # the solution whose stops the last check used
-
         self.goto.on_click(lambda e: self.move_robot(e))
         self.step_pts.on_click(lambda e: self.step(-1 if e.target.value.startswith("◀") else 1, e))
 

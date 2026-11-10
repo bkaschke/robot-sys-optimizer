@@ -56,6 +56,7 @@ class ToolOptPanel:
 
             self.costs = CostPanel(server, session, field="tool_weights")  # its own costs (v6)
             self.run = gui.add_button("Optimize tool", color="green")
+            self.gate_md = gui.add_markdown("", visible=False)  # why Run is disabled (T5)
             self.stop = gui.add_button("Cancel", visible=False)
             self.progress = gui.add_progress_bar(0.0, visible=False)
             self.info = gui.add_markdown(
@@ -136,6 +137,10 @@ class ToolOptPanel:
         s = self.s
         if self._thread is not None and self._thread.is_alive():
             return notify(event, "Busy", "Already running")
+        from ui.workflow import setup_reason
+
+        if reason := setup_reason(s):
+            return notify(event, "Setup not confirmed", reason)
         if s.tool is None or s.part is None or not s.targets.points:
             return notify(event, "Cannot optimize", "Need a tool, a part and targets")
         if s.robot is None:
@@ -262,7 +267,9 @@ class ToolOptPanel:
                 f"\n\n**Best designs:**  \n{listing}\n\n{table}"
             )
             log(f"Tool optimization finished: {r.message}.", "done", getattr(self, "_t0", None))
+        run_s = round(time.monotonic() - self._t0, 1) if hasattr(self, "_t0") else None
         for d in ds:  # every offered design is a result to inspect / build paths for
+            d.solution.planner, d.solution.run_s = "tool", run_s  # the Results summary card
             self.s.stamps[d.solution.label] = self._stamp
             self.s.result_points[d.solution.label] = d.point_results
         if ds:

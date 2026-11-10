@@ -37,7 +37,7 @@ SAVED: dict[str, tuple[str, ...]] = {
     "optimize": ("clearance", "joint_margin", "check_from"),
     "objects": ("gizmo_size", "gizmo_top"),
     "placement": ("res", "grid", "half"),
-    "stations": ("max_stations", "step", "refine", "areas", "zoning"),
+    "stations": ("max_stations", "step", "refine", "areas", "zoning", "mode", "objective", "sing_pct"),
     "stations.costs": ("require_all", "require_config"),
     "tool_opt.costs": ("require_all", "require_config"),
     "tool_opt": ("max_stations", "tol", "shape_evals"),

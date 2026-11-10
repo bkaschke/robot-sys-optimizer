@@ -65,6 +65,7 @@ class SimPanel:
             self.jump = gui.add_number("Max joint step (deg)", 20.0, min=1.0, step=5.0)
             self._pattern_fields(gui)
             self.build_btn = gui.add_button("Build paths", color="green")
+            self.gate_md = gui.add_markdown("", visible=False)  # why Build is disabled (T16)
             self.stop = gui.add_button("Cancel", visible=False)
             self.progress = gui.add_progress_bar(0.0, visible=False)
             self.info = gui.add_markdown(

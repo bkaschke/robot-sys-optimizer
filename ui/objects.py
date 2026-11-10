@@ -37,6 +37,7 @@ class ObjectsPanel:
         self.server, self.s = server, session
         self.cell = self.carrier = self.tool = self.targets = self.results = None  # set by app.py
         self.sim = self.stayouts = None
+        self.mover = None  # ui.move_mode.MoveMode, set by app.py
         gui = server.gui
         self.show: dict = {}  # "Robot", "Robot/Tool", "External axis/<body>", ...
         self._dyn: dict[str, list] = {}  # top entry -> names of its current dynamic children
@@ -55,7 +56,22 @@ class ObjectsPanel:
             self.gizmo_top = gui.add_checkbox(
                 "Gizmos always on top", GizmoStyle.on_top, hint="drawn through bodies, so they can be grabbed"
             )
-        with gui.add_folder("Jog", expand_by_default=True):
+            # v7 round 2 (T11): move one object with its gizmo, then Confirm / Cancel (also Alt+click)
+            self.move_pick = gui.add_dropdown("Move object", ("Robot base",))
+            self.move_btn = gui.add_button("Move…", hint="Alt+click an object in 3D does the same")
+        for w in self.show.values():
+            w.on_update(lambda e: self.apply_visibility())
+        self.gizmo.on_update(lambda e: self.apply_gizmo())
+        self.move_btn.on_click(lambda e: self.start_move(self.move_pick.value, e))
+        self.gizmo_size.on_update(lambda e: GizmoStyle.apply(size=self.gizmo_size.value))
+        self.gizmo_top.on_update(lambda e: GizmoStyle.apply(on_top=self.gizmo_top.value))
+
+    def build_jog(self) -> None:
+        """The Jog widgets; app.py calls this inside the Jog panel docked below the tree (v7
+        round 2, T6)."""
+        gui = self.server.gui
+        self.jog_folder = gui.add_folder("Jog", expand_by_default=True)
+        with self.jog_folder:
             self.move = gui.add_dropdown("Move", MOVE)
             self.step = gui.add_number("Step (mm)", 50.0, min=0.1, step=10.0)
             self.angle = gui.add_number("Turn step (deg)", 5.0, min=0.1, step=1.0)
@@ -67,11 +83,6 @@ class ObjectsPanel:
             # filled by the External Axis panel (carrier DOF sliders) and the Cell tab (arm jog)
             self.carrier_slot = gui.add_folder("Carrier position", expand_by_default=True)
             self.arm_slot = gui.add_folder("Robot arm", expand_by_default=True)
-        for w in self.show.values():
-            w.on_update(lambda e: self.apply_visibility())
-        self.gizmo.on_update(lambda e: self.apply_gizmo())
-        self.gizmo_size.on_update(lambda e: GizmoStyle.apply(size=self.gizmo_size.value))
-        self.gizmo_top.on_update(lambda e: GizmoStyle.apply(on_top=self.gizmo_top.value))
         for axis, group in (("x", self.jx), ("y", self.jy), ("z", self.jz), ("rz", self.jr)):
             group.on_click(lambda e, a=axis: self.jog(a, -1.0 if e.target.value.startswith("−") else 1.0))
 
@@ -85,8 +96,26 @@ class ObjectsPanel:
             return [z.name for z in self.s.stayouts]
         return []
 
+    def start_move(self, key: str, event=None) -> bool:
+        """Move mode for one object (Objects -> Move…, Alt+click). False if it can't move."""
+        from ui.move_targets import move_target
+
+        target = move_target(self, key)
+        if target is None or self.mover is None:
+            return False
+        self.mover.start(key, target, event)
+        return True
+
+    def _move_options(self) -> None:
+        from ui.move_targets import move_keys
+
+        keys = tuple(move_keys(self))
+        if keys != tuple(self.move_pick.options):
+            self.move_pick.options = keys
+
     def rebuild_tree(self) -> None:
         """Add / remove the per-body and per-zone entries when those lists changed."""
+        self._move_options()
         for top, kids in TREE.items():
             if not isinstance(kids, str):
                 continue

@@ -10,6 +10,7 @@ import viser
 
 from core.feasibility import CancelledError
 from opt.placement import _solve
+from tests.helpers import confirm_all
 
 
 @pytest.fixture(scope="module")
@@ -26,6 +27,7 @@ def app():
 def _cancel_after(panel, stage: str, text) -> float:
     """Start the panel's job, press Cancel once its progress text shows ``stage`` (inside the
     exact-check stages, whatever the machine load); seconds from Cancel to stop."""
+    confirm_all(panel)
     panel.start()
     t_end = time.perf_counter() + 120
     while stage not in text().lower() and panel._thread.is_alive() and time.perf_counter() < t_end:
