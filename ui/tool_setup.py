@@ -36,6 +36,8 @@ class ToolSetupTab:
         self._nominal: dict = {}
         self._link_boxes: dict = {}
         self.tcp_choice_value: str | None = None  # TCP to keep selected across refreshes
+        self.refresh_listeners: list = []  # () -> None after every refresh (Extension copies)
+        self.nominal_listeners: list = []  # (key, SI value) after a rough-placement slider edit
         gui = server.gui
 
         with gui.add_folder("Library"):
@@ -241,6 +243,8 @@ class ToolSetupTab:
             val = self._nominal[key].value * scale
             if self._commit(lambda d: d["extension"]["nominal"].update({key: val}), e):
                 self._after()
+                for fn in self.nominal_listeners:
+                    fn(key, val)
 
         return handler
 
@@ -330,6 +334,19 @@ class ToolSetupTab:
         self._busy = True
         try:
             self._refresh()
+        finally:
+            self._busy = False
+        for fn in self.refresh_listeners:
+            fn()
+
+    def set_nominal_slider(self, key: str, val: float) -> None:
+        """Move this tab's rough-placement slider for ``key`` to ``val`` (SI) without a commit."""
+        w = self._nominal.get(key)
+        if w is None:
+            return
+        self._busy = True
+        try:
+            w.value = val * tool_extension.FIELDS[key][1]
         finally:
             self._busy = False
 

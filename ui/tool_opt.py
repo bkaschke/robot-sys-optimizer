@@ -36,7 +36,11 @@ class ToolOptPanel:
         self._cancel = threading.Event()
         self.on_start: Callable[[], None] | None = None  # set by app.py: e.g. clear old paths
         gui = server.gui
+        self.confirm_tool: Callable[[], None] | None = None  # app.py: confirm step 3 Tool
+        self.tool_state: Callable[[], str] | None = None  # app.py: step 3's state
         with gui.add_folder("Tool geometry"):
+            # a copy of 3 Tool -> Extension (ui.tool_ext_mirror, filled by app.py)
+            self.ext_slot = gui.add_folder("Tool extension", expand_by_default=False)
             opt = session.extra.get("optimizer") or Optimizer()
             self.max_stations = gui.add_number("Max stations", opt.max_stations, min=1, max=40, step=1)
             self.tol = gui.add_number(
@@ -105,6 +109,13 @@ class ToolOptPanel:
                 hint="the best designs found (also ones that miss points); each is listed in Results",
             )
             self.apply = gui.add_button("Apply to tool", disabled=True)
+            self.confirm_md = gui.add_markdown("", visible=False)
+            self.confirm_btn = gui.add_button(
+                "Confirm tool",
+                color="green",
+                visible=False,
+                hint="confirm step 3 Tool with the applied design (the planners need it confirmed)",
+            )
             self.save_name = gui.add_text("Save as tool", "", hint="library name for the optimized tool")
             self.save_lib = gui.add_button("Save optimized tool to library", disabled=True)
         self.run.on_click(lambda e: self.start(e))
@@ -121,6 +132,14 @@ class ToolOptPanel:
                     f"design {d.solution.label.split(':')[0]} is now the tool's rough placement",
                     ok=True,
                 )
+                self.update_confirm()
+
+        @self.confirm_btn.on_click
+        def _(e) -> None:
+            if self.confirm_tool is not None:
+                self.confirm_tool()
+                notify(e, "Confirmed", "step 3 Tool is confirmed with the applied design", ok=True)
+            self.update_confirm()
 
         @self.save_lib.on_click
         def _(e) -> None:
@@ -129,6 +148,16 @@ class ToolOptPanel:
             except (OSError, ValueError) as err:
                 return notify(e, "Save failed", str(err))
             notify(e, "Saved", str(path), ok=True)
+
+    def update_confirm(self) -> None:
+        """Show *Confirm tool* while step 3 Tool is not confirmed in its current state (after
+        **Apply to tool**, or any tool edit); the line says what the step's state is."""
+        state = self.tool_state() if self.tool_state is not None else "confirmed"
+        show = state != "confirmed" and self.s.tool is not None
+        self.confirm_btn.visible = self.confirm_md.visible = show
+        if show:
+            why = "changed since you confirmed it" if state == "changed" else "not confirmed yet"
+            self.confirm_md.content = f"_Step **3 Tool**: {why}. Confirm it here or in the Tool tab._"
 
     def tube_od(self) -> float | None:
         """The chosen standard tube OD (mm), or None (the tool's own radius)."""
@@ -218,6 +247,7 @@ class ToolOptPanel:
             "st": st,
             "tube_od_mm": self.tube_od(),
             "dress_m": collision.DRESS_M,  # v8 T18
+            "hose": collision.HOSE,
             "family_dirs": [d.strip() for d in self.family.value.split(";") if d.strip()],
         }
         st.family_cost = self.family_cost.value

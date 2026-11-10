@@ -106,6 +106,7 @@ class Workflow:
         self._lock = threading.Lock()
         self.hooks: list = []  # extra callables run by the watcher (e.g. object visibility)
         self.gates: list[tuple] = []  # (run button, reason markdown): disabled until setup is confirmed
+        self.listeners: list = []  # () -> None after every refresh (e.g. Tool geometry's Confirm tool)
 
     # --- widgets (created inside each tab, before its panel) ------------------------------------
 
@@ -227,6 +228,8 @@ class Workflow:
                     if sol_changes
                     else ""
                 )
+        for fn in self.listeners:
+            fn()
 
     def _log_setup(self, todo: list[str]) -> None:
         """Unconfirmed setup steps: the log panel's status line, and a message when they change."""
