@@ -111,6 +111,9 @@ class SimPanel:
             True,
             hint="plan the mobile base / external axis moves between stops (collision checked)",
         )
+        from ui.method_picker import MethodPicker
+
+        self.order = MethodPicker(gui, "point_order", "Point order")  # v8 T14
         self.motion = gui.add_checkbox(  # v8 T7
             "Check moves between points",
             True,
@@ -207,6 +210,8 @@ class SimPanel:
                     carrier_path=carrier_path,
                     group_of={p.id: p.group for p in s.targets.points},
                     park=None if home is not None else s.home_q(),  # clear pose to go via
+                    order=self.order.key,
+                    cycle=s.cycle,
                 )
                 if self.motion.value:  # v8 T7: the arm sweeps between clear samples
                     from core.motion_check import check_moves

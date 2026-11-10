@@ -70,6 +70,7 @@ SAVED: dict[str, tuple[str, ...]] = {
     "results.export": ("screenshot",),
     "sim": (
         "motion",
+        "order",
         "step",
         "jump",
         "pattern",

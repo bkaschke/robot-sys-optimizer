@@ -329,6 +329,8 @@ def trace(
     carrier_path: Callable[..., list[tuple[dict, np.ndarray, bool]]] | None = None,
     group_of: dict[int, str] | None = None,
     park: np.ndarray | None = None,
+    order: str = "pattern",
+    cycle=None,
 ) -> PathPlan:
     """Paths of solution ``sol``. ``points``: point id -> (p, n) in the part frame;
     ``base_poses``: world base pose per station (core.export.station_pose). ``pattern``
@@ -337,12 +339,18 @@ def trace(
     between two stops as (carrier values, T_world_base, clear), the arm held at ``arm_q``
     (home, or the backed-off last pose without a home); ``group_of`` (point id -> target group)
     keeps each face's points in their own sequences. ``park`` (without ``home``): a clear pose
-    the arm goes via when a joint move or the backed-off pose on a carrier move collides."""
+    the arm goes via when a joint move or the backed-off pose on a carrier move collides.
+    ``order`` = "gtsp" (v8 T14) re-orders each sequence for least joint motion
+    (core.path_order_gtsp; ``cycle``: CycleSettings of the joint move times)."""
     tr = _Tracer(checker, part_mesh, step, jump_deg)
     tr.park = home if home is not None else park
     seqs = ordered_sequences(  # unzoned stops: one group per joint configuration
         sol, results, points, pattern, lambda r: config_label(checker.ik, np.asarray(r.q, float)), group_of
     )
+    if order == "gtsp":  # v8 T14: least joint motion within each sequence
+        from core.path_order_gtsp import reorder
+
+        seqs = reorder(seqs, results, points, cycle, checker.robot.model.velocityLimit)
     plan = PathPlan([], step)
     n_seq = max(1, sum(len(v) for v in seqs.values()))
     done = 0
