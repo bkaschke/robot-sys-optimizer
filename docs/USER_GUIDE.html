@@ -33,7 +33,7 @@ mark.hit{background:#ffe066;color:#1d1f23;border-radius:2px;padding:0 1px}mark.h
 nav a.hide{display:none}
 @media print{mark.hit{background:none;color:inherit}}
 </style></head><body>
-<nav><div class='title'>Robot Cell &amp; End-Effector Optimizer: User Guide</div><input id='search' type='search' placeholder='Search the guide  ( / )' aria-label='Search the guide' autocomplete='off'><div id='hits'></div><a class="h2" href="#1-quickstart-5-minutes">1. Quickstart (5 minutes)</a><a class="h2" href="#2-set-up-on-a-new-computer">2. Set up on a new computer</a><a class="h3" href="#21-prerequisites">2.1 Prerequisites</a><a class="h3" href="#22-clone-and-create-the-environment">2.2 Clone and create the environment</a><a class="h3" href="#23-check-the-installation">2.3 Check the installation</a><a class="h3" href="#24-first-launch">2.4 First launch</a><a class="h3" href="#25-portable-copy-for-a-pc-without-conda-or-internet">2.5 Portable copy for a PC without conda or internet</a><a class="h2" href="#3-how-it-works-concepts-and-conventions">3. How it works: concepts and conventions</a><a class="h3" href="#31-frames-and-units">3.1 Frames and units</a><a class="h3" href="#32-target-tolerances-per-group">3.2 Target tolerances (per group)</a><a class="h3" href="#33-the-parametric-end-effector">3.3 The parametric end effector</a><a class="h3" href="#34-what-feasible-means">3.4 What &quot;feasible&quot; means</a><a class="h3" href="#35-the-optimizer-in-three-layers">3.5 The optimizer in three layers</a><a class="h2" href="#4-tools-and-features-tab-by-tab">4. Tools and features, tab by tab</a><a class="h3" href="#guided-steps">Guided steps</a><a class="h3" href="#top-of-the-panel">Top of the panel</a><a class="h3" href="#1-robot--cell-tab">1 Robot &amp; cell tab</a><a class="h3" href="#2-external-axis-tab">2 External axis tab</a><a class="h3" href="#3-tool-tab">3 Tool tab</a><a class="h3" href="#4-targets-tab">4 Targets tab</a><a class="h3" href="#5-optimize-tab">5 Optimize tab</a><a class="h3" href="#optimization-methods">Optimization methods</a><a class="h3" href="#joint-configuration-zones">Joint-configuration zones</a><a class="h3" href="#6-results-tab">6 Results tab</a><a class="h2" href="#5-worked-examples">5. Worked examples</a><a class="h3" href="#example-a-sand-a-flat-plate-from-one-base-static">Example A: sand a flat plate from one base (static)</a><a class="h3" href="#example-b-a-long-rail-part-with-a-7th-axis-rail-carrier">Example B: a long rail part with a 7th-axis rail carrier</a><a class="h3" href="#example-b2-design-a-mobile-robot-from-simple-shapes">Example B2: design a mobile robot from simple shapes</a><a class="h3" href="#example-b3-avoid-joint-configuration-changes-on-the-rail">Example B3: avoid joint-configuration changes on the rail</a><a class="h3" href="#example-b4-tall-wall-with-a-gantry-floor-x-y-axes-or-a-mobile-lift">Example B4: tall wall with a gantry, floor X-Y axes or a mobile lift</a><a class="h3" href="#example-c-the-shortest-probe-for-a-deep-hole">Example C: the shortest probe for a deep hole</a><a class="h3" href="#example-d-your-own-robot-cell">Example D: your own robot cell</a><a class="h3" href="#adding-a-robot">Adding a robot</a><a class="h3" href="#checking-a-plan-in-ursim">Checking a plan in URSim</a><a class="h2" href="#6-files-folders-and-formats">6. Files, folders and formats</a><a class="h2" href="#7-using-it-from-python-headless">7. Using it from Python (headless)</a><a class="h2" href="#8-troubleshooting-and-limitations">8. Troubleshooting and limitations</a><a class="h2" href="#9-for-developers">9. For developers</a><button id='theme' type='button'>Dark mode</button></nav>
+<nav><div class='title'>Robot Cell &amp; End-Effector Optimizer: User Guide</div><input id='search' type='search' placeholder='Search the guide  ( / )' aria-label='Search the guide' autocomplete='off'><div id='hits'></div><a class="h2" href="#1-quickstart-5-minutes">1. Quickstart (5 minutes)</a><a class="h2" href="#2-set-up-on-a-new-computer">2. Set up on a new computer</a><a class="h3" href="#21-prerequisites">2.1 Prerequisites</a><a class="h3" href="#22-clone-and-create-the-environment">2.2 Clone and create the environment</a><a class="h3" href="#23-check-the-installation">2.3 Check the installation</a><a class="h3" href="#24-first-launch">2.4 First launch</a><a class="h3" href="#25-portable-copy-for-a-pc-without-conda-or-internet">2.5 Portable copy for a PC without conda or internet</a><a class="h2" href="#3-how-it-works-concepts-and-conventions">3. How it works: concepts and conventions</a><a class="h3" href="#31-frames-and-units">3.1 Frames and units</a><a class="h3" href="#32-target-tolerances-per-group">3.2 Target tolerances (per group)</a><a class="h3" href="#33-the-parametric-end-effector">3.3 The parametric end effector</a><a class="h3" href="#34-what-feasible-means">3.4 What &quot;feasible&quot; means</a><a class="h3" href="#35-the-optimizer-in-three-layers">3.5 The optimizer in three layers</a><a class="h2" href="#4-tools-and-features-tab-by-tab">4. Tools and features, tab by tab</a><a class="h3" href="#guided-steps">Guided steps</a><a class="h3" href="#top-of-the-panel">Top of the panel</a><a class="h3" href="#1-robot--cell-tab">1 Robot &amp; cell tab</a><a class="h3" href="#2-external-axis-tab">2 External axis tab</a><a class="h3" href="#3-tool-tab">3 Tool tab</a><a class="h3" href="#4-targets-tab">4 Targets tab</a><a class="h3" href="#5-optimize-tab">5 Optimize tab</a><a class="h3" href="#optimization-methods">Optimization methods</a><a class="h3" href="#joint-configuration-zones">Joint-configuration zones</a><a class="h3" href="#6-results-tab">6 Results tab</a><a class="h3" href="#package-builder-tab">Package builder tab</a><a class="h2" href="#5-worked-examples">5. Worked examples</a><a class="h3" href="#example-a-sand-a-flat-plate-from-one-base-static">Example A: sand a flat plate from one base (static)</a><a class="h3" href="#example-b-a-long-rail-part-with-a-7th-axis-rail-carrier">Example B: a long rail part with a 7th-axis rail carrier</a><a class="h3" href="#example-b2-design-a-mobile-robot-from-simple-shapes">Example B2: design a mobile robot from simple shapes</a><a class="h3" href="#example-b3-avoid-joint-configuration-changes-on-the-rail">Example B3: avoid joint-configuration changes on the rail</a><a class="h3" href="#example-b4-tall-wall-with-a-gantry-floor-x-y-axes-or-a-mobile-lift">Example B4: tall wall with a gantry, floor X-Y axes or a mobile lift</a><a class="h3" href="#example-c-the-shortest-probe-for-a-deep-hole">Example C: the shortest probe for a deep hole</a><a class="h3" href="#example-d-your-own-robot-cell">Example D: your own robot cell</a><a class="h3" href="#adding-a-robot">Adding a robot</a><a class="h3" href="#building-urdf-packages">Building URDF packages</a><a class="h3" href="#checking-a-plan-in-ursim">Checking a plan in URSim</a><a class="h2" href="#6-files-folders-and-formats">6. Files, folders and formats</a><a class="h2" href="#7-using-it-from-python-headless">7. Using it from Python (headless)</a><a class="h2" href="#8-troubleshooting-and-limitations">8. Troubleshooting and limitations</a><a class="h2" href="#9-for-developers">9. For developers</a><button id='theme' type='button'>Dark mode</button></nav>
 <main>
 <h1 id="robot-cell--end-effector-optimizer-user-guide">Robot Cell &amp; End-Effector Optimizer: User Guide</h1>
 <p>A browser-based tool that answers two questions for a robotic process (sanding, scanning, grinding, gripping, spraying):</p>
@@ -541,6 +541,54 @@ $PY scripts/make_portable.py          # -&gt; dist/robot-sys-optimizer-portable-
 <p>Files go to <code>&lt;project folder&gt;/export/</code> and also download in the browser.</p>
 </li>
 </ul>
+<h3 id="package-builder-tab">Package builder tab</h3>
+<p>Builds a <strong>URDF package</strong> (a zip: URDF + meshes + <code>package.yaml</code>) for an <strong>end effector</strong>, a <strong>rail</strong>, a <strong>gantry</strong> or a <strong>mobile base</strong>, from boxes, cylinders and meshes, and loads it into the project. Step by step: <a href="#building-urdf-packages">Building URDF packages</a>.</p>
+<table>
+<thead>
+<tr>
+<th>Control</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Package type</strong> / <strong>Name</strong></td>
+<td><em>End effector (tool)</em>, <em>Rail</em>, <em>Gantry</em> or <em>Mobile base</em>. Changing the type keeps the parts (stages that do not exist in the new type are moved).</td>
+</tr>
+<tr>
+<td><strong>Parts</strong></td>
+<td><strong>Add box</strong>, <strong>Add cylinder</strong>, <strong>Add mesh (STL/OBJ/PLY/STEP)</strong> (<em>Mesh units</em> for STL / OBJ / PLY; STEP files are meshed with CadQuery in metres). Pick a <em>Part</em> to edit its name, <strong>Stage</strong> (which moving stage it rides on: <em>tool</em>; <em>fixed</em> track, <em>bridge</em> moving in X, <em>carriage</em>; the mobile <em>chassis</em>; <em>lift stage</em>), size and pose (fields in mm / deg, or drag its gizmo). Boxes and cylinders sit on their bottom face, centred. <strong>Remove part</strong>.</td>
+</tr>
+<tr>
+<td><strong>Frames and travel</strong></td>
+<td>Tool: the <strong>TCPs</strong> (<strong>Add TCP</strong>, name, pose; z out of the tool toward the part). Carriers: the <strong>Robot mount</strong> pose (where the robot's base sits; a gantry's is usually turned 180° about x so the robot hangs), <strong>X travel</strong> (rail, gantry), <strong>Y travel</strong> (gantry) and <strong>Lift travel</strong> (any carrier; 0, 0 = no lift), in mm.</td>
+</tr>
+<tr>
+<td><strong>Preview</strong></td>
+<td><em>Show preview</em> draws the package at <em>Preview at</em> (default 3 m to the side, clear of the cell): parts coloured by stage, the TCP or robot-mount frames, the package frame's axes.</td>
+</tr>
+<tr>
+<td><strong>Check</strong></td>
+<td>Lists what still stops an export (no parts, a box without size, a tool without a TCP, a missing travel range...).</td>
+</tr>
+<tr>
+<td><strong>Export package (.zip)</strong></td>
+<td>Writes <code>&lt;project&gt;/export/packages/&lt;name&gt;/</code> and <code>&lt;name&gt;.zip</code>, and downloads the zip.</td>
+</tr>
+<tr>
+<td><strong>Use in this project</strong></td>
+<td>Writes <code>&lt;project&gt;/assets/packages/&lt;name&gt;/</code> and loads it: a tool becomes the current tool (Tool tab: set the process and extension ranges, then <strong>Save to library</strong>); a rail, gantry or mobile base becomes the external axis (External axis tab: its bodies, travel ranges and robot mount are set; the standoffs, keep-outs, carrier frame and the mobile base's floor area stay as they were).</td>
+</tr>
+<tr>
+<td><strong>Open package (.zip)</strong></td>
+<td>Reads a package made here, by hand or exported from CAD (see the conventions below) back into the builder to edit or use.</td>
+</tr>
+<tr>
+<td><strong>New package</strong></td>
+<td>Starts an empty package of the current type.</td>
+</tr>
+</tbody>
+</table>
 <hr />
 <h2 id="5-worked-examples">5. Worked examples</h2>
 <h3 id="example-a-sand-a-flat-plate-from-one-base-static">Example A: sand a flat plate from one base (static)</h3>
@@ -617,6 +665,48 @@ $PY scripts/make_portable.py          # -&gt; dist/robot-sys-optimizer-portable-
 <li>Run <code>python scripts/check_robot.py &lt;name&gt;</code>. It loads the files, checks the IK against the URDF on 500 random poses (wrong OPW parameters fail here with the size of the error), and checks the base joint range, reach and home pose. Fix anything marked FAIL.</li>
 </ol>
 <p>The first plan with a new robot builds its reachability map (about a minute per tool), which is then cached.</p>
+<h3 id="building-urdf-packages">Building URDF packages</h3>
+<p>A package describes an end effector or an external axis (rail, gantry, mobile base) as a URDF with its meshes, in a form this app reads back (and other URDF software understands). You can make one in the <strong>Package builder</strong> tab, or write / export it yourself and open it there.</p>
+<p><strong>In the Package builder (from CAD meshes):</strong></p>
+<ol>
+<li>In CAD, export each body that moves on its own (track, carriage, lift column, tool housing...) as an STL or STEP file, <strong>all in one common frame</strong>: for a tool, the robot flange (origin at the flange centre, z out of the flange); for a rail or gantry, the carrier frame on the floor (x along the travel); for a mobile base, the base centre on the floor (x forward). Then every part's pose in the builder is zero. Export them <strong>at zero travel</strong> (carriage at the middle of the rail, lift down).</li>
+<li>Package builder → <em>Package type</em> and <em>Name</em>. <strong>Add mesh</strong> for each file (<em>Mesh units</em> for STL: usually mm), or <strong>Add box / Add cylinder</strong> for simple shapes. Give each part its <strong>Stage</strong>: what it moves with.</li>
+<li>Tool: add the <strong>TCP</strong>(s), z pointing out of the tool toward the part. Carrier: place the <strong>Robot mount</strong> (the robot's base frame: z up, or down for a hanging gantry robot) and set the <strong>travel</strong> ranges (mm, relative to the zero position you exported in).</li>
+<li><em>Show preview</em>, check it from all sides, <strong>Check</strong>, then <strong>Export package (.zip)</strong> to keep or share it, and <strong>Use in this project</strong> to load it.</li>
+<li>Finish in the normal tabs: Tool tab (process, contact faces, extension ranges, <strong>Save to library</strong>) or External axis tab (standoffs, keep-outs, the carrier's place in the cell).</li>
+</ol>
+<p><strong>Writing or exporting the URDF yourself</strong> (e.g. with a SolidWorks or Fusion URDF exporter): zip the folder with the <code>.urdf</code> and its meshes (relative paths or <code>package://</code> URIs) and open it in the builder. It reads any link names; it needs:</p>
+<table>
+<thead>
+<tr>
+<th>Package</th>
+<th>Structure</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Tool</td>
+<td>No moving joints. The root link is the <strong>mount</strong>: it sits on the robot flange (z out of the flange). Fixed frames whose names start with <code>tcp</code> (<code>tcp_pad</code>, <code>tcp</code>) become the TCPs (z out of the tool). The Tool tab's <strong>Upload tool URDF (.zip)</strong> reads these TCP frames too.</td>
+</tr>
+<tr>
+<td>Rail</td>
+<td>A <strong>prismatic</strong> joint along <strong>+x</strong> of the root (the track frame). Links above it move (carriage); links not above it are fixed.</td>
+</tr>
+<tr>
+<td>Gantry</td>
+<td>Prismatic joints along <strong>+x</strong> (the bridge) and <strong>+y</strong> (the carriage, below the bridge in the tree).</td>
+</tr>
+<tr>
+<td>Mobile base</td>
+<td>No x / y joints; the root is the chassis frame (origin on the floor, x forward). The planner drives it on the floor.</td>
+</tr>
+<tr>
+<td>Any carrier</td>
+<td>Optionally a prismatic joint along <strong>+z</strong>: the lift (links above it rise). A frame named <strong><code>robot_mount</code></strong>: where the robot's base goes.</td>
+</tr>
+</tbody>
+</table>
+<p>Joint axes are judged in the root frame at zero travel (an exporter's joint origins are fine); rotary joints are refused. Box and cylinder geometry, meshes (STL / OBJ / PLY; other formats such as DAE are converted to STL) and their <code>scale</code> (1, 0.001 for mm, 0.0254 for inches; others are converted) are read from the collision elements (the visual ones when a link has none). An optional <code>package.yaml</code> next to the URDF sets <code>kind: tool | rail | gantry | mobile</code>, <code>name</code> and <code>description</code>; without it the kind follows from the joints. The builder writes exactly this structure: <code>mount</code> + <code>tcp_&lt;name&gt;</code> (tool); <code>base_link</code> --<code>axis_x</code>--&gt; <code>carriage</code> (rail); <code>base_link</code> --<code>axis_x</code>--&gt; <code>bridge</code> --<code>axis_y</code>--&gt; <code>carriage</code> (gantry); <code>base_link</code> (mobile); then <code>lift</code> --&gt; <code>lift_stage</code> and <code>robot_mount</code>.</p>
 <hr />
 <h3 id="checking-a-plan-in-ursim">Checking a plan in URSim</h3>
 <p><code>scripts/ursim_check.py</code> (v8) runs an exported plan in <strong>URSim</strong>, Universal Robots' simulator (e.g. the <code>universalrobots/ursim_e-series</code> Docker image with ports 29999 and 30002 published). Export <strong>TCP poses (CSV)</strong>, then:</p>

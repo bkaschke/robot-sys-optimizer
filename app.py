@@ -288,6 +288,10 @@ def build_app(
         )
         results.chosen_listeners.append(pareto.refresh)
     state["results"] = results
+    with tabs.add_tab("Package builder"):  # URDF packages for tools, external axes, mobile bases
+        from ui.package_builder import PackageBuilder
+
+        builder = PackageBuilder(server, session, tool_tab=tool, carrier_panel=carrier)
     tool_opt.planner_options = stations.options
     workflow.gate(stations.run, stations.gate_md)  # optimizers need a confirmed setup (T5)
     workflow.gate(stations.quick_run, stations.quick_gate_md)
@@ -394,6 +398,7 @@ def build_app(
         tolerance=tolerance,
         cycle=cycle,
         compare=compare,
+        builder=builder,
         pareto=pareto,
         cable=cable,
         tool_ext_copy=tool_ext_copy,

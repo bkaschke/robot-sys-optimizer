@@ -374,6 +374,22 @@ It also re-runs the localization checks for the chosen solutions. It used to be 
 
   Files go to `<project folder>/export/` and also download in the browser.
 
+### Package builder tab
+
+Builds a **URDF package** (a zip: URDF + meshes + `package.yaml`) for an **end effector**, a **rail**, a **gantry** or a **mobile base**, from boxes, cylinders and meshes, and loads it into the project. Step by step: [Building URDF packages](#building-urdf-packages).
+
+| Control | What it does |
+|---|---|
+| **Package type** / **Name** | *End effector (tool)*, *Rail*, *Gantry* or *Mobile base*. Changing the type keeps the parts (stages that do not exist in the new type are moved). |
+| **Parts** | **Add box**, **Add cylinder**, **Add mesh (STL/OBJ/PLY/STEP)** (*Mesh units* for STL / OBJ / PLY; STEP files are meshed with CadQuery in metres). Pick a *Part* to edit its name, **Stage** (which moving stage it rides on: *tool*; *fixed* track, *bridge* moving in X, *carriage*; the mobile *chassis*; *lift stage*), size and pose (fields in mm / deg, or drag its gizmo). Boxes and cylinders sit on their bottom face, centred. **Remove part**. |
+| **Frames and travel** | Tool: the **TCPs** (**Add TCP**, name, pose; z out of the tool toward the part). Carriers: the **Robot mount** pose (where the robot's base sits; a gantry's is usually turned 180° about x so the robot hangs), **X travel** (rail, gantry), **Y travel** (gantry) and **Lift travel** (any carrier; 0, 0 = no lift), in mm. |
+| **Preview** | *Show preview* draws the package at *Preview at* (default 3 m to the side, clear of the cell): parts coloured by stage, the TCP or robot-mount frames, the package frame's axes. |
+| **Check** | Lists what still stops an export (no parts, a box without size, a tool without a TCP, a missing travel range...). |
+| **Export package (.zip)** | Writes `<project>/export/packages/<name>/` and `<name>.zip`, and downloads the zip. |
+| **Use in this project** | Writes `<project>/assets/packages/<name>/` and loads it: a tool becomes the current tool (Tool tab: set the process and extension ranges, then **Save to library**); a rail, gantry or mobile base becomes the external axis (External axis tab: its bodies, travel ranges and robot mount are set; the standoffs, keep-outs, carrier frame and the mobile base's floor area stay as they were). |
+| **Open package (.zip)** | Reads a package made here, by hand or exported from CAD (see the conventions below) back into the builder to edit or use. |
+| **New package** | Starts an empty package of the current type. |
+
 ---
 
 ## 5. Worked examples
@@ -455,6 +471,30 @@ Robots live in `assets/robots/<name>/`: the URDF with its meshes and a `spec.yam
 4. Run `python scripts/check_robot.py <name>`. It loads the files, checks the IK against the URDF on 500 random poses (wrong OPW parameters fail here with the size of the error), and checks the base joint range, reach and home pose. Fix anything marked FAIL.
 
 The first plan with a new robot builds its reachability map (about a minute per tool), which is then cached.
+
+### Building URDF packages
+
+A package describes an end effector or an external axis (rail, gantry, mobile base) as a URDF with its meshes, in a form this app reads back (and other URDF software understands). You can make one in the **Package builder** tab, or write / export it yourself and open it there.
+
+**In the Package builder (from CAD meshes):**
+
+1. In CAD, export each body that moves on its own (track, carriage, lift column, tool housing...) as an STL or STEP file, **all in one common frame**: for a tool, the robot flange (origin at the flange centre, z out of the flange); for a rail or gantry, the carrier frame on the floor (x along the travel); for a mobile base, the base centre on the floor (x forward). Then every part's pose in the builder is zero. Export them **at zero travel** (carriage at the middle of the rail, lift down).
+2. Package builder → *Package type* and *Name*. **Add mesh** for each file (*Mesh units* for STL: usually mm), or **Add box / Add cylinder** for simple shapes. Give each part its **Stage**: what it moves with.
+3. Tool: add the **TCP**(s), z pointing out of the tool toward the part. Carrier: place the **Robot mount** (the robot's base frame: z up, or down for a hanging gantry robot) and set the **travel** ranges (mm, relative to the zero position you exported in).
+4. *Show preview*, check it from all sides, **Check**, then **Export package (.zip)** to keep or share it, and **Use in this project** to load it.
+5. Finish in the normal tabs: Tool tab (process, contact faces, extension ranges, **Save to library**) or External axis tab (standoffs, keep-outs, the carrier's place in the cell).
+
+**Writing or exporting the URDF yourself** (e.g. with a SolidWorks or Fusion URDF exporter): zip the folder with the `.urdf` and its meshes (relative paths or `package://` URIs) and open it in the builder. It reads any link names; it needs:
+
+| Package | Structure |
+|---|---|
+| Tool | No moving joints. The root link is the **mount**: it sits on the robot flange (z out of the flange). Fixed frames whose names start with `tcp` (`tcp_pad`, `tcp`) become the TCPs (z out of the tool). The Tool tab's **Upload tool URDF (.zip)** reads these TCP frames too. |
+| Rail | A **prismatic** joint along **+x** of the root (the track frame). Links above it move (carriage); links not above it are fixed. |
+| Gantry | Prismatic joints along **+x** (the bridge) and **+y** (the carriage, below the bridge in the tree). |
+| Mobile base | No x / y joints; the root is the chassis frame (origin on the floor, x forward). The planner drives it on the floor. |
+| Any carrier | Optionally a prismatic joint along **+z**: the lift (links above it rise). A frame named **`robot_mount`**: where the robot's base goes. |
+
+Joint axes are judged in the root frame at zero travel (an exporter's joint origins are fine); rotary joints are refused. Box and cylinder geometry, meshes (STL / OBJ / PLY; other formats such as DAE are converted to STL) and their `scale` (1, 0.001 for mm, 0.0254 for inches; others are converted) are read from the collision elements (the visual ones when a link has none). An optional `package.yaml` next to the URDF sets `kind: tool | rail | gantry | mobile`, `name` and `description`; without it the kind follows from the joints. The builder writes exactly this structure: `mount` + `tcp_<name>` (tool); `base_link` --`axis_x`--> `carriage` (rail); `base_link` --`axis_x`--> `bridge` --`axis_y`--> `carriage` (gantry); `base_link` (mobile); then `lift` --> `lift_stage` and `robot_mount`.
 
 ---
 

@@ -291,10 +291,18 @@ class ToolSetupTab:
         dest = self.s.project_dir / "assets" / "tools" / name
         try:
             info = import_urdf_zip(f.content, dest, require_actuated=False)
+            tcps = [TCP(name="tcp")]
+            try:  # frames named tcp* in the URDF (a tool package) become the TCPs
+                from core.urdf_package import read_urdf
+
+                found = read_urdf(info.path, "tool").tcps
+                tcps = [TCP(name=t.name, T_head_tcp=t.pose) for t in found] or tcps
+            except (ValueError, OSError):  # moving joints etc.: place the TCP by hand
+                pass
             ee = EndEffector(  # new tools use the v2 pose extension (head pose with ranges)
                 name=name,
                 urdf=self.s.relative(info.path),
-                tcps=[TCP(name="tcp")],
+                tcps=tcps,
                 extension=Extension(type="pose"),
             )
             self.s.set_tool(ee)
