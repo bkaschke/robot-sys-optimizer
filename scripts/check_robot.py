@@ -44,7 +44,7 @@ def check(name: str, n: int = 500) -> list[tuple[bool, str]]:
                 ""
                 if analytic
                 else ": numeric only (feasibility check works; station planner, tool "
-                "optimizer and reachability maps need ur_analytic or opw)"
+                "optimizer and reachability maps need ur_analytic, opw or offset_wrist)"
             ),
         )
     )
@@ -64,7 +64,7 @@ def check(name: str, n: int = 500) -> list[tuple[bool, str]]:
     )
     turn = robot.urdf_upper[0] - robot.urdf_lower[0]
     out.append(
-        (turn >= 2 * np.pi - 1e-6, f"joint 1 range {np.degrees(turn):.0f} deg (maps need a full turn)")
+        (turn >= np.radians(359.0), f"joint 1 range {np.degrees(turn):.1f} deg (maps need a full turn, 359+)")
     )
     out.append((robot.spec.reach_m is not None, f"reach_m: {robot.spec.reach_m}"))
     h = robot.spec.home_deg

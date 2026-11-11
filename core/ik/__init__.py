@@ -15,7 +15,8 @@ Every solver has the same interface (v7: the planners, maps and paths only use t
     base_height                      shoulder height above the base frame (maps)
 
 Solvers: ``ur_analytic`` (core.ik.ur, UR family), ``opw`` (core.ik.opw, industrial arms with
-a spherical wrist: FANUC, ABB, KUKA, Yaskawa ...), ``numeric`` (core.ik.numeric, any chain;
+a spherical wrist: FANUC, ABB, KUKA, Yaskawa ...), ``offset_wrist`` (core.ik.offset_wrist,
+cobots with an offset wrist: FANUC CRX, ABB GoFa / PoWa; q6 sweep), ``numeric`` (core.ik.numeric, any chain;
 slow, no maps).
 """
 
@@ -92,6 +93,10 @@ def make_ik(robot: Robot, kind: str | None = None):
         from core.ik.opw import OPWIK
 
         return OPWIK(robot)
+    if kind == "offset_wrist":
+        from core.ik.offset_wrist import OffsetWristIK
+
+        return OffsetWristIK(robot)
     if kind == "numeric":
         from core.ik.numeric import NumericIK
 

@@ -65,7 +65,7 @@ class RobotSpec(BaseModel):
     urdf: str
     base_link: str
     flange_link: str
-    ik: Literal["ur_analytic", "opw", "numeric"]
+    ik: Literal["ur_analytic", "opw", "offset_wrist", "numeric"]
     reach_m: float | None = Field(default=None, gt=0)
     # how the controller writes a frame (userframe export): "ur" = x y z + rotation vector,
     # "fanuc" = X Y Z W P R, "matrix" = the 4 x 4 transform only (always added as well)

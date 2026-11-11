@@ -175,7 +175,8 @@ class StationsPanel:
             return notify(
                 event,
                 "Not supported",
-                "Station planning needs an analytic IK solver (spec.yaml: ik ur_analytic or opw). "
+                "Station planning needs an analytic IK solver (spec.yaml: ik ur_analytic, opw "
+                "or offset_wrist). "
                 "See the user guide, Adding a robot.",
             )
         sites = s.sites()

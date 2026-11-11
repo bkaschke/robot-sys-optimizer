@@ -41,7 +41,7 @@ class Robot(_Model):
     flange_link: str = "tool0"
     mount: Literal["floor", "wall", "ceiling", "custom"] = "floor"
     base_pose: Pose = Field(default_factory=Pose)
-    ik: Literal["ur_analytic", "opw", "numeric"] = "numeric"
+    ik: Literal["ur_analytic", "opw", "offset_wrist", "numeric"] = "numeric"
     # home pose saved with the project (deg, one per joint); None = the robot's spec.yaml home
     home_deg: list[float] | None = None
     # joint limits saved with the project (deg, (min, max) per joint); None = the URDF limits

@@ -63,12 +63,17 @@ def within_limits(q: np.ndarray, lo: np.ndarray, hi: np.ndarray) -> np.ndarray:
     return np.all(k_lo <= k_hi, axis=-1)
 
 
+FULL_TURN = np.radians(359.0)  # a base joint range the map treats as a full turn
+
+
 def map_limits(robot: Robot) -> tuple[np.ndarray, np.ndarray]:
     """Joint limits the map uses: the robot's (user limits included), except joint 1 keeps the
     URDF range. The map is symmetric about the base z axis, so it cannot hold a narrower base
     joint; the exact checks (core.feasibility) apply that limit."""
     lo, hi = robot.lower.copy(), robot.upper.copy()
     lo[0], hi[0] = getattr(robot, "urdf_lower", lo)[0], getattr(robot, "urdf_upper", hi)[0]
+    if hi[0] - lo[0] >= FULL_TURN:  # e.g. FANUC's +-179.9 deg: a full turn for the map
+        lo[0], hi[0] = min(lo[0], -np.pi), max(hi[0], np.pi)
     return lo, hi
 
 
@@ -100,11 +105,12 @@ class ReachMap:
         ik = make_ik(robot)
         if not getattr(ik, "batch", False):
             raise NotImplementedError(
-                f"reachability maps need an analytic IK solver (spec.yaml ik: ur_analytic or opw); "
+                f"reachability maps need an analytic IK solver (spec.yaml ik: ur_analytic, opw "
+                f"or offset_wrist); "
                 f"{robot.spec.name} uses '{robot.spec.ik}'"
             )
         lower, upper = map_limits(robot)
-        if upper[0] - lower[0] < 2 * np.pi - 1e-6:
+        if upper[0] - lower[0] < 2 * np.pi - 1e-9:
             raise NotImplementedError("map symmetry needs a full-turn first joint")
         tcp_len = float(np.linalg.norm(T_flange_tcp[:3, 3]))
         reach = (robot.spec.reach_m or 2.0) + tcp_len + settings.res

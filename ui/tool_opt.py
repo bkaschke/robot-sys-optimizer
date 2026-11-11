@@ -220,7 +220,8 @@ class ToolOptPanel:
             return notify(
                 event,
                 "Not supported",
-                "Tool optimization needs an analytic IK solver (spec.yaml: ik ur_analytic or opw). "
+                "Tool optimization needs an analytic IK solver (spec.yaml: ik ur_analytic, opw "
+                "or offset_wrist). "
                 "See the user guide, Adding a robot.",
             )
         opts = self.planner_options() if self.planner_options else {"zoning": False}
