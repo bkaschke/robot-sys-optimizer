@@ -105,3 +105,26 @@ def test_sim_panel_has_the_between_groups_choice(rail):
     sim = rail[0]["sim"]
     assert sim.between.value == "Collision-free joint path"
     assert set(BETWEEN_LABELS.values()) == {"direct", "home"} and "between" in SAVED["sim"]
+
+
+def test_targets_watcher_during_a_build_keeps_the_new_paths(rail):
+    """The 1 s targets watcher ticking while a build finishes (here: during the motion check)
+    must not clear the half-built plan ('NoneType' has no attribute 'stations')."""
+    app, s, sol, _ = rail
+    sim = app["sim"]
+    sim.reset("test")
+    sim.motion.value = True
+    orig = sim._build_progress
+
+    def tick(f):
+        orig(f)
+        sim.check_targets()
+
+    sim._build_progress = tick
+    try:
+        sim.build(block=True)
+    finally:
+        sim._build_progress = orig
+        sim.motion.value = False
+    assert sim.plan is not None and sim.label == sim.selected().label
+    assert "failed" not in sim.info.content

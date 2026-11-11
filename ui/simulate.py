@@ -193,7 +193,7 @@ class SimPanel:
 
         def work() -> None:
             try:
-                self.plan = trace(
+                plan = trace(  # local until done: the 1 s targets watcher must not see it half-built
                     checker,
                     mesh,
                     sol,
@@ -218,15 +218,15 @@ class SimPanel:
                     from core.motion_check import check_moves
 
                     self._build_progress(1.0)
-                    check_moves(checker, self.plan, cancelled=self._cancel.is_set)
-                self.label = sol.label
-                self._targets_key = targets_key
-                self.home_blocked = []  # stops where the home pose itself collides
+                    check_moves(checker, plan, cancelled=self._cancel.is_set)
+                blocked = []  # stops where the home pose itself collides
                 if home is not None:
-                    for st in self.plan.stations:
+                    for st in plan.stations:
                         checker.set_base(st.T_world_base)
                         if checker.scene.collides(home):
-                            self.home_blocked.append(st.station)
+                            blocked.append(st.station)
+                self.label, self._targets_key, self.home_blocked = sol.label, targets_key, blocked
+                self.plan = plan  # last: key and label already match it
                 self._after_build()
             except CancelledError:
                 self.info.content = "**Cancelled.**"
