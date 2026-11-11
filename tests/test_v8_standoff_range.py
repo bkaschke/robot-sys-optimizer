@@ -77,3 +77,14 @@ def test_plan_with_a_standoff_range(app):
         assert 0.4 - 1e-9 <= stn.carrier["gap"] <= 0.7 + 1e-9
         gap = sites.c.footprint(stn.carrier).distance(sites.zones.part)
         assert 0.398 <= gap <= 0.702
+
+
+def test_gui_range_fields(app):
+    car, s = app["carrier"], app["session"]
+    assert app["project"].load_example("mobile_amr")
+    assert car.max_so.visible and car.max_so.value == car.fixed_so.value == 400.0
+    car.max_so.value = 700.0
+    assert car.commit() and s.base.max_standoff_m == pytest.approx(0.7)
+    assert s.sites().dofs == ["t", "gap"]
+    car.fixed_so.value, car.max_so.value = 500.0, 300.0  # up to below from: one fixed standoff
+    assert car.commit() and s.base.max_standoff_m is None and s.base.fixed_standoff_m == pytest.approx(0.5)

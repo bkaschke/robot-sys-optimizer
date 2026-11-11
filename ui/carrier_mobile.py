@@ -31,7 +31,7 @@ def build_mobile(gui, panel) -> None:
         "Standoff from (mm)", 400.0, min=0.0, step=10.0, hint="mobile base outline to part outline"
     )
     panel.max_so = gui.add_number(
-        "Standoff up to (mm)", 400.0, min=0.0, step=10.0, hint="the same as *from* = one fixed standoff"
+        "Standoff up to (mm)", 400.0, min=0.0, step=10.0, hint="at or below *from* = one fixed standoff"
     )
     panel.part_note = gui.add_markdown("**Part sides it may work from** (part frame; none: all)")
     panel.part_boxes = {k: gui.add_checkbox(label, False) for k, label in PART_SIDES.items()}
@@ -76,7 +76,7 @@ def collect(panel, kind: str) -> dict:
         "facings": sides,
         "fixed_standoff_m": panel.fixed_so.value / 1000 if sides else None,
         "max_standoff_m": panel.max_so.value / 1000
-        if sides and panel.max_so.value != panel.fixed_so.value
+        if sides and panel.max_so.value > panel.fixed_so.value
         else None,
         "part_sides": [k for k, box in panel.part_boxes.items() if box.value] if sides else [],
         "align_to_part": bool(panel.align.value) and kind in ("rail", "gantry"),
