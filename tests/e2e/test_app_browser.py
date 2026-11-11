@@ -211,7 +211,8 @@ def test_joystick_pad_drives_the_carrier(live):
     b.click(pos[0], pos[1])
     settle(1.5)
     pad = b.eval(
-        "(()=>{const p=document.querySelector('.rso-joy');if(!p)return null;p.scrollIntoView({block:'center'});"
+        "(()=>{const p=document.querySelector('.rso-joy');if(!p)return null;"
+        "p.scrollIntoView({block:'center'});"
         "const r=p.getBoundingClientRect();return [r.left+r.width/2,r.top+r.height/2,r.width]})()"
     )
     assert pad is not None, "joystick pad not rendered"
