@@ -179,11 +179,12 @@ def test_jog_rail_clamped_mobile_unlimited_part_and_base(app):
         ob.jog("x", +1)
     assert car._dof["s"].value == pytest.approx(hi)  # rail stops at the end of its travel
     assert app["project"].load_example("mobile_amr")
-    x_max = car._dof["x"].max
-    for _ in range(int(x_max / 1000) + 3):
-        ob.jog("x", +1)
+    assert car._dof["x"].max is None  # a number field: a mobile base has no limits (2026-11-11)
     c = s.carrier()
-    assert car.current(c)["x"] > x_max / 1000  # past the old slider range: no limit
+    x_max = float(c.bounds[c.dofs.index("x")][1])  # the planner's search range
+    for _ in range(int(x_max) + 3):
+        ob.jog("x", +1)
+    assert car.current(c)["x"] > x_max  # past the search range: no limit
     assert np.allclose(s.T_world_base, c.T_world_base(car.current(c)), atol=1e-9)
     yaw0 = car.current(c)["yaw"]
     ob.angle.value = 90.0

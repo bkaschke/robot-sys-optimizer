@@ -190,6 +190,10 @@ def build_app(
     with tab_handles["External Axis"]:
         workflow.header("External Axis")
         carrier = CarrierPanel(server, session, set_base=cell.set_base, dof_container=objects.carrier_slot)
+    from ui.joystick import DrivePanel
+
+    drive = DrivePanel(server, carrier, objects.drive_slot)  # carrier gizmo + joystick (left Jog)
+    cell.listeners.append(lambda _T: drive.refresh())
     with tab_handles["Tool Setup"]:
         workflow.header("Tool Setup")
         tool = ToolSetupTab(server, session)
@@ -381,6 +385,7 @@ def build_app(
         workflow.start_watch()
     server.gui.add_markdown(UR_NOTICE)
 
+    state["drive"] = drive
     state.update(
         tabs=tab_handles,
         cell=cell,

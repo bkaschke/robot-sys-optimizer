@@ -43,13 +43,22 @@ class JogPanel:
             self.allow = gui.add_checkbox(
                 "Allow collisions", False, hint="jog steps into the floor, part or external axis"
             )
+            self.show_gizmo = gui.add_checkbox(
+                "Show TCP gizmo",
+                False,
+                hint="drag the jog point in 3D, with the axes of the chosen frame (Joint: world axes)",
+            )
             self.readout = gui.add_markdown("")
+        from ui.jog_gizmos import ArmGizmo
+
+        self.gizmo = ArmGizmo(server, self)
+        self.show_gizmo.on_update(lambda _e: self.gizmo.set_visible(self.show_gizmo.value))
         for group, sign in ((self.minus, -1), (self.plus, 1), (self.turn_minus, -1), (self.turn_plus, 1)):
             group.on_click(lambda e, sg=sign: self.jog(e.target.value, sg, e))
         self.j_minus.on_click(lambda e: self.jog(e.target.value, -1, e))
         self.j_plus.on_click(lambda e: self.jog(e.target.value, +1, e))
         self.frame.on_update(lambda _e: self.refresh())
-        self.point.on_update(lambda _e: self.update_readout())
+        self.point.on_update(lambda _e: self.update_readout())  # the readout re-places the gizmo
         self.refresh()
 
     # --- state ---------------------------------------------------------------------------------
@@ -115,16 +124,25 @@ class JogPanel:
             notify(event, "No part", "Load a part to jog in its frame")
             return False
         amount = sign * (self.step.value / 1000 if axis in AXES[:3] else np.radians(self.turn.value))
-        T_new = jog_pose(T, R, axis, amount)
+        return self.move_point(jog_pose(T, R, axis, amount), event)
+
+    def move_point(self, T_new: np.ndarray, event=None, quiet: bool = False) -> bool:
+        """Move the jog point to the world pose ``T_new`` (IK nearest the current joints; refused
+        out of reach, across a configuration flip or into a collision). ``quiet``: no toasts
+        (gizmo drags, which try many poses)."""
+        s = self.s
+        r, q = s.robot, np.asarray(s.q, float)
         T_bf = np.linalg.inv(np.asarray(s.T_world_base)) @ T_new @ np.linalg.inv(self._T_flange_point())
         qn = nearest_ik(self._solver(), r, T_bf, q)
         if qn is None:
-            notify(event, "Cannot jog", "that pose is out of reach or outside the joint limits")
+            if not quiet:
+                notify(event, "Cannot jog", "that pose is out of reach or outside the joint limits")
             return False
         if np.max(np.abs(qn - q)) > MAX_STEP:
-            notify(event, "Cannot jog", "the arm would have to change configuration (near a singularity)")
+            if not quiet:
+                notify(event, "Cannot jog", "the arm would have to change configuration (near a singularity)")
             return False
-        return self._go(qn, event)
+        return self._go(qn, None if quiet else event, quiet)
 
     def _solver(self):
         from core.ik import make_ik
@@ -137,11 +155,12 @@ class JogPanel:
         """The jog point's TCP (its contact faces may touch the part), or None (flange)."""
         return None if self.point.value == FLANGE else self.point.value
 
-    def _go(self, q: np.ndarray, event=None) -> bool:
+    def _go(self, q: np.ndarray, event=None, quiet: bool = False) -> bool:
         if not self.allow.value:
             hits = self.coll.hits(q, self._tcp())
             if hits:
-                notify(event, "Collision", f"that step collides: {describe(hits)}")
+                if not quiet:
+                    notify(event, "Collision", f"that step collides: {describe(hits)}")
                 return False
         self.cell.set_q(q)
         self.update_readout()
@@ -149,6 +168,9 @@ class JogPanel:
 
     def update_readout(self) -> None:
         T = self.T_world_point()
+        gizmo = getattr(self, "gizmo", None)
+        if gizmo is not None:
+            gizmo.place()
         if T is None:
             self.readout.content = "_No robot._"
             return

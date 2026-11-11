@@ -83,6 +83,7 @@ class ObjectsPanel:
             self.info = gui.add_markdown("")
             # filled by the External Axis panel (carrier DOF sliders) and the Cell tab (arm jog)
             self.carrier_slot = gui.add_folder("Carrier position", expand_by_default=True)
+            self.drive_slot = gui.add_folder("Carrier gizmo & joystick", expand_by_default=False)
             self.arm_slot = gui.add_folder("Robot arm", expand_by_default=True)
         for axis, group in (("x", self.jx), ("y", self.jy), ("z", self.jz), ("rz", self.jr)):
             group.on_click(lambda e, a=axis: self.jog(a, -1.0 if e.target.value.startswith("−") else 1.0))

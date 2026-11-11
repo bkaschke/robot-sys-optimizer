@@ -161,6 +161,7 @@ class SimPanel:
 
     def build(self, event=None, block: bool = False) -> None:
         from core.export import station_pose
+        from core.home_search import blocked_stops, choose_home
         from core.paths import trace
 
         s, sol = self.s, self.selected()
@@ -181,7 +182,6 @@ class SimPanel:
         poses = [station_pose(s.base, st, s.T_world_base) for st in sol.stations]
         mesh = s.part_mesh()
         targets_key = s.targets.model_dump_json()  # paths belong to these targets
-        home = s.home_q() if self.home.value else None  # the project's home (Robot & cell)
         carrier_path = (
             sim_carrier_path(s, sol, max(self.step.value / 1000, 0.05), checker) if self.drive.value else None
         )
@@ -192,7 +192,9 @@ class SimPanel:
         self._t0 = time.monotonic()
 
         def work() -> None:
-            try:
+            try:  # the project's home (Robot & cell), or a clear folded pose when it collides
+                home_q, self.home_note = choose_home(checker, s.home_q(), poses)
+                home = home_q if self.home.value else None
                 plan = trace(  # local until done: the 1 s targets watcher must not see it half-built
                     checker,
                     mesh,
@@ -209,7 +211,7 @@ class SimPanel:
                     home=home,
                     carrier_path=carrier_path,
                     group_of={p.id: p.group for p in s.targets.points},
-                    park=None if home is not None else s.home_q(),  # clear pose to go via
+                    park=None if home is not None else home_q,  # clear pose to go via
                     order=self.order.key,
                     cycle=s.cycle,
                     between=BETWEEN_LABELS[self.between.value],
@@ -219,12 +221,7 @@ class SimPanel:
 
                     self._build_progress(1.0)
                     check_moves(checker, plan, cancelled=self._cancel.is_set)
-                blocked = []  # stops where the home pose itself collides
-                if home is not None:
-                    for st in plan.stations:
-                        checker.set_base(st.T_world_base)
-                        if checker.scene.collides(home):
-                            blocked.append(st.station)
+                blocked = blocked_stops(checker, home, plan.stations)  # the home pose itself collides
                 self.label, self._targets_key, self.home_blocked = sol.label, targets_key, blocked
                 self.plan = plan  # last: key and label already match it
                 self._after_build()
@@ -292,6 +289,9 @@ class SimPanel:
             "done" if problems == "none" else "warn",
             getattr(self, "_t0", None),
         )
+        if getattr(self, "home_note", ""):
+            log(self.home_note, "warn")
+            self.info.content += "  \n" + self.home_note
         if getattr(self, "home_blocked", None):
             log(
                 "The home pose collides at stop " + ", ".join(f"S{k + 1}" for k in self.home_blocked), "error"

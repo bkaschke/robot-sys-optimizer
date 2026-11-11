@@ -194,3 +194,40 @@ def test_pareto_dot_click_selects_plan(live):
         s.results = old
         results.refresh()
         view.refresh()
+
+
+def test_joystick_pad_drives_the_carrier(live):
+    """Holding the joystick knob up in a real browser drives the carrier (the pad's inline
+    handler writes into the Joystick text input, which viser sends to the server)."""
+    app, _server, _client, b, _canvas = live
+    s, car, drive = app["session"], app["carrier"], app["drive"]
+    drive.speed.value = 1000.0
+    pos = b.eval(  # open the folder (a real mouse press on its header)
+        "(()=>{const h=[...document.querySelectorAll('*')].filter(e=>/^Carrier gizmo . joystick$/.test("
+        "e.textContent.trim())).pop();if(!h)return null;h.scrollIntoView({block:'center'});"
+        "const r=h.getBoundingClientRect();return [r.left+r.width/2,r.top+r.height/2]})()"
+    )
+    assert pos is not None, "folder not found"
+    b.click(pos[0], pos[1])
+    settle(1.5)
+    pad = b.eval(
+        "(()=>{const p=document.querySelector('.rso-joy');if(!p)return null;p.scrollIntoView({block:'center'});"
+        "const r=p.getBoundingClientRect();return [r.left+r.width/2,r.top+r.height/2,r.width]})()"
+    )
+    assert pad is not None, "joystick pad not rendered"
+    c = s.carrier()
+    s0 = car.current(c)["s"]
+    cx, cy, w = pad
+    b.cdp("Input.dispatchMouseEvent", type="mouseMoved", x=cx, y=cy)
+    b.cdp("Input.dispatchMouseEvent", type="mousePressed", x=cx, y=cy, button="left", clickCount=1)
+    for k in range(1, 6):  # knob to the right: the rail drives toward +s
+        b.cdp("Input.dispatchMouseEvent", type="mouseMoved", x=cx + k * w / 10, y=cy, button="left")
+        time.sleep(0.05)
+    time.sleep(1.5)  # held: the pad repeats every 100 ms
+    b.cdp("Input.dispatchMouseEvent", type="mouseReleased", x=cx + w / 2, y=cy, button="left", clickCount=1)
+    settle(1.0)
+    s1 = car.current(c)["s"]
+    settle(1.0)
+    assert s1 - s0 > 0.3, f"carrier moved {s1 - s0:.3f} m"
+    assert car.current(c)["s"] == s1  # released: stopped
+    assert drive.value.value.startswith("joy:0.00,0.00")

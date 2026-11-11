@@ -292,6 +292,13 @@ class CarrierPanel:
                     for n, (lo, hi) in zip(c.dofs, c.bounds, strict=True):
                         unit = "deg" if n == "yaw" else "mm"
                         conv = np.degrees if n == "yaw" else (lambda x: x * 1000)
+                        if c.kind == "mobile" and n in ("x", "y"):  # a mobile base drives anywhere
+                            sl = self.server.gui.add_number(
+                                f"{n} (mm)", float(conv(v0.get(n, 0.0))), step=10.0, hint="no limits"
+                            )
+                            sl.on_update(lambda e: self._jog_latest())
+                            self._dof[n] = sl
+                            continue
                         sl = self.server.gui.add_slider(
                             f"{n} ({unit})",
                             float(conv(lo)),
@@ -327,7 +334,7 @@ class CarrierPanel:
         if dof == "yaw" and mobile:
             x = (x + 180.0) % 360.0 - 180.0
         elif mobile and dof in ("x", "y"):
-            sl.min, sl.max = min(sl.min, x), max(sl.max, x)
+            pass  # number field without limits
         else:
             x = float(np.clip(x, sl.min, sl.max))
         sl.value = float(x)  # fires the jog
@@ -369,8 +376,11 @@ class CarrierPanel:
                 if n in values:
                     x = float(np.degrees(values[n]) if n == "yaw" else values[n] * 1000)
                     if self.s.base.carrier == "mobile" and n in ("x", "y"):
-                        sl.min, sl.max = min(sl.min, x), max(sl.max, x)  # no limits
-                    sl.value = float(np.clip(x, sl.min, sl.max))
+                        sl.value = x  # number field without limits
+                    elif n == "yaw" and self.s.base.carrier == "mobile":
+                        sl.value = float((x + 180.0) % 360.0 - 180.0)
+                    else:
+                        sl.value = float(np.clip(x, sl.min, sl.max))
         finally:
             self._busy = False
         self._jog()
