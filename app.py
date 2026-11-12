@@ -172,9 +172,9 @@ def build_app(
     tree = server.gui.add_panel()  # object tree on the left of the 3D view (v3 feedback item 1)
     with tree.add_tab("Objects"):
         objects = ObjectsPanel(server, session)
-        from ui.collision_view import CollisionPanel
+        from ui.collision_view import CollisionView
 
-        coll_view = CollisionPanel(server, session)  # collision shapes per component (2026-11-11)
+        coll_view = CollisionView(server, session)  # show the collision shapes per component
     tree.dock_left()
     tree.set_width(290)
     jog = server.gui.add_panel()  # Jog at the bottom of the left column (v7 round 2, T6)
@@ -190,6 +190,10 @@ def build_app(
     with tab_handles["Cell"]:
         workflow.header("Cell")
         cell = CellTab(server, session, jog_container=objects.arm_slot)
+        from ui.collision_settings import CollisionSettings
+
+        coll = CollisionSettings(server, session)  # simplify for collision, arm padding (2026-11-11)
+        coll.view = coll_view
         stayouts = StayoutPanel(server, session)  # arm, tool and carrier keep clear (v3 item 5)
         slowzones = StayoutPanel(server, session, slow=True)  # the robot only moves slower there
     with tab_handles["External Axis"]:
@@ -201,7 +205,7 @@ def build_app(
     cell.listeners.append(lambda _T: drive.refresh())
     coll_view.cell = cell
     cell.listeners.append(coll_view.on_moved)
-    cell.part_listeners.append(coll_view.settings_changed)  # a new part: its kept faces
+    cell.part_listeners.append(coll.settings_changed)  # a new part: its kept faces
     cell.pose_listeners.append(coll_view.on_moved)
     with tab_handles["Tool Setup"]:
         workflow.header("Tool Setup")
@@ -396,8 +400,9 @@ def build_app(
     server.gui.add_markdown(UR_NOTICE)
 
     state["drive"] = drive
-    state["collision"] = coll_view
-    coll_view.targets = targets
+    state["collision"] = coll
+    state["collision_view"] = coll_view
+    coll.targets = targets
     state.update(
         tabs=tab_handles,
         cell=cell,

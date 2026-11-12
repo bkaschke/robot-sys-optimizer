@@ -1,11 +1,10 @@
 """Collision geometry in the left panel (2026-11-11): show / hide the shapes the collision checks
-use, per component, and choose how each component's meshes are simplified for collision.
+use, per component (how they are simplified: Robot & cell tab, ui.collision_settings).
 
 The viewer always draws the full visual meshes. The collision copies (core.collision_mesh) are
 drawn on top, translucent orange, from the jog's live collision scene (ui.cell_collision), so
-what is shown is exactly what the planner, the paths and the jog check. Settings are global
-(``core.collision.GEOM``, shipped to the planner workers) and saved with the project's panel
-settings; the part's full-detail surfaces (``Part.collision_keep``) with the part.
+what is shown is exactly what the planner, the paths and the jog check (the robot arm drawn
+bloated by its padding).
 """
 
 from __future__ import annotations
@@ -15,122 +14,35 @@ import threading
 import numpy as np
 import viser
 
-from core import collision
-from core.collision_mesh import MODE_LABELS, MODES, Geom
 from core.transforms import matrix_to_wxyz
+from ui.collision_settings import COMPONENTS
 from ui.widgets import Latest
 
-COMPONENTS = {"Robot": "robot", "Tool": "tool", "Part": "part", "External axis": "carrier"}
-LABEL_OF = {MODE_LABELS[m]: m for m in MODES}
 ROOT = "/collision_geometry"
 COLOR = (255, 140, 30)
 
 
-class CollisionPanel:
-    """Built inside the left panel (app.py); ``cell`` and ``targets`` are set by app.py."""
+class CollisionView:
+    """Built inside the left panel (app.py); ``cell`` is set by app.py."""
 
     def __init__(self, server: viser.ViserServer, session) -> None:
         self.server, self.s = server, session
-        self.cell = self.targets = None
+        self.cell = None
         self._handles: dict[int, object] = {}
         self._drawn: dict[int, int] = {}  # gid -> id of the mesh drawn for it
         self._pads: dict = {}  # (gid, id(mesh), pad) -> bloated copy for drawing
         self._lock = threading.Lock()
         gui = server.gui
         with gui.add_folder("Collision geometry", expand_by_default=False):
-            gui.add_markdown(
-                "_The checks use simpler copies of large meshes; the viewer shows the full ones. "
-                "Tick a component to see its collision shapes (orange)._"
-            )
             self.show = {
                 name: gui.add_checkbox(
-                    f"Show {name.lower()}", False, hint=f"draw the {name.lower()}'s collision shapes"
+                    f"Show {name.lower()}", False, hint=f"draw the {name.lower()}'s collision shapes (orange)"
                 )
                 for name in COMPONENTS
             }
-            self.pad_mm = gui.add_number(
-                "Robot arm padding (mm)",
-                0.0,
-                min=0.0,
-                max=100.0,
-                step=1.0,
-                hint="the arm's collision shapes this much larger against the part, floor, carrier, "
-                "stay-out zones and tool (not against itself)",
-            )
-            with gui.add_folder("Simplify for collision", expand_by_default=False):
-                options = tuple(MODE_LABELS[m] for m in MODES)
-                self.mode = {
-                    name: gui.add_dropdown(name, options, initial_value=MODE_LABELS["auto"])
-                    for name in COMPONENTS
-                }
-                for name, c in COMPONENTS.items():  # saved panel settings (ui.settings): attributes
-                    setattr(self, f"mode_{c}", self.mode[name])
-                    setattr(self, f"show_{c}", self.show[name])
-                self.faces = gui.add_number(
-                    "Triangles",
-                    4000,
-                    min=100,
-                    max=200000,
-                    step=100,
-                    hint="target triangles per mesh (reduce, wrap)",
-                )
-                self.wrap_mm = gui.add_number(
-                    "Wrap offset (mm)",
-                    5.0,
-                    min=0.5,
-                    max=100.0,
-                    step=0.5,
-                    hint="the wrap's distance outside the surface",
-                )
-                self.keep_btn = gui.add_button(
-                    "Keep selected part surfaces exact",
-                    hint="the surfaces selected in Targets keep full detail; the rest is simplified",
-                )
-                self.clear_btn = gui.add_button("Clear kept surfaces")
-                self.keep_info = gui.add_markdown("")
         for box in self.show.values():
             box.on_update(lambda _e: self.redraw_soon())
-        for w in (*self.mode.values(), self.faces, self.wrap_mm, self.pad_mm):
-            w.on_update(lambda _e: self.settings_changed())
-        self.keep_btn.on_click(lambda _e: self.keep_selection())
-        self.clear_btn.on_click(lambda _e: self.set_keep([]))
         self._redraw = Latest(self.redraw)
-        self.sync()
-
-    # --- settings ------------------------------------------------------------------------------
-
-    def geom(self, name: str) -> Geom:
-        return Geom(
-            LABEL_OF.get(self.mode[name].value, "auto"), int(self.faces.value), float(self.wrap_mm.value)
-        )
-
-    def sync(self) -> None:
-        """Copy the widgets and the part's kept faces into core.collision (all scenes built from
-        now on use them; planner jobs take a copy)."""
-        part = self.s.part
-        keep = tuple(int(f) for f in part.collision_keep) if part is not None else ()
-        pad = max(float(self.pad_mm.value), 0.0) / 1000
-        collision.set_geom_state(({c: self.geom(n) for n, c in COMPONENTS.items()}, keep, pad))
-        n = len(keep)
-        text = f"_{n} part faces kept exact._" if n else "_No part surfaces kept exact._"
-        if self.keep_info.content != text:
-            self.keep_info.content = text
-
-    def settings_changed(self) -> None:
-        self.sync()
-        self.redraw_soon()
-
-    def keep_selection(self) -> None:
-        sel = getattr(self.targets, "selection", None)
-        self.set_keep([] if sel is None else [int(f) for f in sel])
-
-    def set_keep(self, faces: list[int]) -> None:
-        if self.s.part is None:
-            return
-        self.s.part.collision_keep = sorted(set(faces))
-        self.settings_changed()
-
-    # --- drawing -------------------------------------------------------------------------------
 
     def redraw_soon(self) -> None:
         threading.Thread(target=self._redraw, daemon=True).start()
@@ -202,8 +114,9 @@ class CollisionPanel:
         """The mesh pushed out along its vertex normals by ``pad`` (display; cached)."""
         key = (gid, id(mesh), round(pad, 6))
         if key not in self._pads:
-            out = mesh.copy()
-            out.vertices = np.asarray(mesh.vertices) + pad * np.asarray(mesh.vertex_normals)
+            from core.collision_mesh import inflate
+
+            out = inflate(mesh, pad)
             self._pads = {k: v for k, v in self._pads.items() if k[0] != gid}
             self._pads[key] = out
         return self._pads[key]

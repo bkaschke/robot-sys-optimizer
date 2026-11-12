@@ -95,6 +95,33 @@ def test_visual_mode_and_per_part_override(tmp_path):
     assert hull.is_convex
 
 
+def test_package_padding(tmp_path):
+    from core.urdf_package import part_collision
+
+    src = tmp_path / "src"
+    src.mkdir()
+    _detailed(src)
+    p = _tool_pkg("reduce").model_copy(update={"collision": Collision(mode="reduce", faces=800, pad_mm=10.0)})
+    box = Part(name="box", stage="tool", shape="box", size=(0.2, 0.1, 0.05))
+    m = part_collision(p, box, src)
+    assert np.allclose(m.bounds, [[-0.11, -0.06, -0.01], [0.11, 0.06, 0.06]])  # bottom face on z = 0
+    head = part_collision(p, p.parts[0], src)
+    plain = part_collision(
+        p.model_copy(update={"collision": Collision(mode="reduce", faces=800)}), p.parts[0], src
+    )
+    assert np.all(head.bounds[1] - plain.bounds[1] > 0.009)  # pushed out by the padding
+    urdf = write_package(p.model_copy(update={"parts": [*p.parts, box]}), src, tmp_path / "pad")
+    assert set(collision_files(p.model_copy(update={"parts": [*p.parts, box]}), tmp_path / "pad")) == {
+        "head",
+        "box",
+        "flange",
+    }
+    tm = ToolModel(to_tool(p, str(urdf)), urdf)
+    hl = tm.link("mount")
+    assert np.all(hl.collision.bounds[0] < hl.mesh.bounds[0] - 0.009)  # the whole tool padded, in place
+    assert np.all(hl.collision.bounds[1] > hl.mesh.bounds[1] + 0.009)
+
+
 def test_carrier_package_collision_meshes(tmp_path):
     src = tmp_path / "src"
     src.mkdir()

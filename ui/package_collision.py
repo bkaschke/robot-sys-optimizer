@@ -39,6 +39,14 @@ class PackageCollision:
                 "Triangles", 4000, min=50, max=200000, step=100, hint="target per mesh"
             )
             self.wrap_mm = gui.add_number("Wrap offset (mm)", 5.0, min=0.5, max=100.0, step=0.5)
+            self.pad_mm = gui.add_number(
+                "Padding (mm)",
+                0.0,
+                min=0.0,
+                max=100.0,
+                step=1.0,
+                hint="every part's collision shape this much larger",
+            )
             self.part_mode = gui.add_dropdown(
                 "This part", (PACKAGE, *options), hint="the selected part: the package setting or its own"
             )
@@ -46,7 +54,7 @@ class PackageCollision:
                 "Show collision shapes", False, hint="orange: what the checks will use"
             )
             self.info = gui.add_markdown("")
-        for w in (self.mode, self.faces, self.wrap_mm):
+        for w in (self.mode, self.faces, self.wrap_mm, self.pad_mm):
             w.on_update(lambda _e: self._package_changed())
         self.part_mode.on_update(lambda _e: self._part_changed())
         self.show.on_update(lambda _e: self.redraw_soon())
@@ -62,6 +70,7 @@ class PackageCollision:
             self.mode.value = MODE_LABELS[c.mode]
             self.faces.value = c.faces
             self.wrap_mm.value = c.wrap_mm
+            self.pad_mm.value = c.pad_mm
             own = parts[self.b.sel].collision if parts else None
             self.part_mode.value = MODE_LABELS[own] if own else PACKAGE
             self.part_mode.visible = bool(parts) and any(x.shape == "mesh" for x in parts)
@@ -75,6 +84,7 @@ class PackageCollision:
             mode=LABEL_OF.get(self.mode.value, "auto"),
             faces=int(np.clip(self.faces.value, 50, 200000)),
             wrap_mm=float(np.clip(self.wrap_mm.value, 0.5, 200.0)),
+            pad_mm=float(np.clip(self.pad_mm.value, 0.0, 100.0)),
         )
         self.b.pkg = self.b.pkg.model_copy(update={"collision": c})
         self.redraw_soon()

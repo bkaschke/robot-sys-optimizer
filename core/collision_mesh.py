@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import threading
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -76,6 +77,23 @@ def reduce(mesh: trimesh.Trimesh, faces: int) -> trimesh.Trimesh:
     except (ImportError, ModuleNotFoundError):
         return hull(mesh)
     return out if len(out.faces) >= 4 else hull(mesh)
+
+
+def inflate(mesh: trimesh.Trimesh, d: float) -> trimesh.Trimesh:
+    """The mesh pushed out by about ``d`` (mesh units): each vertex moves along its normal far
+    enough that every face around it moves out by at least ``d`` (at most 3 d at sharp corners)."""
+    if d <= 0:
+        return mesh
+    m = mesh.copy()
+    m.merge_vertices()
+    vn = np.asarray(m.vertex_normals)
+    fn = np.asarray(m.face_normals)
+    cos = np.ones(len(m.vertices))
+    for k in range(3):  # the smallest normal . face-normal over the faces at each vertex
+        np.minimum.at(cos, m.faces[:, k], np.einsum("ij,ij->i", vn[m.faces[:, k]], fn))
+    step = d / np.clip(cos, 1 / 3, 1.0)
+    m.vertices = np.asarray(m.vertices) + vn * step[:, None]
+    return m
 
 
 def hull(mesh: trimesh.Trimesh) -> trimesh.Trimesh:
@@ -174,6 +192,7 @@ def _simplify(mesh: trimesh.Trimesh, g: Geom, scale: float) -> trimesh.Trimesh:
 
 
 _MEMO: dict = {}  # digest -> mesh (this process)
+_LOCK = threading.Lock()  # one simplification at a time (fast_simplification is not thread-safe)
 
 
 def collision_mesh(
@@ -211,14 +230,17 @@ def collision_mesh(
                 return out
             except Exception:
                 pass
-    if len(keep):
-        rest = np.setdiff1d(np.arange(len(mesh.faces)), keep)
-        kept = mesh.submesh([keep], append=True)
-        out = kept
-        if len(rest):
-            out = trimesh.util.concatenate([kept, _simplify(mesh.submesh([rest], append=True), g, scale)])
-    else:
-        out = _simplify(mesh, g, scale)
+    with _LOCK:
+        if digest in _MEMO:  # another thread just made it
+            return _MEMO[digest]
+        if len(keep):
+            rest = np.setdiff1d(np.arange(len(mesh.faces)), keep)
+            kept = mesh.submesh([keep], append=True)
+            out = kept
+            if len(rest):
+                out = trimesh.util.concatenate([kept, _simplify(mesh.submesh([rest], append=True), g, scale)])
+        else:
+            out = _simplify(mesh, g, scale)
     if path is not None:
         try:
             path.parent.mkdir(parents=True, exist_ok=True)

@@ -85,6 +85,7 @@ class Collision(_M):
     mode: CollisionMode = "auto"
     faces: int = Field(default=4000, ge=50, le=200000)
     wrap_mm: float = Field(default=5.0, gt=0, le=200)
+    pad_mm: float = Field(default=0.0, ge=0, le=100)  # every part's collision shape this much larger
 
 
 class Frame(_M):
@@ -162,19 +163,39 @@ def _geometry(part: Part) -> tuple[str, np.ndarray]:
 
 
 def part_collision(p: Package, part: Part, mesh_dir: Path) -> trimesh.Trimesh | None:
-    """A mesh part's collision copy in metres (its own frame), or None when it is the visual
-    mesh itself (boxes, cylinders, "visual", small meshes under "auto")."""
-    from core.collision_mesh import Geom, collision_mesh
+    """A part's collision copy in metres, in the part's own frame (boxes / cylinders: bottom
+    face on z = 0), or None when it is the visual geometry itself (no padding, and a box,
+    a cylinder, "visual" or a small mesh under "auto"). ``Collision.pad_mm`` makes it larger:
+    boxes and cylinders exactly, a wrap by a larger offset, other meshes along their normals
+    (core.collision_mesh.inflate)."""
+    from core.collision_mesh import Geom, collision_mesh, inflate
 
+    c = p.collision
+    pad = c.pad_mm / 1000
+    if part.shape == "box" and part.size:
+        if pad <= 0:
+            return None
+        m = trimesh.creation.box(extents=[v + 2 * pad for v in part.size])
+        m.apply_translation((0, 0, part.size[2] / 2))  # bottom at -pad: centred on the box
+        return m
+    if part.shape == "cylinder" and part.radius and part.height:
+        if pad <= 0:
+            return None
+        m = trimesh.creation.cylinder(radius=part.radius + pad, height=part.height + 2 * pad, sections=32)
+        m.apply_translation((0, 0, part.height / 2))
+        return m
     if part.shape != "mesh" or not part.mesh:
         return None
-    c = p.collision
-    g = Geom(part.collision or c.mode, c.faces, c.wrap_mm)
-    if g.mode == "visual":
+    mode = part.collision or c.mode
+    if mode == "visual" and pad <= 0:
         return None
     m = trimesh.load(str(mesh_dir / part.mesh), force="mesh")
     m.apply_scale(UNIT_SCALE[part.units])
-    out = collision_mesh(m, g)
+    if mode == "wrap":
+        return collision_mesh(m, Geom("wrap", c.faces, c.wrap_mm + c.pad_mm))
+    out = m if mode == "visual" else collision_mesh(m, Geom(mode, c.faces, c.wrap_mm))
+    if pad > 0:
+        return inflate(out, pad)
     return None if out is m else out
 
 
@@ -191,9 +212,10 @@ def build_urdf(p: Package, collision: dict[str, str] | None = None) -> str:
         el = f"<geometry>{g}</geometry>"
         cf = collision.get(part.name)
         cel = f'<geometry><mesh filename="meshes/{cf}"/></geometry>' if cf else el
+        co = f"<origin {_xyz_rpy(pose_to_matrix(part.pose))}/>" if cf else o  # file: the part frame
         links[LINK[part.stage]].append(
             f'    <visual name="{safe(part.name)}">{o}{el}</visual>\n'
-            f'    <collision name="{safe(part.name)}">{o}{cel}</collision>\n'
+            f'    <collision name="{safe(part.name)}">{co}{cel}</collision>\n'
         )
     head = f'<?xml version="1.0"?>\n<!-- {p.kind} package {safe(p.name)} (Package builder) -->\n'
     out = [head + f'<robot name="{safe(p.name)}">']
