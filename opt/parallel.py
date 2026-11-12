@@ -51,6 +51,7 @@ class CheckerSpec:
     obstacles: list = field(default_factory=list)
     dress: float = 0.0  # v8 T18: core.collision.DRESS_M of the parent
     hose: object = None  # core.collision.HOSE of the parent (core.hose.Hose)
+    geom: object = None  # core.collision.geom_state() of the parent (collision geometry)
 
     def build(self):
         from core import collision
@@ -61,6 +62,7 @@ class CheckerSpec:
 
         collision.DRESS_M = self.dress
         collision.HOSE = self.hose
+        collision.set_geom_state(self.geom)
         robot = Robot(self.robot_spec)
         scene = CollisionScene(
             robot,

@@ -254,6 +254,7 @@ class ToolOptPanel:
             "tube_od_mm": self.tube_od(),
             "dress_m": collision.DRESS_M,  # v8 T18
             "hose": collision.HOSE,
+            "collision_geom": collision.geom_state(),
             "family_dirs": [d.strip() for d in self.family.value.split(";") if d.strip()],
         }
         st.family_cost = self.family_cost.value

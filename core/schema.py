@@ -191,6 +191,7 @@ class Part(_Model):
     mesh: str
     units: Literal["m", "mm", "in"] = "m"
     pose: Pose = Field(default_factory=Pose)
+    collision_keep: list[int] = Field(default_factory=list)  # faces kept at full detail for collision
 
 
 SpinTolerance = Literal["free"] | Annotated[float, Field(ge=0)] | Range

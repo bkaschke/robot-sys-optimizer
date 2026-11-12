@@ -232,3 +232,32 @@ def test_joystick_pad_drives_the_carrier(live):
     assert s1 - s0 > 0.3, f"carrier moved {s1 - s0:.3f} m"
     assert car.current(c)["s"] == s1  # released: stopped
     assert drive.value.value.startswith("joy:0.00,0.00")
+
+
+def test_package_builder_opens_in_its_own_window(live):
+    """The Package builder tab's button opens the builder (its own viser server) in a new
+    window, which connects to that server, not the project's."""
+    app, server, _client, b, _canvas = live
+    w = app["builder_window"]
+    assert w.port != PORT
+    n_main = len(server.get_clients())
+    pos = b.eval(
+        "(()=>{const h=[...document.querySelectorAll('button,[role=tab]')].filter(e=>/Package builder$/.test("
+        "e.textContent.trim())).pop();if(!h)return null;h.scrollIntoView({block:'center'});"
+        "const r=h.getBoundingClientRect();return [r.left+r.width/2,r.top+r.height/2]})()"
+    )
+    assert pos is not None, "Package builder tab not found"
+    b.click(pos[0], pos[1])
+    settle(1.5)
+    btn = b.eval(
+        "(()=>{const h=[...document.querySelectorAll('button')].filter(e=>/Open package builder/.test("
+        "e.textContent)).pop();if(!h)return null;h.scrollIntoView({block:'center'});"
+        "const r=h.getBoundingClientRect();return [r.left+r.width/2,r.top+r.height/2]})()"
+    )
+    assert btn is not None, "open button not rendered"
+    b.click(btn[0], btn[1])
+    t_end = time.time() + 30
+    while not w.server.get_clients() and time.time() < t_end:
+        time.sleep(0.25)
+    assert w.server.get_clients(), "the builder window did not connect"
+    assert len(server.get_clients()) == n_main  # the project page did not navigate away

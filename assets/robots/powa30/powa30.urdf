@@ -3,11 +3,11 @@
 <robot name="powa30">
   <link name="base_link">
     <visual><origin xyz="-0 -0 -0" rpy="0 0 0"/><geometry><mesh filename="meshes/base_link.stl" scale="0.001 0.001 0.001"/></geometry></visual>
-    <collision><origin xyz="-0 -0 -0" rpy="0 0 0"/><geometry><mesh filename="meshes/base_link.stl" scale="0.001 0.001 0.001"/></geometry></collision>
+    <collision><origin xyz="-0 -0 -0" rpy="0 0 0"/><geometry><mesh filename="meshes/collision/base_link.stl" scale="0.001 0.001 0.001"/></geometry></collision>
   </link>
   <link name="link_1">
     <visual><origin xyz="-0 -0 -0.158" rpy="0 0 0"/><geometry><mesh filename="meshes/CRB1920_30kg-1350_OmniCore_rev00_Link1_CAD_1.stl" scale="0.001 0.001 0.001"/></geometry></visual>
-    <collision><origin xyz="-0 -0 -0.158" rpy="0 0 0"/><geometry><mesh filename="meshes/CRB1920_30kg-1350_OmniCore_rev00_Link1_CAD_1.stl" scale="0.001 0.001 0.001"/></geometry></collision>
+    <collision><origin xyz="-0 -0 -0.158" rpy="0 0 0"/><geometry><mesh filename="meshes/collision/CRB1920_30kg-1350_OmniCore_rev00_Link1_CAD_1.stl" scale="0.001 0.001 0.001"/></geometry></collision>
   </link>
   <joint name="joint_1" type="revolute">
     <parent link="base_link"/><child link="link_1"/>
@@ -16,7 +16,7 @@
   </joint>
   <link name="link_2">
     <visual><origin xyz="-0.18 0.098 -0.3845" rpy="0 0 0"/><geometry><mesh filename="meshes/CRB1920_30kg-1350_OmniCore_rev00_Link2_CAD_1.stl" scale="0.001 0.001 0.001"/></geometry></visual>
-    <collision><origin xyz="-0.18 0.098 -0.3845" rpy="0 0 0"/><geometry><mesh filename="meshes/CRB1920_30kg-1350_OmniCore_rev00_Link2_CAD_1.stl" scale="0.001 0.001 0.001"/></geometry></collision>
+    <collision><origin xyz="-0.18 0.098 -0.3845" rpy="0 0 0"/><geometry><mesh filename="meshes/collision/CRB1920_30kg-1350_OmniCore_rev00_Link2_CAD_1.stl" scale="0.001 0.001 0.001"/></geometry></collision>
   </link>
   <joint name="joint_2" type="revolute">
     <parent link="link_1"/><child link="link_2"/>
@@ -25,7 +25,7 @@
   </joint>
   <link name="link_3">
     <visual><origin xyz="-0.18 0.059 -1.0245" rpy="0 0 0"/><geometry><mesh filename="meshes/CRB1920_30kg-1350_OmniCore_rev00_Link3_CAD_1.stl" scale="0.001 0.001 0.001"/></geometry></visual>
-    <collision><origin xyz="-0.18 0.059 -1.0245" rpy="0 0 0"/><geometry><mesh filename="meshes/CRB1920_30kg-1350_OmniCore_rev00_Link3_CAD_1.stl" scale="0.001 0.001 0.001"/></geometry></collision>
+    <collision><origin xyz="-0.18 0.059 -1.0245" rpy="0 0 0"/><geometry><mesh filename="meshes/collision/CRB1920_30kg-1350_OmniCore_rev00_Link3_CAD_1.stl" scale="0.001 0.001 0.001"/></geometry></collision>
   </link>
   <joint name="joint_3" type="revolute">
     <parent link="link_2"/><child link="link_3"/>
@@ -34,7 +34,7 @@
   </joint>
   <link name="link_4">
     <visual><origin xyz="-0.4 -0.0601 -1.0245" rpy="0 0 0"/><geometry><mesh filename="meshes/CRB1920_30kg-1350_OmniCore_rev00_Link4_CAD_1.stl" scale="0.001 0.001 0.001"/></geometry></visual>
-    <collision><origin xyz="-0.4 -0.0601 -1.0245" rpy="0 0 0"/><geometry><mesh filename="meshes/CRB1920_30kg-1350_OmniCore_rev00_Link4_CAD_1.stl" scale="0.001 0.001 0.001"/></geometry></collision>
+    <collision><origin xyz="-0.4 -0.0601 -1.0245" rpy="0 0 0"/><geometry><mesh filename="meshes/collision/CRB1920_30kg-1350_OmniCore_rev00_Link4_CAD_1.stl" scale="0.001 0.001 0.001"/></geometry></collision>
   </link>
   <joint name="joint_4" type="revolute">
     <parent link="link_3"/><child link="link_4"/>
@@ -43,7 +43,7 @@
   </joint>
   <link name="link_5">
     <visual><origin xyz="-0.713 0.0259 -1.0245" rpy="0 0 0"/><geometry><mesh filename="meshes/CRB1920_30kg-1350_OmniCore_rev00_Link5_CAD_1.stl" scale="0.001 0.001 0.001"/></geometry></visual>
-    <collision><origin xyz="-0.713 0.0259 -1.0245" rpy="0 0 0"/><geometry><mesh filename="meshes/CRB1920_30kg-1350_OmniCore_rev00_Link5_CAD_1.stl" scale="0.001 0.001 0.001"/></geometry></collision>
+    <collision><origin xyz="-0.713 0.0259 -1.0245" rpy="0 0 0"/><geometry><mesh filename="meshes/collision/CRB1920_30kg-1350_OmniCore_rev00_Link5_CAD_1.stl" scale="0.001 0.001 0.001"/></geometry></collision>
   </link>
   <joint name="joint_5" type="revolute">
     <parent link="link_4"/><child link="link_5"/>
@@ -52,7 +52,7 @@
   </joint>
   <link name="link_6">
     <visual><origin xyz="-0.7929 0.1009 -1.1145" rpy="0 0 0"/><geometry><mesh filename="meshes/CRB1920_30kg-1350_OmniCore_rev00_Link6_CAD_1.stl" scale="0.001 0.001 0.001"/></geometry></visual>
-    <collision><origin xyz="-0.7929 0.1009 -1.1145" rpy="0 0 0"/><geometry><mesh filename="meshes/CRB1920_30kg-1350_OmniCore_rev00_Link6_CAD_1.stl" scale="0.001 0.001 0.001"/></geometry></collision>
+    <collision><origin xyz="-0.7929 0.1009 -1.1145" rpy="0 0 0"/><geometry><mesh filename="meshes/collision/CRB1920_30kg-1350_OmniCore_rev00_Link6_CAD_1.stl" scale="0.001 0.001 0.001"/></geometry></collision>
   </link>
   <joint name="joint_6" type="revolute">
     <parent link="link_5"/><child link="link_6"/>

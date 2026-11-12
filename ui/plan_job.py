@@ -80,6 +80,7 @@ def build_checker(s, robot, sites, workers: int, say, emit):
 
             cs = CheckerSpec(robot.spec, s.tool_model, mesh, T_base0, T_part, bb, wb, obstacles)
             cs.dress, cs.hose = collision.DRESS_M, collision.HOSE  # v8 T18
+            cs.geom = collision.geom_state()  # 2026-11-11: collision geometry settings
             checker.pool = pool_for(cs, workers)
         except Exception as err:  # e.g. a setup object that doesn't pickle: run serially
             emit("warn", f"parallel checks off for this run ({type(err).__name__}: {err})")
@@ -94,6 +95,8 @@ def use_dress(spec: dict) -> None:
         collision.DRESS_M = float(spec["dress_m"])
     if "hose" in spec:
         collision.HOSE = spec["hose"]
+    if "collision_geom" in spec:
+        collision.set_geom_state(spec["collision_geom"])
 
 
 def station_job(payload: dict, emit, cancelled) -> dict:

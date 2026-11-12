@@ -45,6 +45,56 @@ DRESS_M = 0.0
 HOSE = None
 
 
+# 2026-11-11: low-detail collision copies of meshes (core.collision_mesh): component ("robot",
+# "tool", "part", "carrier") -> Geom; PART_KEEP = part face ids kept at full detail. Set from the
+# left panel's Collision geometry and shipped to the planner / worker processes (geom_state)
+GEOM: dict = {}
+PART_KEEP: tuple = ()
+ROBOT_AUTO_FACES = 5000  # robot links: "auto" reduces links above this (URDF CAD meshes)
+
+
+def geom_state() -> tuple:
+    return dict(GEOM), tuple(PART_KEEP)
+
+
+def set_geom_state(state) -> None:
+    global GEOM, PART_KEEP
+    if state is not None:
+        GEOM, PART_KEEP = dict(state[0]), tuple(int(f) for f in state[1])
+
+
+def _geom(component: str):
+    from core.collision_mesh import Geom
+
+    return GEOM.get(component) or Geom()
+
+
+def _low(mesh: trimesh.Trimesh, component: str, keep=None, auto_faces: int | None = None) -> trimesh.Trimesh:
+    """The collision copy of a mesh of this component (core.collision_mesh)."""
+    from core.collision_mesh import collision_mesh
+
+    return collision_mesh(mesh, _geom(component), keep=keep, auto_faces=auto_faces)
+
+
+_ROBOT_MESHES: dict = {}  # (path, scale) -> trimesh: robot collision meshes read for simplifying / showing
+
+
+def _robot_mesh(go) -> trimesh.Trimesh | None:
+    path = getattr(go, "meshPath", "")
+    if not path or not path.lower().endswith((".stl", ".obj", ".dae", ".ply", ".glb", ".gltf")):
+        return None
+    scale = np.asarray(go.meshScale, float)
+    key = (path, tuple(np.round(scale, 9)))
+    if key not in _ROBOT_MESHES:
+        try:
+            m = trimesh.load(path, force="mesh")
+        except Exception:
+            return None
+        m.apply_transform(np.diag([*scale, 1.0]))
+        _ROBOT_MESHES[key] = m
+    return _ROBOT_MESHES[key]
+
+
 HITS = "collides with: "  # PointResult.notes prefix of ``describe_hits``
 
 
@@ -146,6 +196,8 @@ class CollisionScene:
             model, urdf, pin.GeometryType.COLLISION, None, [str(robot.spec.folder)]
         )
         self.robot_ids = list(range(self.gm.ngeoms))
+        self.shapes: dict[int, trimesh.Trimesh] = {}  # gid -> collision mesh (geometry frame), for showing
+        self._simplify_robot()
         # the joint each robot shape moves with (0 = fixed base): pairs are chosen by link, not by
         # the shape's position in the list (a URDF link may have several collision shapes)
         joint_of = [g.parentJoint for g in self.gm.geometryObjects]
@@ -178,6 +230,8 @@ class CollisionScene:
             for hl in tool.links:
                 for sig, faces in self._split_by_contact(tool, hl):
                     piece = hl.mesh.submesh([np.array(sorted(faces))], append=True)
+                    if not sig:  # contact pieces stay exact: they meet the part at the contact edge
+                        piece = _low(piece, "tool")
                     go = pin.GeometryObject(
                         f"tool_{hl.name}_{'+'.join(sorted(sig)) or 'body'}",
                         fr.parentJoint,
@@ -187,6 +241,7 @@ class CollisionScene:
                     gid = self.gm.addGeometryObject(go)
                     self.tool_ids.append(gid)
                     self.tool_contact[gid] = set(sig)
+                    self.shapes[gid] = piece
 
         self.hose_ids: list[int] = []
         hose = HOSE if hose == -1 else hose
@@ -199,8 +254,10 @@ class CollisionScene:
 
         self.part_id = None
         if part_mesh is not None and T_world_part is not None:
-            go = pin.GeometryObject("part", 0, _se3(self.T_univ_world @ T_world_part), _bvh(part_mesh))
+            low = _low(part_mesh, "part", keep=PART_KEEP)
+            go = pin.GeometryObject("part", 0, _se3(self.T_univ_world @ T_world_part), _bvh(low))
             self.part_id = self.gm.addGeometryObject(go)
+            self.shapes[self.part_id] = low
         self.floor_id = None
         if floor:
             go = pin.GeometryObject(
@@ -216,15 +273,19 @@ class CollisionScene:
         for name, mesh, T_base_body, *follow in base_bodies or []:
             if follow:
                 T_base_body = follow[0](T_world_base)
+            mesh = _low(mesh, "carrier")
             go = pin.GeometryObject(f"carrier_{name}", 0, _se3(self.T_univ_base @ T_base_body), _bvh(mesh))
             gid = self.gm.addGeometryObject(go)
             self.carrier_ids.append(gid)
+            self.shapes[gid] = mesh
             if follow:
                 self.follow[gid] = follow[0]
         for name, mesh, T_world_body in world_bodies or []:
+            mesh = _low(mesh, "carrier")
             go = pin.GeometryObject(f"carrier_{name}", 0, _se3(self.T_univ_world @ T_world_body), _bvh(mesh))
             gid = self.gm.addGeometryObject(go)
             self.carrier_ids.append(gid)
+            self.shapes[gid] = mesh
             self.world_body_T[gid] = T_world_body
 
         self.obstacle_ids: list[int] = []
@@ -294,6 +355,51 @@ class CollisionScene:
             self.gm.geometryObjects[gid].placement = _se3(self.T_univ_world @ T)
         for gid, fn in self.follow.items():  # carriage bodies below a lift
             self.gm.geometryObjects[gid].placement = _se3(self.T_univ_base @ fn(T_world_base))
+
+    def _simplify_robot(self) -> None:
+        """Robot link meshes above ``ROBOT_AUTO_FACES`` triangles (or all, for an explicit
+        mode) are replaced by their collision copy (``GEOM["robot"]``)."""
+        g = _geom("robot")
+        if g.mode == "visual":
+            return
+        for gid in self.robot_ids:
+            go = self.gm.geometryObjects[gid]
+            n = getattr(go.geometry, "num_tris", 0)
+            if not n or (g.mode == "auto" and n <= ROBOT_AUTO_FACES):
+                continue
+            mesh = _robot_mesh(go)
+            if mesh is None:
+                continue
+            low = _low(mesh, "robot", auto_faces=ROBOT_AUTO_FACES)
+            go.geometry = _bvh(low)
+            self.shapes[gid] = low
+
+    def shape(self, gid: int) -> trimesh.Trimesh | None:
+        """The collision mesh of geometry ``gid`` in its own frame: meshes and capsules (None
+        for the floor; stay-out zones are drawn by their own panel)."""
+        if gid in self.shapes:
+            return self.shapes[gid]
+        go = self.gm.geometryObjects[gid]
+        G = go.geometry
+        m = None
+        if isinstance(G, coal.Capsule):
+            m = trimesh.creation.capsule(height=2 * G.halfLength, radius=G.radius, count=[12, 12])
+        elif gid in self.robot_ids:
+            m = _robot_mesh(go)
+        if m is not None:
+            self.shapes[gid] = m
+        return m
+
+    def world_shapes(self, q: np.ndarray) -> list[tuple[int, str, np.ndarray]]:
+        """(gid, name, T_world_geom) of every geometry at joints q (the current base)."""
+        pin.updateGeometryPlacements(
+            self.robot.model, self.robot.data, self.gm, self.gd, np.asarray(q, float)
+        )
+        T_world_univ = np.linalg.inv(self.T_univ_world)
+        return [
+            (gid, go.name, T_world_univ @ np.asarray(self.gd.oMg[gid].homogeneous))
+            for gid, go in enumerate(self.gm.geometryObjects)
+        ]
 
     @staticmethod
     def _split_by_contact(tool: ToolModel, hl) -> list[tuple[frozenset, set[int]]]:

@@ -23,8 +23,13 @@ class CellCollision:
         s = self.s
         if s.robot is None:
             return None
+        from core import collision
+
         c = components(s, tool_nominal=True)
-        return "|".join((c["robot"], c["carrier"], c["tool"], c["part"], c["stayout"], str(id(s.robot))))
+        geom = str(hash(repr(collision.geom_state())))  # collision geometry settings (2026-11-11)
+        return "|".join(
+            (c["robot"], c["carrier"], c["tool"], c["part"], c["stayout"], str(id(s.robot)), geom)
+        )
 
     def scene(self):
         key = self._setup_key()

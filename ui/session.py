@@ -36,6 +36,7 @@ class PartState:
     mesh_path: str  # as stored in the project (relative to project dir or repo)
     units: str = "m"
     T_world_part: np.ndarray = field(default_factory=lambda: np.eye(4))
+    collision_keep: list = field(default_factory=list)  # faces kept at full detail (core.collision)
 
 
 @dataclass
@@ -220,6 +221,7 @@ class Session:
                 mesh=self.part.mesh_path,
                 units=self.part.units,
                 pose=matrix_to_pose(self.part.T_world_part),
+                collision_keep=[int(f) for f in self.part.collision_keep],
             )
         return schema.Project(
             robot=robot,
@@ -255,7 +257,12 @@ class Session:
                     pass
         self.part = None
         if project.part is not None:
-            self.part = PartState(project.part.mesh, project.part.units, pose_to_matrix(project.part.pose))
+            self.part = PartState(
+                project.part.mesh,
+                project.part.units,
+                pose_to_matrix(project.part.pose),
+                list(project.part.collision_keep),
+            )
             self.part_mesh()  # fail early if the mesh is missing or broken
         self.extra = {"optimizer": project.optimizer}
         self.base = project.base

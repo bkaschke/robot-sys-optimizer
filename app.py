@@ -133,6 +133,7 @@ def build_app(
         state["tool_opt"].update_hint()
         state["cable"].follow_robot()  # the robot view was rebuilt: redraw the hose on it
         state["floor"].update(session)  # the floor fits the new cell
+        state["collision"].settings_changed()  # the project's part surfaces kept exact
 
     def restore_work() -> None:
         """Bring back where the user left off: selection, then panel settings."""
@@ -150,6 +151,7 @@ def build_app(
         state["stations"].costs.load()  # the project's cost weights
         state["tool_opt"].costs.load()  # and the tool optimizer's
         ui_settings.apply(state, session.ui)
+        state["collision"].sync()
         t.refresh()
 
     def collect_work() -> None:
@@ -170,6 +172,9 @@ def build_app(
     tree = server.gui.add_panel()  # object tree on the left of the 3D view (v3 feedback item 1)
     with tree.add_tab("Objects"):
         objects = ObjectsPanel(server, session)
+        from ui.collision_view import CollisionPanel
+
+        coll_view = CollisionPanel(server, session)  # collision shapes per component (2026-11-11)
     tree.dock_left()
     tree.set_width(290)
     jog = server.gui.add_panel()  # Jog at the bottom of the left column (v7 round 2, T6)
@@ -194,6 +199,10 @@ def build_app(
 
     drive = DrivePanel(server, carrier, objects.drive_slot)  # carrier gizmo + joystick (left Jog)
     cell.listeners.append(lambda _T: drive.refresh())
+    coll_view.cell = cell
+    cell.listeners.append(coll_view.on_moved)
+    cell.part_listeners.append(coll_view.settings_changed)  # a new part: its kept faces
+    cell.pose_listeners.append(coll_view.on_moved)
     with tab_handles["Tool Setup"]:
         workflow.header("Tool Setup")
         tool = ToolSetupTab(server, session)
@@ -293,9 +302,10 @@ def build_app(
         results.chosen_listeners.append(pareto.refresh)
     state["results"] = results
     with tabs.add_tab("Package builder"):  # URDF packages for tools, external axes, mobile bases
-        from ui.package_builder import PackageBuilder
+        from ui.builder_window import BuilderWindow
 
-        builder = PackageBuilder(server, session, tool_tab=tool, carrier_panel=carrier)
+        builder_window = BuilderWindow(server, session, tool_tab=tool, carrier_panel=carrier)
+        builder = builder_window.builder
     tool_opt.planner_options = stations.options
     workflow.gate(stations.run, stations.gate_md)  # optimizers need a confirmed setup (T5)
     workflow.gate(stations.quick_run, stations.quick_gate_md)
@@ -386,6 +396,8 @@ def build_app(
     server.gui.add_markdown(UR_NOTICE)
 
     state["drive"] = drive
+    state["collision"] = coll_view
+    coll_view.targets = targets
     state.update(
         tabs=tab_handles,
         cell=cell,
@@ -404,6 +416,7 @@ def build_app(
         cycle=cycle,
         compare=compare,
         builder=builder,
+        builder_window=builder_window,
         pareto=pareto,
         cable=cable,
         tool_ext_copy=tool_ext_copy,

@@ -19,7 +19,9 @@ def draw(b) -> None:
         h.remove()
     b._handles = []
     b.root.visible = bool(b.show.value)
-    b.root.position = tuple(v / 1000 for v in b.at.value)
+    T_root = b.root_pose()
+    b.root.wxyz = matrix_to_wxyz(T_root[:3, :3])
+    b.root.position = tuple(T_root[:3, 3])
     if not b.show.value:
         return
     sc = b.server.scene

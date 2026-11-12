@@ -55,7 +55,14 @@ def _mm(v) -> tuple:
 
 
 class PackageBuilder:
-    def __init__(self, server: viser.ViserServer, session, tool_tab=None, carrier_panel=None):
+    def __init__(
+        self,
+        server: viser.ViserServer,
+        session,
+        tool_tab=None,
+        carrier_panel=None,
+        robot_preview: bool = False,
+    ):
         self.server, self.s = server, session
         self.tool_tab, self.carrier = tool_tab, carrier_panel
         self.pkg = Package(kind="tool", name="my_tool", tcps=[Frame(name="tcp")])
@@ -98,9 +105,12 @@ class PackageBuilder:
             self.ty = gui.add_vector2("Y travel (mm)", (-1000.0, 1000.0), step=10.0)
             self.tlift = gui.add_vector2("Lift travel (mm)", (0.0, 0.0), step=10.0, hint="0, 0 = no lift")
         with gui.add_folder("Preview"):
-            self.show = gui.add_checkbox("Show preview", False)
+            self.show = gui.add_checkbox("Show preview", True)
             self.at = gui.add_vector3(
-                "Preview at (mm)", (0.0, -3000.0, 0.0), step=50.0, hint="clear of the cell"
+                "Preview at (mm)",
+                (0.0, 0.0, 0.0),
+                step=50.0,
+                hint="where a rail / gantry / mobile base stands",
             )
         self.check_btn = gui.add_button("Check")
         self.export = gui.add_button("Export package (.zip)", color="green")
@@ -111,6 +121,11 @@ class PackageBuilder:
         self.root = server.scene.add_frame(
             ROOT, show_axes=True, axes_length=0.3, axes_radius=0.006, visible=False
         )
+        self.robot_preview = None
+        if robot_preview:  # the builder window (ui.builder_window): a robot to try the package on
+            from ui.package_robot import RobotPreview
+
+            self.robot_preview = RobotPreview(server, self, session)
         self._wire()
         self.load_widgets()
 
@@ -399,8 +414,18 @@ class PackageBuilder:
             units=part.units,
         )
 
+    def root_pose(self) -> np.ndarray:
+        """World pose of the package frame: on the preview robot's flange (tool), else at
+        *Preview at*."""
+        from ui.package_robot import at_pose
+
+        at = at_pose(self.at.value)
+        return at if self.robot_preview is None else self.robot_preview.root_pose(at)
+
     def draw(self) -> None:
         draw(self)
+        if self.robot_preview is not None:
+            self.robot_preview.place(self.root_pose())
 
     # --- actions -------------------------------------------------------------------------------
 
