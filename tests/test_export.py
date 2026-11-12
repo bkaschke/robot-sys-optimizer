@@ -182,7 +182,8 @@ def test_report_is_self_contained(plate_plan, sander):
             notes=["n1"],
         )
     )
-    for section in ("Cost breakdown", "Stations", "Tool geometry", "Points", "Notes", "Universal Robots"):
+    assert "<h2>Points</h2>" not in html  # v9 #8: the CSV export has every point
+    for section in ("Cost breakdown", "Stations", "Tool geometry", "Notes", "Universal Robots"):
         assert section in html
     refs = re.findall(r"""(?:src|href)\s*=\s*['"]([^'"]+)""", html)
     assert refs and all(r.startswith("data:") for r in refs)  # nothing fetched from the network

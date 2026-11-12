@@ -5,7 +5,9 @@ session is not touched), swaps the robot (keeping the mount, base pose, tool, pa
 carrier and stay-out zones; joint limits and home revert to the robot's own), and runs the
 station planner with the current planner settings. One row per robot: stations, points
 reached, estimated cycle time, worst clearance, lowest manipulability, cost and run time.
-**Use robot** switches the cell to the chosen row's robot (Robot & cell tab).
+v9 #6: every robot's plans (solutions + joint solutions + setup stamps) are kept in
+``session.compared`` and saved with the project; Results -> Robot shows one robot at its stops
+with its plans (ui.compare_view), and switches the project's robot after a confirmation.
 """
 
 from __future__ import annotations
@@ -90,8 +92,35 @@ def compare_job(payload: dict, emit, cancelled) -> list[dict]:
         m = _metrics(best, res, time.monotonic() - t0)
         top = sols.get("__max_manip")
         m["manip_pct"] = 100 * m["manip"] / top if m["manip"] is not None and top else None
-        rows.append({"robot": name, **m})
+        from ui.staleness import stamp_for
+
+        plans = sorted(
+            (v for k, v in sols.items() if k != "__max_manip"),
+            key=lambda sr: (bool(sr[0].violations), sr[0].cost),
+        )
+        stamp = stamp_for(s, "plan")  # this robot's setup: its plans are up to date when viewed with it
+        rows.append(
+            {"robot": name, **m, "plans": plans, "stamps": {sol.label: dict(stamp) for sol, _ in plans}}
+        )
     return rows
+
+
+def keep_plans(session, rows: list[dict]) -> list[dict]:
+    """Move each row's plans into ``session.compared``; returns the rows without them (the table)."""
+    session.compared = {}
+    out = []
+    for r in rows:
+        r = dict(r)
+        plans, stamps = r.pop("plans", []), r.pop("stamps", {})
+        if plans:
+            session.compared[r["robot"]] = {
+                "results": [sol for sol, _ in plans],
+                "points": {sol.label: dict(res) for sol, res in plans},
+                "stamps": stamps,
+                "metrics": dict(r),
+            }
+        out.append(r)
+    return out
 
 
 def table(rows: list[dict], n_points: int) -> str:
@@ -135,15 +164,28 @@ class ComparePanel:
             self.progress = gui.add_progress_bar(0.0, visible=False)
             self.status = gui.add_markdown("")
             self.choice = gui.add_dropdown("Robot", ("—",), visible=False)
-            self.use = gui.add_button("Use robot", visible=False, hint="switch the cell to this robot")
+            self.use = gui.add_button(
+                "View in Results", visible=False, hint="this robot at its stops, with its plans (Results tab)"
+            )
+        self.view_robot: Callable[[str], None] | None = None  # app.py: ui.compare_view.CompareView.view
+        self.on_done: Callable[[], None] | None = None  # app.py: Results lists the compared robots
         self.run.on_click(lambda e: self.start(e))
         self.stop.on_click(lambda e: self._cancel.set())
 
         @self.use.on_click
         def _(e) -> None:
-            if self.choice.value in list_robots():
+            if self.choice.value not in list_robots():
+                return
+            if self.view_robot is not None:  # v9: view it in Results (the project's robot stays)
+                self.view_robot(self.choice.value)
+                notify(
+                    e,
+                    "Viewing a compared robot",
+                    f"Results shows the {self.choice.value} and its plans",
+                    ok=True,
+                )
+            else:
                 self.use_robot(self.choice.value)
-                notify(e, "Robot changed", f"The cell now uses the {self.choice.value}; plan again", ok=True)
 
     def start(self, event=None, block: bool = False) -> None:
         s = self.s
@@ -152,6 +194,10 @@ class ComparePanel:
         robots = [n for n, cb in self.pick.items() if cb.value]
         if not robots:
             return notify(event, "No robots", "Tick at least one robot")
+        if s.view_stash:
+            return notify(
+                event, "Viewing a compared robot", "Results → Robot: go back to the project's robot first"
+            )
         if s.tool_model is None or s.part is None or not s.targets.points:
             return notify(event, "Cannot compare", "Need a tool, a part and targets")
         from opt.placement import PlannerSettings
@@ -191,9 +237,10 @@ class ComparePanel:
 
         def work() -> None:
             try:
-                self.rows = jobs.call(
-                    "ui.compare:compare_job", payload, on_msg, self._cancel.is_set, in_process
-                )
+                rows = jobs.call("ui.compare:compare_job", payload, on_msg, self._cancel.is_set, in_process)
+                self.rows = keep_plans(s, rows)  # v9 #6: each robot's plans, viewable in Results
+                if self.on_done is not None:
+                    self.on_done()
                 self.status.content = table(self.rows, n)
                 names = tuple(r["robot"] for r in self.rows if r.get("stations"))
                 self.choice.options = names or ("—",)

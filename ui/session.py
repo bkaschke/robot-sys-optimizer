@@ -61,6 +61,10 @@ class Session:
     extra: dict = field(default_factory=dict)  # untouched project sections (optimizer)
     selection: tuple[str, list[int]] | None = None  # (part mesh path, face ids): saved selection
     load_warnings: list = field(default_factory=list)  # v9 #12: files a loaded project is missing
+    # v9 #6: Compare robots: robot -> {"results", "points" {label: {pid: PointResult}}, "stamps", "metrics"}
+    compared: dict = field(default_factory=dict)
+    # v9 #6: while Results shows a compared robot, the project's own robot and plans (ui.compare_view)
+    view_stash: dict | None = None
     bundled: list = field(default_factory=list)  # v9 #12: files the last save copied into the project
     ui: dict = field(default_factory=dict)  # saved panel settings ("panel.widget" -> value)
     stayouts: list = field(default_factory=list)  # schema.Primitive, world poses (core.stayout)
@@ -174,10 +178,43 @@ class Session:
     # --- project file -----------------------------------------------------------
 
     def snapshot(self) -> schema.Project:
-        """Project including GUI state: runs the ``before_save`` hooks, then to_project()."""
+        """Project including GUI state: runs the ``before_save`` hooks, then to_project(). While
+        Results shows a compared robot (``view_stash``), the project's own robot and plans are
+        saved."""
         for fn in self.before_save:
             fn()
-        return self.to_project()
+        stash = self.view_stash
+        if not stash:
+            return self.to_project()
+        cur = {k: getattr(self, k) for k in stash}
+        try:
+            for k, v in stash.items():
+                setattr(self, k, v)
+            return self.to_project()
+        finally:
+            for k, v in cur.items():
+                setattr(self, k, v)
+
+    def compared_data(self) -> list:
+        from core.feasibility import result_to_data
+
+        return [
+            schema.ComparedRobot(
+                robot=name,
+                metrics={
+                    k: v
+                    for k, v in c.get("metrics", {}).items()
+                    if isinstance(v, (int, float, str, type(None)))
+                },
+                results=list(c.get("results", [])),
+                result_points={
+                    label: [result_to_data(r) for r in pts.values()]
+                    for label, pts in c.get("points", {}).items()
+                },
+                stamps={k: dict(v) for k, v in c.get("stamps", {}).items()},
+            )
+            for name, c in self.compared.items()
+        ]
 
     def work_state(self) -> schema.WorkState:
         from core.feasibility import result_to_data
@@ -236,6 +273,7 @@ class Session:
             base=self.base,
             stayouts=list(self.stayouts),
             work=self.work_state(),
+            compared=self.compared_data(),
             **self.extra,
         )
 
@@ -276,6 +314,20 @@ class Session:
         self.base = project.base
         self.stayouts = list(project.stayouts)
         self.results = list(project.results)
+        from core.feasibility import result_from_data
+
+        self.view_stash = None
+        self.compared = {
+            c.robot: {
+                "results": list(c.results),
+                "points": {
+                    label: {d.id: result_from_data(d) for d in pts} for label, pts in c.result_points.items()
+                },
+                "stamps": {k: dict(v) for k, v in c.stamps.items()},
+                "metrics": dict(c.metrics),
+            }
+            for c in project.compared
+        }
         self.targets = project.targets
         self.set_tool(project.end_effector)
         self._apply_work(project.work)

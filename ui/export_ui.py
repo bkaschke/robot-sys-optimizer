@@ -210,6 +210,18 @@ class ExportPanel:
             cyc.append(f"Cycle time of the built paths: **{c['total']:.0f} s** ({parts}).")
         if any(cyc):
             out.append(("Cycle time", md_html("  \n".join(x for x in cyc if x))))
+        if s.compared:  # v9 #7: Optimize -> Compare robots
+            from ui.compare import table
+
+            rows = [{"robot": name, **c.get("metrics", {})} for name, c in s.compared.items()]
+            n = len(s.targets.points)
+            own = (s.view_stash or {}).get("robot_name", s.robot_name)
+            note = (
+                "Each robot planned the same study (same tool, part, targets, carrier and planner "
+                f"settings); its best plan is listed. This report's plan uses the **{s.robot_name}**"
+                + (f" (the project uses the **{own}**)." if own != s.robot_name else ".")
+            )
+            out.append(("Robot comparison", md_html(table(rows, n) + "\n\n" + note)))
         tol = getattr(s, "tolerance", None)
         if tol is not None and tol.label == sol.label:
             from ui.tolerance_ui import summary

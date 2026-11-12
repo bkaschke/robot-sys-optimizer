@@ -134,6 +134,7 @@ def build_app(
         state["cable"].follow_robot()  # the robot view was rebuilt: redraw the hose on it
         state["floor"].update(session)  # the floor fits the new cell
         state["collision"].settings_changed()  # the project's part surfaces kept exact
+        state["compare_view"].refresh()  # v9 #6: the project's compared robots
 
     def restore_work() -> None:
         """Bring back where the user left off: selection, then panel settings."""
@@ -287,6 +288,9 @@ def build_app(
         )
     with tab_handles["Results"]:
         workflow.results_header()
+        from ui.compare_view import CompareView
+
+        compare_view = CompareView(server, session)  # v9 #6: Results -> Robot (compared robots)
         results = ResultsTab(server, session, set_base=cell.set_base)
         optimize.build_inspect()  # v7 round 2 (T18): Inspect result lives in Results
         sim = SimPanel(  # paths along the selected solution + playback (v2 phase 5)
@@ -323,6 +327,10 @@ def build_app(
         )
         results.chosen_listeners.append(pareto.refresh)
     state["results"] = results
+    compare_view.cell, compare_view.results, compare_view.sim = cell, results, sim
+    compare_view.on_changed = lambda: pareto.refresh()
+    compare.view_robot, compare.on_done = compare_view.view, compare_view.refresh
+    state["compare_view"] = compare_view
     with tabs.add_tab("Package builder"):  # URDF packages for tools, external axes, mobile bases
         from ui.builder_window import BuilderWindow
 

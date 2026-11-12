@@ -30,7 +30,11 @@ th,td{border-bottom:1px solid #eee;padding:4px 6px;text-align:right}th{backgroun
 td:first-child,th:first-child{text-align:left}.bar{background:#5a8cdc;height:10px;display:inline-block}
 .ok{color:#1f8a43}.warn{color:#b07800}.bad{color:#c62828}.note{color:#666;font-size:12px}
 img{max-width:100%;border:1px solid #ddd;border-radius:6px}.scroll{max-height:420px;overflow:auto}
-@media print{.scroll{max-height:none}}
+section{margin:0 0 8px}figure{margin:12px 0}
+@page{margin:14mm 12mm}
+@media print{body{max-width:none;margin:0;padding:0;font-size:12px}.scroll{max-height:none;overflow:visible}
+h2{break-after:avoid;page-break-after:avoid}tr,figure,.kpis,.kpi,img{break-inside:avoid;page-break-inside:avoid}
+section{break-inside:avoid-page}}
 @media (prefers-color-scheme: dark){body{background:#16181c;color:#e6e8eb}th{background:#23262c}
 th,td{border-color:#2c3038}.kpi,h2,img{border-color:#2c3038}.meta,.note,.kpi span{color:#9aa0a8}
 .ok{color:#4cc27a}.warn{color:#e0a83a}.bad{color:#ef6b6b}svg{border-radius:6px}}
@@ -132,6 +136,8 @@ def build_report(r: ReportInput) -> str:
         f"<div class='kpi'><b class='{'warn' if n_marg else 'ok'}'>{n_marg}</b><span>marginal</span></div>",
         f"<div class='kpi'><b>{sol.cost:.2f}</b><span>cost J</span></div>",
     ]
+    if sol.cycle_s is not None:  # v9 #8
+        parts.append(f"<div class='kpi'><b>{sol.cycle_s:.0f} s</b><span>cycle time (estimate)</span></div>")
     if tv is not None:
         parts.append(f"<div class='kpi'><b>{tv.L * 1000:.0f} mm</b><span>tool length L</span></div>")
     parts.append("</div>")
@@ -142,8 +148,8 @@ def build_report(r: ReportInput) -> str:
             "</figcaption></figure>"
         )
 
-    for heading, body in r.sections:  # v8 T19: summary, cycle time, tolerance, unreached points
-        parts.append(f"<h2>{_e(heading)}</h2>{body}")
+    for heading, body in r.sections:  # summary, cycle time, comparison, tolerance, unreached points
+        parts.append(f"<section><h2>{_e(heading)}</h2>{body}</section>")
 
     parts.append("<h2>Cost breakdown</h2><table><tr><th>term</th><th>weighted value</th><th></th></tr>")
     total = max(sol.cost, 1e-9)
@@ -182,14 +188,12 @@ def build_report(r: ReportInput) -> str:
             f"{switches + jumps} configuration changes ({switches} zone switches, {jumps} wrist jumps &gt; "
             "180°). Configuration = shoulder (S), elbow (E), wrist (W) branch.</p>"
             "<table><tr><th>zone</th><th>station</th><th>configuration</th><th>points</th>"
-            "<th>wrist jumps</th><th>path (point ids)</th></tr>"
+            "<th>wrist jumps</th></tr>"
         )
         for i, z in enumerate(sol.zones):
-            ids = ", ".join(str(p) for p in z.points[:40]) + (" …" if len(z.points) > 40 else "")
             parts.append(
                 f"<tr><td>Z{i + 1}</td><td>S{z.station + 1}</td><td>{_e(z.config)}</td>"
-                f"<td>{len(z.points)}</td><td>{z.wrap_jumps}</td>"
-                f"<td style='text-align:left'>{_e(ids)}</td></tr>"
+                f"<td>{len(z.points)}</td><td>{z.wrap_jumps}</td></tr>"
             )
         parts.append("</table>")
 
@@ -207,32 +211,6 @@ def build_report(r: ReportInput) -> str:
                 f"<td>{s.stations}</td></tr>"
             )
         parts.append("</table>")
-
-    cols = [
-        "point_id",
-        "station",
-        *(["zone", "seq", "config"] if sol.zones else []),
-        "status",
-        "tcp",
-        "tcp_world_x_mm",
-        "tcp_world_y_mm",
-        "tcp_world_z_mm",
-        "tilt_deg",
-        "clearance_mm",
-        "limit_margin_deg",
-        "reason",
-    ]
-    parts.append(
-        "<h2>Points</h2><div class='scroll'><table><tr>" + "".join(f"<th>{c}</th>" for c in cols) + "</tr>"
-    )
-    for row in r.rows:
-        cls = {"reachable": "ok", "marginal": "warn", "unreachable": "bad"}.get(row["status"], "")
-        parts.append(
-            "<tr>"
-            + "".join(f"<td class='{cls if c == 'status' else ''}'>{_e(row.get(c, ''))}</td>" for c in cols)
-            + "</tr>"
-        )
-    parts.append("</table></div>")
 
     if r.settings:
         parts.append("<h2>Settings</h2><table>")

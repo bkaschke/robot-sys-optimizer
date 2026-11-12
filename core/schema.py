@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import math
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import Field, field_validator, model_validator
 
@@ -330,6 +330,16 @@ class Solution(_Model):
 # --- Project -------------------------------------------------------------------
 
 
+class ComparedRobot(_Model):
+    """v9 #6: one robot of Optimize -> Compare robots, with its plans (viewable in Results)."""
+
+    robot: str  # registry name
+    metrics: dict[str, Any] = Field(default_factory=dict)  # the comparison table's row
+    results: list[Solution] = Field(default_factory=list)
+    result_points: dict[str, list[PointResultData]] = Field(default_factory=dict)  # label -> points
+    stamps: dict[str, dict[str, str]] = Field(default_factory=dict)  # label -> setup fingerprint
+
+
 class Project(_Model):
     version: int = SCHEMA_VERSION
     units: Literal["m"] = "m"
@@ -343,6 +353,7 @@ class Project(_Model):
     optimizer: Optimizer = Field(default_factory=Optimizer)
     results: list[Solution] = Field(default_factory=list)
     work: WorkState = Field(default_factory=WorkState)
+    compared: list[ComparedRobot] = Field(default_factory=list)  # v9 #6: Compare robots, kept
 
     @field_validator("version")
     @classmethod

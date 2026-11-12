@@ -32,8 +32,9 @@ def test_report_has_the_customer_sections(app):
     sol = app["results"].selected()
     path, data = ex.export_report(sol)
     page = data.decode()
-    for h in ("Summary", "Cycle time", "Tolerance check", "Unreached points", "Stations", "Points"):
+    for h in ("Summary", "Cycle time", "Tolerance check", "Unreached points", "Stations"):
         assert f"<h2>{h}</h2>" in page, h
+    assert "<h2>Points</h2>" not in page  # v9 #8: no per-point table (the CSV has every point)
     assert "<script" not in page and "Estimated cycle time" in page
 
 
