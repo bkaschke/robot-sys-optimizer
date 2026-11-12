@@ -276,6 +276,10 @@ def build_app(
         compare = ComparePanel(  # v8 T9
             server, session, stations, use_robot=lambda name: setattr(cell.robot_choice, "value", name)
         )
+        from ui.frame_ui import FramePanel
+
+        frame = FramePanel(server, session, stations, carrier, on_results=new_results)  # v9 #9
+        picker.on_show["Gantry placement"] = frame.refresh
         picker.bind(
             {
                 "Station planner": [stations.folder],
@@ -284,6 +288,7 @@ def build_app(
                 "Base placement map": [placement.folder],
                 "Tool geometry": [tool_opt.folder],
                 "Compare robots": [compare.folder],
+                "Gantry placement": [frame.folder],
             }
         )
     with tab_handles["Results"]:
@@ -345,7 +350,10 @@ def build_app(
             open_html(builder_window.port, "Simplify the part in the package builder ↗", False)
         )
     tool_opt.planner_options = stations.options
-    workflow.gate(stations.run, stations.gate_md)  # optimizers need a confirmed setup (T5)
+    workflow.gate(stations.run, stations.gate_md)
+    workflow.gate(
+        frame.run, frame.gate_md
+    )  # v9 #9: like the planner, a confirmed setup  # optimizers need a confirmed setup (T5)
     workflow.gate(stations.quick_run, stations.quick_gate_md)
     from ui.workflow import feasibility_reason, plan_reason, result_reason
 
@@ -449,6 +457,7 @@ def build_app(
         targets=targets,
         optimize=optimize,
         picker=picker,
+        frame=frame,
         placement=placement,
         stations=stations,
         tool_opt=tool_opt,

@@ -21,6 +21,8 @@ OPTIMIZERS = {
     "Tool geometry": "Optimizes the tool (pose ranges, length and bends) together with the stations.",
     "Compare robots": "Plans the same study with several robots and lists stations, reach, cycle time "
     "and cost side by side.",
+    "Gantry placement": "Places the whole rail or gantry frame relative to the part (standoff, shift, "
+    "robot mount height), then plans the stops of the best frames.",
 }
 
 
@@ -34,6 +36,7 @@ class OptimizerSelect:
         self.choice = gui.add_dropdown("Optimizer", names, initial_value=names[0])
         self.about = gui.add_markdown("")
         self.folders: dict[str, list] = {}
+        self.on_show: dict[str, object] = {}  # name -> called when that optimizer is shown
         self.choice.on_update(lambda _e: self.show())
 
     def bind(self, folders: dict[str, list]) -> None:
@@ -49,6 +52,9 @@ class OptimizerSelect:
         for key, handles in self.folders.items():
             for h in handles:
                 h.visible = key == pick
+        fn = self.on_show.get(pick)
+        if fn is not None:
+            fn()
         text = f"_{OPTIMIZERS.get(pick, '')}_"
         if self.about.content != text:
             self.about.content = text
