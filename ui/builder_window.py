@@ -47,6 +47,7 @@ class BuilderWindow:
         def _view(client) -> None:  # close on the package and the robot
             client.camera.position = (1.8, -1.8, 1.4)
             client.camera.look_at = (0.0, 0.0, 0.5)
+
         with self.server.gui.add_folder("Package builder", expand_by_default=True):
             self.builder = PackageBuilder(
                 self.server, session, tool_tab=tool_tab, carrier_panel=carrier_panel, robot_preview=True
