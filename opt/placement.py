@@ -243,6 +243,9 @@ def plan_stations(
                 assignment, results, split = make_areas(
                     checker, t, stations, sites, assignment, results, hint=cov
                 )
+            from opt.shoulder import one_side
+
+            sides = one_side(checker, t, stations, sites, assignment, results, st.zoning_poses)
             zones = []
             from opt.zoning import arm_motion, config_changes, stop_sequences, violations, zone_counts
 
@@ -250,7 +253,9 @@ def plan_stations(
                 from opt.zoning import zone_solution
 
                 say(f"zoning k={k}", f)
-                zones, _ = zone_solution(checker, t, stations, sites, assignment, results, st.zoning_poses)
+                zones, _ = zone_solution(
+                    checker, t, stations, sites, assignment, results, st.zoning_poses, sides=sides
+                )
             unreached = sorted(pid for pid, r in results.items() if r.status == "unreachable")
             groups, flips = zone_counts(zones)
             seqs = stop_sequences(checker, t, assignment, results, zones)

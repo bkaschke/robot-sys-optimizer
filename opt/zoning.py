@@ -49,8 +49,10 @@ def zone_solution(
     assignment: dict[int, int],
     results: dict[int, PointResult],
     max_poses: int = 40,
+    sides: dict[int, str] | None = None,
 ) -> tuple[list[Zone], int]:
     """Zones for a verified plan; updates ``results`` in place (q, config, zone, seq).
+    ``sides``: the shoulder side some stops must keep (opt.shoulder.one_side).
     Returns (zones in station order, number of configuration changes)."""
     from opt.placement import _robust
 
@@ -65,9 +67,12 @@ def zone_solution(
         for pid in pids:
             results[pid].config = config_label(checker.ik, results[pid].q)
 
-        def search(pid: int) -> dict[str, PointResult]:
+        def search(pid: int, k: int = k) -> dict[str, PointResult]:
             i, r0 = index[pid], results[pid]
             opts = checker.check_point_configs(pid, t.P_part[i], t.N_part[i], t.groups[i], max_poses)
+            want = (sides or {}).get(k)
+            if want:  # this stop keeps one shoulder side (opt.shoulder)
+                opts = {c: r for c, r in opts.items() if c.startswith(want)}
             opts.setdefault(r0.config, r0)  # the verified solution is always an option
             return opts
 

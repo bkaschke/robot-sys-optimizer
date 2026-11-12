@@ -138,6 +138,9 @@ class _Evaluator:
             stations = [{d: s.carrier[d] for d in sites.dofs if d in s.carrier} for s in sol.stations]
         pref = np.array([sol.assignment.get(int(i), 0) for i in self.t.ids])
         assignment, res = verify(checker, self.t, stations, sites, pref)
+        from opt.shoulder import one_side
+
+        sides = one_side(checker, self.t, stations, sites, assignment, res, self.st.planner.zoning_poses)
         zones, changes = [], 0
         from opt.zoning import zone_counts
 
@@ -145,7 +148,7 @@ class _Evaluator:
             from opt.zoning import zone_solution
 
             zones, changes = zone_solution(
-                checker, self.t, stations, sites, assignment, res, self.st.planner.zoning_poses
+                checker, self.t, stations, sites, assignment, res, self.st.planner.zoning_poses, sides=sides
             )
         unreached = sorted(p for p, r in res.items() if r.status == "unreachable")
         from opt.zoning import arm_motion, config_changes, stop_sequences

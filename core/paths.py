@@ -171,14 +171,19 @@ class _Tracer:
 
     def around(self, seg: list[PathSample], k, zone, q, rb: PointResult) -> list[PathSample]:
         """A surface move where the arm or tool collides (e.g. a long move swinging the forearm
-        into the part) becomes a planned joint move to b (back off, around, approach), unless
-        that does no better. v6 feedback: the arm must not pass through objects."""
-        hits = sum(p.issue == "collision" for p in seg)
-        if not hits or rb.q is None:
+        into the part), or that cannot follow the surface inside the joint limits (a wrist
+        joint would pass its limit: unreachable samples or a big joint jump), becomes a planned
+        joint move to b (back off, around / unwind, approach), unless that does no better.
+        v6 feedback: the arm must not pass through objects; 2026-11-11: nor stop short of a
+        point it cannot follow the surface to."""
+        bad = _bad(seg)
+        if not bad or rb.q is None:
             return seg
+        if np.linalg.norm(self.tcp_pose(rb)[:3, 3] - seg[-1].T_part_tcp[:3, 3]) > 5e-3:
+            return seg  # b's planned joints do not put the tool on b from here: keep the flags
         qb = self.nearest_copy(rb.q, q)
         alt = self.change_move(k, zone, q, qb, rb.tcp, seg[0].a, rb.id)
-        if _hits(alt) >= hits:
+        if _bad(alt) >= bad:
             return seg
         qb = alt[-1].q  # the joint move may arrive at another 2*pi copy (same pose)
         return [*alt, PathSample(k, zone, rb.id, rb.id, 0.0, self.tcp_pose(rb), rb.tcp, qb)]
@@ -254,6 +259,8 @@ class _Tracer:
         best = None
         for s in sols:
             q = prev + (np.mod(s - prev + np.pi, 2 * np.pi) - np.pi)  # nearest copy of each joint
+            q = np.where(q > ch.hi + 1e-9, q - 2 * np.pi, q)  # past a limit: the copy inside it
+            q = np.where(q < ch.lo - 1e-9, q + 2 * np.pi, q)  # (a big jump: an unwinding move)
             if np.any(q < ch.lo - 1e-9) or np.any(q > ch.hi + 1e-9):
                 continue
             same = config_label(ch.ik, q) == label
@@ -303,6 +310,23 @@ class _Tracer:
 
 def _hits(samples: list[PathSample]) -> int:
     return sum(p.issue == "collision" for p in samples)
+
+
+UNWIND = np.radians(90.0)  # a jump this big is a joint unwinding at its limit, not a fast step
+
+
+def _bad(samples: list[PathSample]) -> int:
+    """Samples the arm cannot do as planned: collisions, outside the joint limits, and jumps
+    that unwind a joint (over ``UNWIND`` from the previous sample)."""
+    n, prev = 0, None
+    for p in samples:
+        if p.issue in ("collision", "unreachable"):
+            n += 1
+        elif p.issue == "jump" and prev is not None and p.q is not None:
+            n += float(np.max(np.abs(np.asarray(p.q) - prev))) > UNWIND
+        if p.q is not None:
+            prev = np.asarray(p.q, float)
+    return n
 
 
 def _drive_hits(checker, moves, q, tcp: str) -> bool:
