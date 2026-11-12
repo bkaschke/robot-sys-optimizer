@@ -118,7 +118,8 @@ class ComparePanel:
         self._cancel = threading.Event()
         self.rows: list[dict] = []
         gui = server.gui
-        with gui.add_folder("Compare robots", expand_by_default=False):
+        self.folder = gui.add_folder("Compare robots", expand_by_default=False)
+        with self.folder:
             gui.add_markdown(
                 "_Plans the current study with each ticked robot (same tool, part, targets, carrier and "
                 "planner settings) and lists the results side by side._"

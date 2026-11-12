@@ -73,7 +73,7 @@ nav a.hide{display:none}
 <li><strong>Optimize tab</strong> → <em>Base placement</em> → <strong>Show base heatmap</strong> (the first run builds a reachability map, about 1 min) → <strong>Move base to best</strong>.</li>
 <li><strong>Optimize tab</strong> → <em>Station planner</em> → <strong>Plan stations</strong>. The result appears in the <strong>Results</strong> tab.</li>
 <li><strong>Optimize tab</strong> → <em>Tool geometry</em> → <strong>Optimize tool</strong> → <strong>Apply to tool</strong>.</li>
-<li><strong>Results tab</strong> → <em>Export</em> → <strong>TCP poses (CSV)</strong>, <strong>Optimized tool URDF (zip)</strong>, <strong>HTML report</strong>. Files are downloaded and also saved to <code>workspace/default/export/</code>.</li>
+<li><strong>Results tab</strong> → <em>Export</em> → <strong>TCP poses (CSV)</strong>, <strong>Optimized tool URDF (zip)</strong>, <strong>Export report</strong> (<em>Report format</em> PDF or HTML). Files are downloaded and also saved to <code>workspace/default/export/</code>.</li>
 <li><strong>Project</strong> (top of the panel) → <strong>Save</strong> stores everything in <code>workspace/default/project.json</code>. Autosave also does this every 2 minutes. At the next start, the <strong>Open a project</strong> window offers <strong>Reopen last project</strong>.</li>
 </ol>
 <p>Tick <strong>Dark mode</strong> under <strong>Settings &amp; help</strong> at the top of the panel at any time.</p>
@@ -382,6 +382,7 @@ $PY scripts/make_portable.py          # -&gt; dist/robot-sys-optimizer-portable-
 <p>Points are stored <strong>in the part frame</strong>, so moving the part moves them with it.</p>
 <h3 id="5-optimize-tab">5 Optimize tab</h3>
 <p><strong>The optimizers need a confirmed setup.</strong> <em>Plan stations</em>, <em>Quick plan</em> and <em>Optimize tool</em> stay greyed out until steps 1 to 4 are confirmed; a line under each button says what is missing, e.g. &quot;Confirm <strong>2 External axis</strong> first&quot; or &quot;<strong>3 Tool</strong> changed since you confirmed it — confirm it again&quot;. The feasibility check and the base heatmap work at any time.</p>
+<p><strong>Layout (v9).</strong> The <strong>Optimizer</strong> dropdown at the top picks one optimizer: <em>Station planner</em>, <em>Quick station plan</em>, <em>Feasibility check</em>, <em>Base placement map</em>, <em>Tool geometry</em> or <em>Compare robots</em>. A line under it says what that optimizer does, and only its section is shown, with one <strong>Run</strong> button (labelled for the optimizer), its <strong>Cancel</strong> and its progress bar. The settings they share are in one <strong>Settings</strong> folder at the bottom of the tab: <strong>Max stations</strong> (every optimizer that plans stations uses it), <strong>Costs &amp; requirements</strong> (station planner, quick plan, compare), <strong>Costs &amp; requirements (tool optimizer)</strong>, <strong>Cycle time</strong> and <strong>Cable &amp; safety</strong>. In the Station planner, <em>Candidate grid</em>, <em>Refinement</em> and <em>Objective</em> (with the fields that depend on them) are under <strong>Advanced</strong>. The rows below describe each optimizer and those settings.</p>
 <table>
 <thead>
 <tr>
@@ -408,7 +409,7 @@ $PY scripts/make_portable.py          # -&gt; dist/robot-sys-optimizer-portable-
 </tr>
 <tr>
 <td><strong>Quick station plan</strong></td>
-<td><strong>Quick plan</strong>: a first look in seconds with the Station planner's <em>Max stations</em>: no fine-tuning, no zones, no station areas, and it stops after the first station count that gives nothing better. Its plans are labelled <strong>Quick:</strong> in Results; the status says they are not optimized (run <strong>Plan stations</strong> for that). Same Cancel, progress and confirmed-setup rule as the planner; the log gives the run time.</td>
+<td><strong>Quick plan</strong>: a first look in seconds with <em>Max stations</em> (Settings): no fine-tuning, no zones, no station areas, and it stops after the first station count that gives nothing better. Its plans are labelled <strong>Quick:</strong> in Results; the status says they are not optimized (run <strong>Plan stations</strong> for that). Same Cancel, progress and confirmed-setup rule as the planner; the log gives the run time.</td>
 </tr>
 <tr>
 <td><strong>Compare robots</strong> (v8)</td>
@@ -535,8 +536,8 @@ $PY scripts/make_portable.py          # -&gt; dist/robot-sys-optimizer-portable-
 <li><strong>TCP poses (CSV)</strong></li>
 <li><strong>Userframes (CSV)</strong>: one row per stop: its carrier values and the <strong>user frame</strong>, the pose of the part frame in the robot's base frame at that stop (teach the points in it and they stay valid). The columns follow the robot model: UR arms <code>x_mm, y_mm, z_mm</code> + rotation vector <code>rx_rad, ry_rad, rz_rad</code> (as in a UR pose <code>p[...]</code>, with x y z converted to m); FANUC-style arms <code>X Y Z</code> (mm) + <code>W P R</code> (deg); every robot also gets the rotation matrix <code>r11 … r33</code>. The format comes from <code>frame_convention</code> in the robot's <code>spec.yaml</code> (<code>ur</code>, <code>fanuc</code> or <code>matrix</code>).</li>
 <li><strong>Optimized tool URDF (zip)</strong></li>
-<li><strong>HTML report</strong>: self-contained, printable to PDF, with an optional 3D snapshot. Since v8 it opens with the customer sections: the <strong>Summary</strong> card, the <strong>Cycle time</strong> (the plan's estimate, and the built paths' when they belong to this plan), the <strong>Tolerance check</strong> of this plan (when one was run) and the <strong>Unreached points</strong> with their reasons.</li>
-<li><strong>Report (PDF)</strong> (v8): the same report printed to <code>export/report.pdf</code> by Edge headless (Chrome works too); without a browser the HTML report is still written.</li>
+<li><strong>Export report</strong> with <em>Report format</em> = <strong>HTML</strong> (v9: one button, the format chosen above it): self-contained, printable to PDF, with an optional 3D snapshot. Since v8 it opens with the customer sections: the <strong>Summary</strong> card, the <strong>Cycle time</strong> (the plan's estimate, and the built paths' when they belong to this plan), the <strong>Tolerance check</strong> of this plan (when one was run) and the <strong>Unreached points</strong> with their reasons.</li>
+<li><em>Report format</em> = <strong>PDF</strong> (the default): the same report printed to <code>export/report.pdf</code> by Edge headless (Chrome works too); without a browser the HTML report is still written.</li>
 <li><strong>Tool (STEP)</strong> (v8): the selected result's tool (its optimized values, else the nominal) as a STEP file for CAD: the extension as round tube legs (the <em>Tube OD</em> chosen under Tool geometry, else the tool's radius) with a ball at each bend, plus an <strong>ISO 9409-1 flange plate</strong> at the mount (<em>Flange</em>: 50-4-M6 for UR arms, 63-4-M6, 80-6-M8; 8 mm thick, with the bolt holes and the centring bore). The head is not in it (use its own CAD). Made with CadQuery, which is part of the environment and the portable copy.</li>
 </ul>
 <p>Files go to <code>&lt;project folder&gt;/export/</code> and also download in the browser.</p>
@@ -646,7 +647,7 @@ $PY scripts/make_portable.py          # -&gt; dist/robot-sys-optimizer-portable-
 <li>Optimize → <strong>Check all targets</strong>. Everything should be reachable from the origin.</li>
 <li>Optimize → <strong>Plan stations</strong> → Results: &quot;1 floor station: N/N reached&quot;.</li>
 <li>Optimize → <strong>Optimize tool</strong>. On this plate the shortest straight tool is the bottom of the range (50 mm), and the bend stage may lower the cost further.</li>
-<li>Results → <strong>HTML report</strong>.</li>
+<li>Results → <strong>Export report</strong>.</li>
 </ol>
 <p>The same job without the GUI is in <code>examples/headless_plan.py</code> (section 7).</p>
 <h3 id="example-b-a-long-rail-part-with-a-7th-axis-rail-carrier">Example B: a long rail part with a 7th-axis rail carrier</h3>
@@ -655,7 +656,7 @@ $PY scripts/make_portable.py          # -&gt; dist/robot-sys-optimizer-portable-
 <li>Cell → <em>Part</em> <code>long_rail</code>, xyz <code>0, 800, 500</code>.</li>
 <li>Targets → <em>Select by normal</em> <code>(0,0,1)</code> within <code>5</code> → <em>Spacing</em> <code>250</code> → <strong>Generate</strong>.</li>
 <li>External Axis → Carrier <code>rail</code> → <strong>Load carrier defaults</strong>. Set <em>Track/gantry frame xyz</em> to <code>0, 150, 0</code>, so the 0.5 m carriage sits exactly 300 mm from the part. Optionally add a wall keep-out <code>-5000,1300,5000,3000</code>. Click <strong>Apply base settings</strong>.</li>
-<li>Optimize → <em>Max stations</em> <code>5</code> → <strong>Plan stations</strong>. Expect 2 rail stations for the top face; the Results tab shows the carriage positions <em>s</em>.</li>
+<li>Optimize → Settings → <em>Max stations</em> <code>5</code> → <strong>Plan stations</strong>. Expect 2 rail stations for the top face; the Results tab shows the carriage positions <em>s</em>.</li>
 <li>Try Carrier <code>mobile</code> with its defaults on the same targets and compare. Both need 2 stops on the top face. On the wall-side face (generate on the face pointing to the wall) the rail needs 4 and the mobile base 5.</li>
 </ol>
 <h3 id="example-b2-design-a-mobile-robot-from-simple-shapes">Example B2: design a mobile robot from simple shapes</h3>

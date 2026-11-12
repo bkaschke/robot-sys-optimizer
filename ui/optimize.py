@@ -41,7 +41,8 @@ class OptimizeTab:
         self._thread: threading.Thread | None = None
         self._cancel = threading.Event()
         gui = server.gui
-        with gui.add_folder("Feasibility check"):
+        self.folder = gui.add_folder("Feasibility check")
+        with self.folder:
             self.clearance = gui.add_number("Clearance (mm)", 10.0, min=0.0, step=1.0)
             self.joint_margin = gui.add_number("Joint-limit margin (deg)", 5.0, min=0.0, step=1.0)
             self.check_from = gui.add_dropdown(

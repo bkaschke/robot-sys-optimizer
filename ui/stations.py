@@ -44,59 +44,68 @@ ZONING = ("best per point", "zones (minimize changes)")
 
 
 class StationsPanel:
-    def __init__(self, server: viser.ViserServer, session: Session, on_solution: Callable[[], None]):
+    def __init__(
+        self, server: viser.ViserServer, session: Session, on_solution: Callable[[], None], settings=None
+    ):
+        """``settings``: the Optimize tab's Settings folder (v9): Max stations and the costs go there."""
+        from contextlib import nullcontext
+
+        slot = settings if settings is not None else nullcontext()
         self.s = session
         self.on_solution = on_solution
         self._thread: threading.Thread | None = None
         self._cancel = threading.Event()
         self.on_start: Callable[[], None] | None = None  # set by app.py: e.g. clear old paths
         gui = server.gui
-        with gui.add_folder("Station planner"):
+        self.folder = gui.add_folder("Station planner")
+        with self.folder:
             from ui import rules_ui
 
             rules_ui.build(gui, self)  # v7 round 2 (T15): Mode = Cost based / Rules only
             opt = self._optimizer()
-            self.max_stations = gui.add_number(
-                "Max stations",
-                opt.max_stations,
-                min=1,
-                max=40,
-                step=1,
-                hint="the planner stops early once more stops no longer give a better plan",
-            )
+            with slot:
+                self.max_stations = gui.add_number(
+                    "Max stations",
+                    opt.max_stations,
+                    min=1,
+                    max=40,
+                    step=1,
+                    hint="the planner stops early once more stops no longer give a better plan",
+                )
             gui.add_markdown(
                 "_Static base mode places one base (k = 1); set Mode = movable with a carrier in the "
                 "External Axis tab for several stations._"
             )
-            self.step = gui.add_number("Candidate grid (mm)", 100.0, min=25.0, max=500.0, step=25.0)
-            from ui.method_picker import MethodPicker
+            with gui.add_folder("Advanced", expand_by_default=False):  # v9 #10: rarely changed
+                self.step = gui.add_number("Candidate grid (mm)", 100.0, min=25.0, max=500.0, step=25.0)
+                from ui.method_picker import MethodPicker
 
-            # v8 T10: was the checkbox "Refine with exact check (CMA-ES)"; old saved values map on
-            self.refine = MethodPicker(gui, "station_refine", "Refinement")
-            self.objective_m = MethodPicker(gui, "station_objective", "Objective")  # v8 T11 / T12
-            from ui.pareto_ui import pareto_keys_widgets
+                # v8 T10: was the checkbox "Refine with exact check (CMA-ES)"; old saved values map on
+                self.refine = MethodPicker(gui, "station_refine", "Refinement")
+                self.objective_m = MethodPicker(gui, "station_objective", "Objective")  # v8 T11 / T12
+                from ui.pareto_ui import pareto_keys_widgets
 
-            self.pareto_keys = pareto_keys_widgets(gui, ("stations", "cycle", "clearance"))
-            from opt.robust import MEASURES
+                self.pareto_keys = pareto_keys_widgets(gui, ("stations", "cycle", "clearance"))
+                from opt.robust import MEASURES
 
-            self.robust_measure = gui.add_dropdown(  # v8 T12
-                "Robust measure",
-                MEASURES,
-                visible=False,
-                hint="points lost: the worst sample or the worst 20 %",
-            )
-            self.robust_samples = gui.add_number(
-                "Robust samples",
-                10,
-                min=2,
-                max=200,
-                step=1,
-                visible=False,
-                hint="tolerance samples per candidate",
-            )
-            self.tolerance_settings = None  # app.py: the Results -> Tolerance check offsets
-            self.cable = None  # app.py: Optimize -> Cable & safety (v8 T18)
-            self.objective_m.dropdown.on_update(lambda _e: self._objective_fields())
+                self.robust_measure = gui.add_dropdown(  # v8 T12
+                    "Robust measure",
+                    MEASURES,
+                    visible=False,
+                    hint="points lost: the worst sample or the worst 20 %",
+                )
+                self.robust_samples = gui.add_number(
+                    "Robust samples",
+                    10,
+                    min=2,
+                    max=200,
+                    step=1,
+                    visible=False,
+                    hint="tolerance samples per candidate",
+                )
+                self.tolerance_settings = None  # app.py: the Results -> Tolerance check offsets
+                self.cable = None  # app.py: Optimize -> Cable & safety (v8 T18)
+                self.objective_m.dropdown.on_update(lambda _e: self._objective_fields())
             self.areas = gui.add_checkbox(
                 "Connected station areas", True, hint="each stop's points one area on the part (no overlap)"
             )
@@ -115,7 +124,8 @@ class StationsPanel:
             zoning_fields()
             from ui.costs_ui import CostPanel
 
-            self.costs = CostPanel(server, session)
+            with slot:
+                self.costs = CostPanel(server, session)
             rules_ui.show(self)
             self.run = gui.add_button("Plan stations", color="green")
             self.gate_md = gui.add_markdown("", visible=False)  # why Run is disabled (T5)
@@ -123,9 +133,10 @@ class StationsPanel:
             self.progress = gui.add_progress_bar(0.0, visible=False)
             self.status = gui.add_markdown("_Results appear in the Results tab as they finish._")
         # v7 round 2 (T14): a fast first look, without refinement, zones or station areas
-        with gui.add_folder("Quick station plan"):
+        self.quick_folder = gui.add_folder("Quick station plan")
+        with self.quick_folder:
             gui.add_markdown(
-                "_Uses *Max stations* of the Station planner. No refinement, no zones, no station "
+                "_Uses *Max stations* (Settings). No refinement, no zones, no station "
                 "areas: a first look in seconds._"
             )
             self.quick_run = gui.add_button("Quick plan", color="green")

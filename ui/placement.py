@@ -40,7 +40,8 @@ class PlacementPanel:
         self._map_key = None
         self._handles: list = []
         gui = server.gui
-        with gui.add_folder("Base placement (reachability)", expand_by_default=False):
+        self.folder = gui.add_folder("Base placement (reachability)", expand_by_default=False)
+        with self.folder:
             self.res = gui.add_number("Map cell (mm)", 50.0, min=10.0, max=200.0, step=5.0)
             self.grid = gui.add_number("Heatmap cell (mm)", 25.0, min=5.0, max=200.0, step=5.0)
             self.half = gui.add_number("Search half-width (m)", 2.5, min=0.5, max=10.0, step=0.5)

@@ -37,7 +37,8 @@ class CablePanel:
         self._handles: list = []
         self._view = None  # the robot view the hose was drawn on
         gui = server.gui
-        with gui.add_folder("Cable & safety", expand_by_default=False):
+        self.folder = gui.add_folder("Cable & safety", expand_by_default=False)
+        with self.folder:
             gui.add_markdown(
                 "_Hose / dress pack on the arm and the cable wrap at joint 6. Reduced-speed zones are "
                 "under Robot & cell → Reduced-speed zones; the reach envelope and a fence line are "

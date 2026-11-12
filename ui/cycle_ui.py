@@ -41,7 +41,8 @@ class CyclePanel:
         self.s = session
         d = CycleSettings()
         gui = server.gui
-        with gui.add_folder("Cycle time", expand_by_default=False):
+        self.folder = gui.add_folder("Cycle time", expand_by_default=False)
+        with self.folder:
             gui.add_markdown(
                 "_Speeds of the robot program, used for the **estimated cycle time** of each plan (Results "
                 "card; cost term *Cost per minute of cycle time*) and the cycle time of built paths._"

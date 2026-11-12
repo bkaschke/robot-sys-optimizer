@@ -26,7 +26,9 @@ class ToolOptPanel:
         session: Session,
         apply_values: Callable[[ExtensionValues], None],
         on_solution: Callable[[], None],
+        settings=None,
     ):
+        self.settings = settings  # v9: the Optimize tab's Settings folder (its costs go there)
         self.planner_options = None  # set by the app: StationsPanel.options
         self.s = session
         self.apply_values = apply_values
@@ -38,7 +40,8 @@ class ToolOptPanel:
         gui = server.gui
         self.confirm_tool: Callable[[], None] | None = None  # app.py: confirm step 3 Tool
         self.tool_state: Callable[[], str] | None = None  # app.py: step 3's state
-        with gui.add_folder("Tool geometry"):
+        self.folder = gui.add_folder("Tool geometry")
+        with self.folder:
             # a copy of 3 Tool -> Extension (ui.tool_ext_mirror, filled by app.py)
             self.ext_slot = gui.add_folder("Tool extension", expand_by_default=False)
             opt = session.extra.get("optimizer") or Optimizer()
@@ -86,9 +89,12 @@ class ToolOptPanel:
                     cb.visible = self.objective.key == "pareto"
 
             self.objective.dropdown.on_update(keys_visible)
+            from contextlib import nullcontext
+
             from ui.costs_ui import CostPanel
 
-            self.costs = CostPanel(server, session, field="tool_weights")  # its own costs (v6)
+            with getattr(self, "settings", None) or nullcontext():  # v9: in the Settings folder
+                self.costs = CostPanel(server, session, field="tool_weights")  # its own costs (v6)
             self.run = gui.add_button("Optimize tool", color="green")
             self.gate_md = gui.add_markdown("", visible=False)  # why Run is disabled (T5)
             self.stop = gui.add_button("Cancel", visible=False)

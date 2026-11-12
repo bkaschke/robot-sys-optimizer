@@ -38,8 +38,10 @@ class ExportPanel:
                 "Userframes (CSV)", hint="robot base -> part frame for every stop, in this robot's format"
             )
             self.urdf = gui.add_button("Optimized tool URDF (zip)")
-            self.report = gui.add_button("HTML report")
-            self.pdf = gui.add_button("Report (PDF)", hint="the HTML report printed by Edge headless (v8)")
+            self.report_format = gui.add_dropdown(  # v9 #10: one report button
+                "Report format", ("PDF", "HTML"), hint="PDF: the HTML report printed by Edge headless"
+            )
+            self.report = gui.add_button("Export report")
             from core.step_export import FLANGES
 
             self.step = gui.add_button(
@@ -53,8 +55,9 @@ class ExportPanel:
         self.csv.on_click(lambda e: self._run(e, self.export_csv))
         self.uframes.on_click(lambda e: self._run(e, self.export_userframes))
         self.urdf.on_click(lambda e: self._run(e, self.export_urdf))
-        self.report.on_click(lambda e: self._run(e, self.export_report))
-        self.pdf.on_click(lambda e: self._run(e, self.export_pdf))
+        self.report.on_click(
+            lambda e: self._run(e, self.export_pdf if self.report_format.value == "PDF" else self.export_report)
+        )
         self.step.on_click(lambda e: self._run(e, self.export_step))
         self.tube_od = lambda: None  # app.py: Tool geometry -> Tube OD
 

@@ -231,6 +231,10 @@ def build_app(
 
     with tab_handles["Optimize"]:
         workflow.optimize_header()
+        from ui.optimizer_select import OptimizerSelect
+
+        picker = OptimizerSelect(server)  # v9 #10: one Optimizer dropdown, one panel shown
+        settings_folder = server.gui.add_folder("Settings", expand_by_default=False, order=1e6)
         optimize = OptimizeTab(server, session, on_results, show_q=cell.set_q)
         placement = PlacementPanel(server, session, set_base=cell.set_base)
 
@@ -243,29 +247,43 @@ def build_app(
             if "safety" in state:
                 state["safety"].refresh()
 
-        stations = StationsPanel(server, session, on_solution=new_results)
+        stations = StationsPanel(server, session, on_solution=new_results, settings=settings_folder)
 
         def apply_values(v) -> None:
             if tool._commit(lambda d: d["extension"]["nominal"].update(v.model_dump())):
                 tool._after(full=True)
 
-        tool_opt = ToolOptPanel(server, session, apply_values, on_solution=new_results)
+        tool_opt = ToolOptPanel(
+            server, session, apply_values, on_solution=new_results, settings=settings_folder
+        )
+        tool_opt.max_stations.visible = False  # v9: one Max stations (Settings) for every optimizer
+        tool_opt.max_stations = stations.max_stations
         from ui.tool_ext_mirror import ExtensionMirror
 
         tool_ext_copy = ExtensionMirror(
             server, tool, tool_opt.ext_slot, tool_opt
         )  # 3 Tool -> Extension, here too
         from ui.cycle_ui import CyclePanel
-
-        cycle = CyclePanel(server, session)  # v8 T6
         from ui.safety_ui import CablePanel
 
-        cable = CablePanel(server, session, cell)  # v8 T18 (+ the hose drawn on the robot)
+        with settings_folder:  # v9: shared by every optimizer
+            cycle = CyclePanel(server, session)  # v8 T6
+            cable = CablePanel(server, session, cell)  # v8 T18 (+ the hose drawn on the robot)
         stations.cable = tool_opt.cable = cable
         from ui.compare import ComparePanel
 
         compare = ComparePanel(  # v8 T9
             server, session, stations, use_robot=lambda name: setattr(cell.robot_choice, "value", name)
+        )
+        picker.bind(
+            {
+                "Station planner": [stations.folder],
+                "Quick station plan": [stations.quick_folder],
+                "Feasibility check": [optimize.folder],
+                "Base placement map": [placement.folder],
+                "Tool geometry": [tool_opt.folder],
+                "Compare robots": [compare.folder],
+            }
         )
     with tab_handles["Results"]:
         workflow.results_header()
@@ -320,7 +338,7 @@ def build_app(
     ex.tube_od = tool_opt.tube_od  # v8 T17: the STEP export uses the chosen tube
     ex.sim = sim  # v8 T19: the report shows the built paths' cycle time
     workflow.gate(
-        (ex.csv, ex.uframes, ex.urdf, ex.report, ex.pdf, ex.step), ex.gate_md, result_reason(results.selected)
+        (ex.csv, ex.uframes, ex.urdf, ex.report, ex.step), ex.gate_md, result_reason(results.selected)
     )
     workflow.gate(sim.build_btn, sim.gate_md, plan_reason(sim.selected))
     workflow.gate(tool_opt.run, tool_opt.gate_md)
@@ -415,6 +433,7 @@ def build_app(
         tool=tool,
         targets=targets,
         optimize=optimize,
+        picker=picker,
         placement=placement,
         stations=stations,
         tool_opt=tool_opt,
