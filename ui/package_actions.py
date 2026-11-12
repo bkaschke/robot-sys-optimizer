@@ -5,11 +5,13 @@ from __future__ import annotations
 
 import shutil
 import tempfile
+import threading
 from pathlib import Path
 
 from core.urdf_package import (
     Frame,
     Package,
+    Part,
     check,
     collision_files,
     open_package,
@@ -28,8 +30,62 @@ def write(self, dest: Path) -> Path:
     return write_package(self.pkg, self.work / "meshes", dest)
 
 
+def import_mesh(self, e) -> None:
+    """Add the uploaded mesh as a part (v9 #2). STEP files are meshed with CadQuery, which takes
+    seconds to minutes: that runs in a thread with a status line and a progress bar; a failure is
+    shown there, kept for *Check*, and leaves the package as it was."""
+    f = self.upload.value
+    if len(f.content) > MAX_UPLOAD:
+        return notify(e, "Upload too large", "Limit is 200 MB")
+    ext = Path(f.name).suffix.lower()
+    if ext not in (".step", ".stp", ".stl", ".obj", ".ply"):
+        return notify(e, "Unsupported file", "Use STL, OBJ, PLY or STEP")
+    name = safe(Path(f.name).stem)
+    units = self.units.value
+    content = f.content
+    self.import_bar.visible = True
+    self.import_info.content = (
+        f"_Importing **{f.name}**{' (meshing the STEP file)' if ext in ('.step', '.stp') else ''}…_"
+    )
+
+    def work() -> None:
+        from core.carrier import primitive_mesh
+
+        mesh_dir = self.work / "meshes"
+        try:
+            mesh_dir.mkdir(parents=True, exist_ok=True)
+            if ext in (".step", ".stp"):
+                from core.tool_import import step_mesh
+
+                with tempfile.TemporaryDirectory() as tmp:
+                    src = Path(tmp) / f"{name}{ext}"
+                    src.write_bytes(content)
+                    step_mesh(src).export(mesh_dir / f"{name}.stl")
+                fname, u = f"{name}.stl", "m"
+            else:
+                fname, u = f"{name}{ext}", units
+                (mesh_dir / fname).write_bytes(content)
+            part = Part(name=name, stage=self._default_stage(), shape="mesh", mesh=fname, units=u)
+            m = primitive_mesh(self.primitive(part))  # fail now on a broken file
+        except Exception as err:  # a broken mesh / STEP file: report, keep the package
+            why = f"{type(err).__name__}: {err}"[:300]
+            self.import_errors[f.name] = why
+            self.import_info.content = f"✘ **{f.name} was not added**: {why}"
+            notify(e, "Mesh not added", why)
+        else:
+            self.import_errors.pop(f.name, None)
+            self.import_info.content = f"✔ Added **{name}** ({len(m.faces)} triangles)."
+            self._add(part)
+        finally:
+            self.import_bar.visible = False
+
+    threading.Thread(target=work, daemon=True).start()
+
+
 def check_package(self, e) -> None:
-    problems = check(self.pkg)
+    problems = check(self.pkg) + [
+        f"{f}: import failed ({why})" for f, why in getattr(self, "import_errors", {}).items()
+    ]
     self.status.content = "✔ **Ready to export.**" if not problems else "✘ " + "  \n✘ ".join(problems)
     if problems:
         notify(e, "Package not ready", "; ".join(problems))

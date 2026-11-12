@@ -9,13 +9,11 @@ package made here or by hand / from CAD (see the user guide, "Building URDF pack
 
 from __future__ import annotations
 
-import tempfile
 from pathlib import Path
 
 import numpy as np
 import viser
 
-from core.carrier import primitive_mesh
 from core.schema import Primitive
 from core.transforms import matrix_to_pose, pose_to_matrix
 from core.urdf_package import (
@@ -27,7 +25,7 @@ from core.urdf_package import (
 )
 from ui import package_actions
 from ui.package_preview import ROOT, draw
-from ui.widgets import MAX_UPLOAD, PoseWidgets, notify
+from ui.widgets import PoseWidgets, notify
 
 KIND_LABELS = {"End effector (tool)": "tool", "Rail": "rail", "Gantry": "gantry", "Mobile base": "mobile"}
 KIND_OF = {v: k for k, v in KIND_LABELS.items()}
@@ -79,6 +77,9 @@ class PackageBuilder:
             self.add_cyl = gui.add_button("Add cylinder")
             self.units = gui.add_dropdown("Mesh units", UNITS, hint="STL / OBJ / PLY (STEP carries its own)")
             self.upload = gui.add_upload_button("Add mesh (STL/OBJ/PLY/STEP)")
+            self.import_bar = gui.add_progress_bar(0.0, animated=True, visible=False)
+            self.import_info = gui.add_markdown("")
+            self.import_errors: dict[str, str] = {}  # file -> why its import failed (Check lists it)
             self.part_name = gui.add_text("Part name", "")
             self.stage = gui.add_dropdown("Stage", (STAGE_LABELS["tool"],))
             self.size = gui.add_vector3("Box size (mm)", (200.0, 200.0, 200.0), min=(1, 1, 1), step=5.0)
@@ -279,32 +280,7 @@ class PackageBuilder:
         self.load_widgets()
 
     def _on_mesh(self, e) -> None:
-        f = self.upload.value
-        if len(f.content) > MAX_UPLOAD:
-            return notify(e, "Upload too large", "Limit is 200 MB")
-        ext = Path(f.name).suffix.lower()
-        name = safe(Path(f.name).stem)
-        mesh_dir = self.work / "meshes"
-        mesh_dir.mkdir(parents=True, exist_ok=True)
-        try:
-            if ext in (".step", ".stp"):
-                from core.tool_import import step_mesh
-
-                with tempfile.TemporaryDirectory() as tmp:
-                    src = Path(tmp) / f"{name}{ext}"
-                    src.write_bytes(f.content)
-                    step_mesh(src).export(mesh_dir / f"{name}.stl")
-                fname, units = f"{name}.stl", "m"
-            elif ext in (".stl", ".obj", ".ply"):
-                fname, units = f"{name}{ext}", self.units.value
-                (mesh_dir / fname).write_bytes(f.content)
-            else:
-                return notify(e, "Unsupported file", "Use STL, OBJ, PLY or STEP")
-            part = Part(name=name, stage=self._default_stage(), shape="mesh", mesh=fname, units=units)
-            primitive_mesh(self.primitive(part))  # fail now on a broken file
-        except Exception as err:  # a broken mesh / STEP file: report, keep the package
-            return notify(e, "Mesh not added", f"{type(err).__name__}: {err}")
-        self._add(part)
+        package_actions.import_mesh(self, e)  # v9 #2: in the background, with status
 
     def _select(self, name: str) -> None:
         names = [x.name for x in self.pkg.parts]

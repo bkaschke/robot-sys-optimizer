@@ -59,6 +59,8 @@ class Session:
     base: schema.Base = field(default_factory=schema.Base)  # static or carrier (M9)
     extra: dict = field(default_factory=dict)  # untouched project sections (optimizer)
     selection: tuple[str, list[int]] | None = None  # (part mesh path, face ids): saved selection
+    load_warnings: list = field(default_factory=list)  # v9 #12: files a loaded project is missing
+    bundled: list = field(default_factory=list)  # v9 #12: files the last save copied into the project
     ui: dict = field(default_factory=dict)  # saved panel settings ("panel.widget" -> value)
     stayouts: list = field(default_factory=list)  # schema.Primitive, world poses (core.stayout)
     stamps: dict = field(default_factory=dict)  # result key -> setup fingerprint (ui.staleness)
@@ -236,7 +238,10 @@ class Session:
         )
 
     def apply_project(self, project: schema.Project, project_dir: Path) -> None:
+        from ui.project_assets import tolerate_missing
+
         self.project_dir = project_dir
+        project, self.load_warnings = tolerate_missing(self, project)  # v9 #12: open without them
         pr = project.robot
         if pr is None:  # empty study
             self.robot, self.robot_name, self.robot_urdf, self.q = None, None, None, None
@@ -312,6 +317,9 @@ def save_project(session: Session, project_dir: Path | None = None) -> Path:
             shutil.copytree(old_assets, new / "assets", dirs_exist_ok=True)
         session.project_dir = project_dir
     session.project_dir.mkdir(parents=True, exist_ok=True)
+    from ui.project_assets import bundle
+
+    session.bundled = bundle(session)  # v9 #12: outside files are copied into the project
     path = session.project_dir / "project.json"
     project = session.snapshot()
     tmp = path.with_suffix(".json.tmp")  # write-then-rename: a crash never leaves half a file

@@ -276,7 +276,7 @@ def test_gui_base_mode_panel():
         assert np.allclose(s.T_world_base, c.T_world_base({"s": 1.25}), atol=1e-9)
         assert np.allclose(state["cell"].base.gizmo.position, s.T_world_base[:3, 3])
         assert "Carrier footprint to part" in panel.info.content
-        assert any(getattr(h, "name", "").endswith("standoff_min") for h in panel._handles)
+        assert any(getattr(h, "name", "").endswith("standoff_min") for h in panel._overlay["Standoff"])
         panel.so.value = (400.0, 300.0)  # preferred < minimum: rejected, base unchanged
         assert not panel.commit() and s.base.standoff_m.carrier_part_min == pytest.approx(0.3)
         panel.mode.value = "static"

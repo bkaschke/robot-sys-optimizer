@@ -18,9 +18,9 @@ from pydantic import ValidationError
 
 from core.carrier import migrate
 from core.schema import Base, CarrierJoints, Keepout, Pose, Primitive, Standoffs
-from core.standoff import Zones, footprint
+from core.standoff import footprint
 from core.transforms import make_T, matrix_to_wxyz, pose_to_matrix
-from ui import carrier_axis, carrier_mobile
+from ui import carrier_axis, carrier_mobile, carrier_overlay
 from ui.carrier_bodies import BodyEditor
 from ui.session import Session
 from ui.widgets import Latest, notify
@@ -109,6 +109,7 @@ class CarrierPanel:
             w.on_update(lambda e: self.update_visibility())
         self.load(session.base)
         self.refresh()
+        carrier_overlay.wire(self)  # v9 #14: standoff / keep-out overlays follow the fields
 
     # --- what is shown --------------------------------------------------------------------------
 
@@ -413,9 +414,7 @@ class CarrierPanel:
             h.remove()
         self._handles, self._body_handles, self._moving_names = [], {}, []
         b = self.s.base
-        zones = None
-        if self.s.part is not None:
-            zones = Zones(b, footprint(self.s.part_mesh(), self.s.part.T_world_part))
+        zones = carrier_overlay.draw(self)  # standoff lines / band and keep-outs (v9 #14)
         self._zones = zones
         if b.mode == "movable":
             c = self._carrier()
@@ -441,31 +440,4 @@ class CarrierPanel:
             self._update_info(c, v)
         else:
             self.info.content = "_Static base: the planner places one base (k = 1). Set Mode to movable._"
-        if zones is not None:
-            for name, d, color in (("min", zones.min, (220, 40, 40)), ("pref", zones.pref, (240, 170, 20))):
-                ring = zones.shell(d) if d > 0 else None
-                if ring is not None:
-                    seg = np.stack(
-                        [
-                            np.column_stack([ring[:-1], np.full(len(ring) - 1, 0.004)]),
-                            np.column_stack([ring[1:], np.full(len(ring) - 1, 0.004)]),
-                        ],
-                        axis=1,
-                    )
-                    self._handles.append(
-                        self.server.scene.add_line_segments(
-                            f"{ROOT}/standoff_{name}", seg, color, thickness=2.0, thickness_units="screen"
-                        )
-                    )
-        for k, ko in enumerate(b.keepouts):
-            (x0, y0), (x1, y1) = ko.min_xy, ko.max_xy
-            self._handles.append(
-                self.server.scene.add_box(
-                    f"{ROOT}/keepout{k}",
-                    color=(230, 60, 60),
-                    dimensions=(x1 - x0, y1 - y0, 0.02),
-                    position=((x0 + x1) / 2, (y0 + y1) / 2, 0.01),
-                    opacity=0.35,
-                )
-            )
         self.editor.place_gizmos()

@@ -239,18 +239,7 @@
         0.0
       ]
     },
-    "keepouts": [
-      {
-        "min_xy": [
-          -5.0,
-          1.3
-        ],
-        "max_xy": [
-          5.0,
-          3.0
-        ]
-      }
-    ],
+    "keepouts": [],
     "standoff_m": {
       "carrier_part_min": 0.3,
       "carrier_part_preferred": 0.5,

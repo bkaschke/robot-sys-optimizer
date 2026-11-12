@@ -323,6 +323,12 @@ class ProjectPanel:
             return False
         self.untitled = False
         self.on_loaded()
+        if self.s.load_warnings:  # v9 #12: opened without the files that are missing
+            from ui.log_panel import log
+
+            for w in self.s.load_warnings:
+                log(f"Missing file: {w}", "warn")
+            _notify(e, "Opened with missing files", "; ".join(self.s.load_warnings)[:500])
         with self._lock:
             self._saved_json = None  # compare against the next snapshot, not the old project
             self._last_save = time.monotonic()

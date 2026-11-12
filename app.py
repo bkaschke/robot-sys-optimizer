@@ -358,6 +358,7 @@ def build_app(
 
     workflow.on_confirmed.append(objects.step_confirmed)  # its drag gizmos go off
     objects.cell, objects.carrier, objects.tool = cell, carrier, tool
+    carrier.on_overlay = objects.apply_visibility  # v9: redrawn overlays keep their show / hide ticks
     objects.targets, objects.results, objects.sim = targets, results, sim
     objects.stayouts, objects.slowzones = stayouts, slowzones
     from ui.move_mode import MoveMode

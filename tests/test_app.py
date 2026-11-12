@@ -99,12 +99,19 @@ def test_project_save_load_round_trip(tmp_path):
 def test_broken_project_leaves_session_untouched(tmp_path):
     s = Session()
     s.load_robot_from_registry("ur20")
+    (tmp_path / "broken.stl").write_bytes(b"solid nothing\nendsolid nothing\n")  # no triangles
+    (tmp_path / "project.json").write_text(
+        '{"version": 1, "robot": {"name": "ur20"}, "part": {"mesh": "broken.stl"}}'
+    )
+    with pytest.raises(ValueError):
+        load_project(s, tmp_path)
+    assert s.robot_name == "ur20" and s.part is None
+    # v9 #12: a missing file no longer stops the project from opening (it is left out, with a warning)
     (tmp_path / "project.json").write_text(
         '{"version": 1, "robot": {"name": "ur20"}, "part": {"mesh": "missing.stl"}}'
     )
-    with pytest.raises(FileNotFoundError):
-        load_project(s, tmp_path)
-    assert s.robot_name == "ur20" and s.part is None
+    load_project(s, tmp_path)
+    assert s.part is None and any("missing.stl" in w for w in s.load_warnings)
 
 
 def test_hiding_gizmo_keeps_robot_and_part_visible(app):

@@ -488,3 +488,7 @@ $PY scripts/import_ur_description.py <clone> ur20   # re-import a UR model (see 
 - [ ] Single tool length for all stations, or a tool swap per station?
 - [ ] Gantry: station mode only in v1, or coordinated mode too?
 - [x] Designer output: URDF + CSV + HTML with a dimensioned SVG envelope; STEP deferred (user, 2026-11-04).
+
+## v9 (branch `v9`, plan: docs/V9_PLAN.md, GitHub issues #1-#14)
+
+- **Phase 1 (2026-11-12):** #2 `ui/package_actions.import_mesh` (thread, `import_bar` / `import_info`, `import_errors` listed by Check). #12 `ui/project_assets.py`: `bundle` (save_project: outside files -> `<project>/assets/imported/{parts,tools,carrier,stayouts,robots}`, session paths rewritten, `session.bundled`), `tolerate_missing` (apply_project: missing part / tool / carrier or stay-out mesh / robot URDF left out with `session.load_warnings`, logged by `ProjectPanel._load`). #13 mobile_amr keep-out removed. #14 `ui/carrier_overlay.py` (`draw` from CarrierPanel.draw, `preview` on field edits via `wire`; handles in `panel._overlay` {"Standoff", "Keep-outs"}, left-panel children of External axis; contour standoff range = earcut-triangulated band). Tests: tests/test_v9_phase1.py.

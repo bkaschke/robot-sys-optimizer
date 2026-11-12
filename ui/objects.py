@@ -93,7 +93,8 @@ class ObjectsPanel:
     def _children(self, top: str) -> list[str]:
         """Current dynamic children: carrier bodies, stay-out zones."""
         if top == "External axis" and self.carrier is not None:
-            return list(self.carrier._body_handles)
+            over = [k for k, hs in getattr(self.carrier, "_overlay", {}).items() if hs]
+            return list(self.carrier._body_handles) + over  # v9: keep-outs, standoff lines
         if top == "Stay-out zones":
             return [z.name for z in self.s.stayouts if z.speed_pct is None]
         if top == "Reduced-speed zones":
@@ -157,7 +158,11 @@ class ObjectsPanel:
             bodies = {id(h) for h in car._body_handles.values()}
             return [h for h in car._handles if id(h) not in bodies]
         if key.startswith("External axis/"):
-            h = car._body_handles.get(key.split("/", 1)[1]) if car is not None else None
+            name = key.split("/", 1)[1]
+            over = getattr(car, "_overlay", {}) if car is not None else {}
+            if name in over:
+                return list(over[name])
+            h = car._body_handles.get(name) if car is not None else None
             return [h] if h is not None else []
         if key == "Part":
             return [c.part_handle] if c is not None and c.part_handle is not None else []
