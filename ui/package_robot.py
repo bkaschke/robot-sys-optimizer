@@ -73,7 +73,7 @@ class RobotPreview:
 
     @property
     def active(self) -> bool:
-        return bool(self.on.value) and self.robot is not None
+        return bool(self.on.value) and self.robot is not None and self.b.pkg.kind != "part"
 
     def root_pose(self, at: np.ndarray) -> np.ndarray:
         """World pose of the package root: the flange (tool), else ``at`` (the floor point)."""

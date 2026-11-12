@@ -27,6 +27,28 @@ def _scale_units(scale) -> str | None:
     return None
 
 
+def _own_collision(folder: Path, el, pname: str, units: str) -> str | None:
+    """A URDF collision element's mesh as an imported collision file of the part (in the part's
+    units, under meshes/collision_src/), or None: no mesh, the same file as the visual one, or a
+    copy the Package builder simplified itself (meshes/collision/)."""
+    g = el.geometry if el is not None else None
+    if g is None or g.mesh is None:
+        return None
+    fn = g.mesh.filename.replace("\\", "/")
+    if fn.startswith("meshes/collision/"):
+        return None
+    src = (folder / fn).resolve()
+    if not src.is_relative_to(folder.resolve()) or not src.is_file():
+        return None
+    m = trimesh.load(str(src), force="mesh")
+    m.apply_scale(np.asarray(g.mesh.scale if g.mesh.scale is not None else 1.0, float))
+    m.apply_scale(1.0 / UNIT_SCALE[units])
+    rel = f"collision_src/{pname}.stl"
+    (folder / "meshes" / "collision_src").mkdir(parents=True, exist_ok=True)
+    m.export(folder / "meshes" / rel)
+    return rel
+
+
 def read_urdf(urdf_path: Path, kind: str | None = None, name: str | None = None) -> Package:
     """A Package from a URDF on disk (convention or CAD export), meshes in its folder. Meshes
     in other formats or units are converted to STL in metres next to the URDF."""
@@ -58,10 +80,10 @@ def read_urdf(urdf_path: Path, kind: str | None = None, name: str | None = None)
         found = set(roles.values())
         kind = (
             "gantry" if {"x", "y"} <= found else "rail" if "x" in found
-            else "mobile" if "robot_mount" in links else "tool"
+            else "mobile" if "robot_mount" in links else "part" if root == "part" else "tool"
         )  # fmt: skip
-    if kind == "tool" and roles:
-        raise ValueError("a tool package has no moving joints")
+    if kind in ("tool", "part") and roles:
+        raise ValueError(f"a {kind} package has no moving joints")
     # stage of each link: the travel joints above it
     parent_joint = {j.child: j for j in u.robot.joints}
 
@@ -72,8 +94,8 @@ def read_urdf(urdf_path: Path, kind: str | None = None, name: str | None = None)
             if j.name in roles:
                 above.add(roles[j.name])
             link = j.parent
-        if kind == "tool":
-            return "tool"
+        if kind in ("tool", "part"):
+            return kind
         if "lift" in above:
             return "lift"
         if kind == "mobile":
@@ -133,6 +155,10 @@ def read_urdf(urdf_path: Path, kind: str | None = None, name: str | None = None)
                     (folder / "meshes").mkdir(exist_ok=True)
                     shutil.copy(src, folder / "meshes" / Path(rel).name)
                     part = part.model_copy(update={"mesh": Path(rel).name})
+                coll = lk.collisions[n] if len(lk.collisions) == len(elems) and lk.visuals else None
+                cf = _own_collision(folder, coll, pname, units)
+                if cf is not None:  # v9 #3: the URDF's own collision mesh for this part
+                    part = part.model_copy(update={"collision_file": cf})
             else:
                 continue
             parts.append(part)
@@ -171,10 +197,17 @@ def open_package(data: bytes, dest: Path) -> tuple[Package, Path]:
         upd["collision"] = Collision.model_validate(meta.get("collision") or {})
         authored = [x for x in meta.get("parts") or [] if isinstance(x, dict)]
         modes = {str(x.get("name")): x.get("collision") for x in authored}
-        upd["parts"] = [
-            x.model_copy(update={"collision": modes.get(x.name)}) if modes.get(x.name) in MODES else x
-            for x in pkg.parts
-        ]
+        files = {str(x.get("name")): x.get("collision_file") for x in authored}
+        mesh_dir = info.path.parent / "meshes"
+        parts = []
+        for x in pkg.parts:
+            if modes.get(x.name) in MODES:
+                x = x.model_copy(update={"collision": modes.get(x.name)})
+            f = files.get(x.name)
+            if f and (mesh_dir / f).is_file():  # an imported collision mesh, as authored
+                x = x.model_copy(update={"collision_file": f})
+            parts.append(x)
+        upd["parts"] = parts
     except ValueError:
         pass
     return pkg.model_copy(update=upd), info.path

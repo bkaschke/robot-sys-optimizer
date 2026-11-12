@@ -42,15 +42,17 @@ from pydantic import BaseModel, ConfigDict, Field
 from core.schema import Base, CarrierJoints, EndEffector, Pose, Primitive, Range
 from core.transforms import make_T, matrix_to_pose, pose_to_matrix
 
-Kind = Literal["tool", "rail", "gantry", "mobile"]
-KINDS: tuple[str, ...] = ("tool", "rail", "gantry", "mobile")
+Kind = Literal["tool", "part", "rail", "gantry", "mobile"]
+KINDS: tuple[str, ...] = ("tool", "part", "rail", "gantry", "mobile")
+CARRIERS = ("rail", "gantry", "mobile")
 STAGES = {
     "tool": ("tool",),
+    "part": ("part",),  # v9: the workpiece (one link, no joints)
     "rail": ("fixed", "carriage", "lift"),
     "gantry": ("fixed", "bridge", "carriage", "lift"),
     "mobile": ("chassis", "lift"),
 }
-LINK = {"tool": "mount", "fixed": "base_link", "chassis": "base_link", "bridge": "bridge"}
+LINK = {"tool": "mount", "part": "part", "fixed": "base_link", "chassis": "base_link", "bridge": "bridge"}
 LINK.update(carriage="carriage", lift="lift_stage")
 ATTACH = {"fixed": "fixed", "bridge": "x_axis", "carriage": "carriage", "lift": "lift", "chassis": "carriage"}
 UNIT_SCALE = {"m": 1.0, "mm": 1e-3, "in": 0.0254}
@@ -77,6 +79,9 @@ class Part(_M):
     units: Literal["m", "mm", "in"] = "m"
     pose: Pose = Field(default_factory=Pose)
     collision: CollisionMode | None = None  # None: the package's collision setting
+    # v9 #3: an imported collision mesh (file in meshes/, same units and frame as ``mesh``); when
+    # set it is the part's collision shape (with the package padding), instead of a simplified copy
+    collision_file: str | None = None
 
 
 class Collision(_M):
@@ -86,6 +91,8 @@ class Collision(_M):
     faces: int = Field(default=4000, ge=50, le=200000)
     wrap_mm: float = Field(default=5.0, gt=0, le=200)
     pad_mm: float = Field(default=0.0, ge=0, le=100)  # every part's collision shape this much larger
+    # v9 (part packages): face ids of the (single) mesh kept at full detail, e.g. the surfaces worked on
+    keep: list[int] = Field(default_factory=list)
 
 
 class Frame(_M):
@@ -126,6 +133,8 @@ def check(p: Package) -> list[str]:
             out.append(f"{part.name}: no mesh file")
     if p.kind == "tool" and not p.tcps:
         out.append("a tool needs at least one TCP")
+    if p.kind == "part" and not any(x.shape == "mesh" for x in p.parts):
+        out.append("a part needs a mesh (STL / OBJ / PLY / STEP)")
     if len({t.name for t in p.tcps}) != len(p.tcps):
         out.append("TCP names must differ")
     if p.kind in ("rail", "gantry") and p.x is None:
@@ -186,14 +195,19 @@ def part_collision(p: Package, part: Part, mesh_dir: Path) -> trimesh.Trimesh | 
         return m
     if part.shape != "mesh" or not part.mesh:
         return None
+    if part.collision_file:  # v9 #3: the user's own collision mesh
+        m = trimesh.load(str(mesh_dir / part.collision_file), force="mesh")
+        m.apply_scale(UNIT_SCALE[part.units])
+        return inflate(m, pad) if pad > 0 else m
     mode = part.collision or c.mode
     if mode == "visual" and pad <= 0:
         return None
     m = trimesh.load(str(mesh_dir / part.mesh), force="mesh")
     m.apply_scale(UNIT_SCALE[part.units])
+    keep = c.keep if p.kind == "part" and len(p.parts) == 1 else None
     if mode == "wrap":
-        return collision_mesh(m, Geom("wrap", c.faces, c.wrap_mm + c.pad_mm))
-    out = m if mode == "visual" else collision_mesh(m, Geom(mode, c.faces, c.wrap_mm))
+        return collision_mesh(m, Geom("wrap", c.faces, c.wrap_mm + c.pad_mm), keep=keep)
+    out = m if mode == "visual" else collision_mesh(m, Geom(mode, c.faces, c.wrap_mm), keep=keep)
     if pad > 0:
         return inflate(out, pad)
     return None if out is m else out
@@ -203,7 +217,7 @@ def build_urdf(p: Package, collision: dict[str, str] | None = None) -> str:
     """The URDF; ``collision``: part name -> its collision mesh file under meshes/ (metres)."""
     collision = collision or {}
     stages = list(STAGES[p.kind])
-    if p.kind != "tool" and p.lift is None:
+    if p.kind in CARRIERS and p.lift is None:
         stages.remove("lift")
     links: dict[str, list[str]] = {LINK[s]: [] for s in stages}
     for part in p.parts:
@@ -238,7 +252,7 @@ def build_urdf(p: Package, collision: dict[str, str] | None = None) -> str:
                     f"tcp_{safe(t.name)}", "fixed", "mount", f"tcp_{safe(t.name)}", T=pose_to_matrix(t.pose)
                 )
             )
-    else:
+    elif p.kind in CARRIERS:
         top = "base_link"
         if p.kind in ("rail", "gantry"):
             out.append(
@@ -281,12 +295,15 @@ def write_package(p: Package, mesh_dir: Path | None, dest: Path) -> Path:
     dest.mkdir(parents=True, exist_ok=True)
     (dest / "meshes").mkdir(exist_ok=True)
     for part in p.parts:
-        if part.shape == "mesh":
-            src = (mesh_dir or dest / "meshes") / part.mesh
+        for rel in (part.mesh, part.collision_file) if part.shape == "mesh" else ():
+            if not rel:
+                continue
+            src = (mesh_dir or dest / "meshes") / rel
             if not src.is_file():
-                raise FileNotFoundError(f"{part.name}: mesh file {part.mesh} not found")
-            if src.resolve() != (dest / "meshes" / part.mesh).resolve():
-                shutil.copy(src, dest / "meshes" / part.mesh)
+                raise FileNotFoundError(f"{part.name}: mesh file {rel} not found")
+            if src.resolve() != (dest / "meshes" / rel).resolve():
+                (dest / "meshes" / rel).parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy(src, dest / "meshes" / rel)
     coll_dir = dest / "meshes" / "collision"
     if coll_dir.is_dir():
         shutil.rmtree(coll_dir)

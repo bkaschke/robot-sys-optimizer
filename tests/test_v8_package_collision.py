@@ -166,7 +166,7 @@ def test_arm_padding(monkeypatch):
     reqs = padded.gd.collisionRequests
     assert all(reqs[k].security_margin == 0.0 for k in padded.pairs.robot_self)  # not against itself
     state = collision.geom_state()
-    assert len(state) == 3 and state[2] == pytest.approx(collision.ARM_PAD)
+    assert len(state) == 5 and state[2] == pytest.approx(collision.ARM_PAD)
     collision.set_geom_state(({"robot": Geom("auto")}, ()))  # an older 2-part state: no padding
     assert collision.ARM_PAD == 0.0
 
@@ -194,7 +194,8 @@ def test_builder_collision_folder(tmp_path):
         assert b.pkg.parts[b.sel].collision == "reduce"
         pc.show.value = False
         pc.show.value = True
-        pc.redraw()
+        assert not pc._handles  # v9 #4: nothing is computed until Simplify
+        pc.simplify()
         assert len(pc._handles) == 1 and "triangles" in pc.info.content
         b.load_widgets()
         assert pc.part_mode.value == cm.MODE_LABELS["reduce"] and pc.mode.value == cm.MODE_LABELS["hull"]

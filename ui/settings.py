@@ -68,15 +68,7 @@ SAVED: dict[str, tuple[str, ...]] = {
     "tolerance": ("part_mm", "part_deg", "station_mm", "samples", "seed"),
     "cable": ("mode", "dress", "diameter", "offset", "side", "show", "wrap"),  # v8 T18
     "safety": ("show", "distance"),
-    "collision": (
-        "mode_robot",
-        "mode_tool",
-        "mode_part",
-        "mode_carrier",
-        "faces",
-        "wrap_mm",
-        "pad_mm",
-    ),  # 2026-11-11
+    "collision": ("pad_mm",),  # Robot & cell: the arm padding (v9: the rest is in the Package builder)
     "cycle": (
         "joint_speed",
         "joint_acc",

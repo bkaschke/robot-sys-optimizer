@@ -17,14 +17,18 @@ OPEN_JS = (
 )
 
 
-def open_html(port: int) -> str:
+def open_html(port: int, label: str = "Open package builder ↗", note: bool = True) -> str:
     js = OPEN_JS.format(port=port)
+    hint = (
+        '<div style="font-size:11px;opacity:.65;margin-top:4px">'
+        f"or browse to port {port} of this address</div>"
+        if note
+        else ""
+    )
     return (
         '<div style="padding:4px 0 8px">'
         f'<button onclick="{js}" style="width:100%;padding:8px;border-radius:6px;border:0;'
-        'background:#2f9e44;color:white;font-weight:600;cursor:pointer">Open package builder ↗</button>'
-        f'<div style="font-size:11px;opacity:.65;margin-top:4px">or browse to port {port} of this '
-        "address</div></div>"
+        f'background:#2f9e44;color:white;font-weight:600;cursor:pointer">{label}</button>{hint}</div>'
     )
 
 

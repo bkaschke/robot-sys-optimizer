@@ -119,12 +119,13 @@ def test_collision_panel_shows_and_keeps(app):
     gid = sc.robot_ids[-1]
     T = dict((g, T) for g, _, T in sc.world_shapes(np.asarray(s.q, float)))[gid]
     assert np.allclose(cv._handles[gid].position, T[:3, 3])
-    app["targets"].selection = np.arange(10)
-    cs.keep_selection()
-    assert s.part.collision_keep == list(range(10)) and collision.PART_KEEP == tuple(range(10))
+    # v9: Robot & cell only has the arm padding; kept faces of projects from before v9 still apply
+    assert not hasattr(cs, "mode") and not hasattr(cs, "keep_selection")
+    s.part.collision_keep = list(range(10))
+    cs.sync()
+    assert collision.PART_KEEP == tuple(range(10))
     assert s.to_project().part.collision_keep == list(range(10))
-    cs.mode["Part"].value = cm.MODE_LABELS["hull"]
-    assert collision.GEOM["part"].mode == "hull"
+    s.part.collision_keep = []
     cs.pad_mm.value = 8.0  # robot arm padding (Robot & cell tab): checked and drawn bloated
     assert collision.ARM_PAD == pytest.approx(0.008)
     cv.redraw()
@@ -133,8 +134,6 @@ def test_collision_panel_shows_and_keeps(app):
     big = cv._pads[next(k for k in cv._pads if k[0] == gid)]
     assert np.all(big.bounds[1] > sc.shape(gid).bounds[1])
     cs.pad_mm.value = 0.0
-    cs.set_keep([])
-    cs.mode["Part"].value = cm.MODE_LABELS["auto"]
     for box in cv.show.values():
         box.value = False
     cv.redraw()

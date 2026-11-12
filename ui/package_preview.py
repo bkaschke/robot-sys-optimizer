@@ -8,7 +8,7 @@ import numpy as np
 from core.carrier import primitive_mesh
 from core.transforms import matrix_to_wxyz, pose_to_matrix
 
-COLORS = {"tool": (90, 140, 220), "fixed": (150, 150, 150), "bridge": (200, 160, 60)}
+COLORS = {"tool": (90, 140, 220), "part": (170, 170, 185), "fixed": (150, 150, 150), "bridge": (200, 160, 60)}
 COLORS.update(carriage=(70, 170, 120), chassis=(70, 170, 120), lift=(200, 110, 70))
 ROOT = "/package_preview"
 
@@ -43,7 +43,7 @@ def draw(b) -> None:
             )
         )
     frames = [(f"tcp_{t.name}", t.pose, 0.08) for t in b.pkg.tcps] if b.pkg.kind == "tool" else []
-    if b.pkg.kind != "tool":
+    if b.pkg.kind in ("rail", "gantry", "mobile"):
         frames.append(("robot_mount", b.pkg.mount, 0.2))
     for name, pose, size in frames:
         T = pose_to_matrix(pose)

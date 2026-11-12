@@ -27,10 +27,19 @@ from ui import package_actions
 from ui.package_preview import ROOT, draw
 from ui.widgets import PoseWidgets, notify
 
-KIND_LABELS = {"End effector (tool)": "tool", "Rail": "rail", "Gantry": "gantry", "Mobile base": "mobile"}
+KIND_LABELS = {
+    "End effector (tool)": "tool",
+    "Part": "part",
+    "Rail": "rail",
+    "Gantry": "gantry",
+    "Mobile base": "mobile",
+}
+TABS = {"End effector": "tool", "Part": "part", "Rail": "rail", "Gantry": "gantry", "Mobile robot": "mobile"}
+TAB_OF = {v: k for k, v in TABS.items()}
 KIND_OF = {v: k for k, v in KIND_LABELS.items()}
 STAGE_LABELS = {
     "tool": "tool (on the flange mount)",
+    "part": "part (the workpiece)",
     "fixed": "fixed (track / frame)",
     "bridge": "bridge (moves in X)",
     "carriage": "carriage (moves)",
@@ -64,12 +73,30 @@ class PackageBuilder:
         self._handles: list = []
         gui = server.gui
         gui.add_markdown(
-            "_Build a URDF package for a **tool**, a **rail / gantry** or a **mobile base** from boxes, "
-            "cylinders and meshes (STL / OBJ / PLY / STEP), then export it or use it here. Poses are in the "
-            "package frame: the robot flange (tool) or the carrier frame on the floor. See the user guide, "
+            "_All geometry of the project is made here (v9): an **end effector**, the **part**, a **rail / "
+            "gantry** or a **mobile robot**, from boxes, cylinders and meshes (STL / OBJ / PLY / STEP), with "
+            "its collision geometry. Export it or use it in the project. Poses are in the package frame: the "
+            "robot flange (tool), the part's own frame, or the carrier frame on the floor. User guide: "
             "*Building URDF packages*._"
         )
-        self.kind = gui.add_dropdown("Package type", tuple(KIND_LABELS), initial_value=KIND_OF["tool"])
+        self.tabs = gui.add_button_group("Package", tuple(TABS))  # v9 #1: a tab per package type
+        self.kind_md = gui.add_markdown("")
+        self.kind = gui.add_dropdown(
+            "Package type", tuple(KIND_LABELS), initial_value=KIND_OF["tool"], visible=False
+        )
+        self.edit_source = (
+            None  # ("tool", EndEffector) / ("part", None) / ("carrier", None): from the project
+        )
+        from ui import package_edit
+
+        with gui.add_folder("From the project", expand_by_default=False):
+            self.edit_tool = gui.add_button("Edit the project's tool")
+            self.edit_part = gui.add_button("Edit the project's part")
+            self.edit_carrier = gui.add_button("Edit the project's external axis")
+        self.edit_tool.on_click(lambda e: package_edit.edit_tool(self, e))
+        self.edit_part.on_click(lambda e: package_edit.edit_part(self, e))
+        self.edit_carrier.on_click(lambda e: package_edit.edit_carrier(self, e))
+        self.on_part = None  # app.py: the project's part changed (Use in this project)
         self.name = gui.add_text("Name", self.pkg.name)
         with gui.add_folder("Parts"):
             self.part = gui.add_dropdown("Part", (NONE,))
@@ -147,6 +174,7 @@ class PackageBuilder:
             return h
 
         self.kind.on_update(guard(lambda e: self._set_kind(KIND_LABELS[self.kind.value])))
+        self.tabs.on_click(lambda e: self._set_kind(TABS[e.target.value]))
         self.name.on_update(guard(lambda e: self._update(name=self.name.value.strip() or "package")))
         self.part.on_update(guard(lambda e: self._select(self.part.value)))
         self.add_box.on_click(
@@ -173,13 +201,13 @@ class PackageBuilder:
         self.at.on_update(lambda e: self.draw())
         self.check_btn.on_click(self._check)
         self.export.on_click(self._export)
-        self.use.on_click(self._use)
+        self.use.on_click(self._confirm_use)
         self.open.on_upload(self._open)
         self.new.on_click(lambda e: self._reset())
 
     def _default_stage(self) -> str:
         k = self.pkg.kind
-        return {"tool": "tool", "mobile": "chassis"}.get(k, "carriage")
+        return {"tool": "tool", "part": "part", "mobile": "chassis"}.get(k, "carriage")
 
     def _update(self, **kw) -> None:
         self.pkg = self.pkg.model_copy(update=kw)
@@ -191,6 +219,7 @@ class PackageBuilder:
         self._busy = True
         try:
             self.kind.value = KIND_OF[p.kind]
+            self.kind_md.content = f"**{TAB_OF[p.kind]}** package"
             self.name.value = p.name
             names = [x.name for x in p.parts]
             self.part.options = tuple(names) or (NONE,)
@@ -209,6 +238,7 @@ class PackageBuilder:
                     self.cyl.value = (x.radius * 1000, x.height * 1000)
                 self.part_pose.set(pose_to_matrix(x.pose))
             tool = p.kind == "tool"
+            carrier = p.kind in ("rail", "gantry", "mobile")
             self.tcp.options = tuple(t.name for t in p.tcps) or (NONE,)
             if p.tcps:
                 self.sel_tcp = min(self.sel_tcp, len(p.tcps) - 1)
@@ -230,15 +260,16 @@ class PackageBuilder:
             ):
                 w.visible = tool
             for w in (self.mount_md, self.tlift, *self._pose_widgets(self.mount_pose)):
-                w.visible = not tool
+                w.visible = carrier
             self.tx.visible = p.kind in ("rail", "gantry")
             self.ty.visible = p.kind == "gantry"
             has = bool(p.parts)
             for w in (self.part_name, self.stage, self.remove, *self._pose_widgets(self.part_pose)):
                 w.visible = has
+            self.stage.visible = has and len(STAGES[p.kind]) > 1
             shape = p.parts[self.sel].shape if has else None
             self.size.visible, self.cyl.visible = shape == "box", shape == "cylinder"
-            for pw, on in ((self.part_pose, has), (self.tcp_pose, tool), (self.mount_pose, not tool)):
+            for pw, on in ((self.part_pose, has), (self.tcp_pose, tool), (self.mount_pose, carrier)):
                 pw.gizmo.visible = on  # only these gizmo nodes: they have no children
         finally:
             self._busy = False
@@ -257,7 +288,7 @@ class PackageBuilder:
             st = (
                 x.stage
                 if x.stage in ok
-                else remap.get(x.stage, ok[min(1, len(ok) - 1)] if kind != "tool" else "tool")
+                else remap.get(x.stage, ok[min(1, len(ok) - 1)] if kind not in ("tool", "part") else kind)
             )
             parts.append(x.model_copy(update={"stage": st if st in ok else ok[0]}))
         tcps = self.pkg.tcps or ([Frame(name="tcp")] if kind == "tool" else [])
@@ -414,8 +445,13 @@ class PackageBuilder:
     def _export(self, e) -> None:
         package_actions.export(self, e)
 
-    def _use(self, e) -> None:
-        package_actions.use(self, e)
+    def _use(self, e) -> bool:
+        return package_actions.use(self, e)
+
+    def _confirm_use(self, e) -> None:
+        from ui.package_edit import confirm_use
+
+        confirm_use(self, e)  # v9 #5: asks first, closes the window after
 
     def _open(self, e) -> None:
         package_actions.open_zip(self, e)

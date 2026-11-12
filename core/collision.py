@@ -18,7 +18,6 @@ register as a collision.
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 
 import coal
@@ -51,18 +50,47 @@ HOSE = None
 GEOM: dict = {}
 PART_KEEP: tuple = ()
 ARM_PAD = 0.0  # m: the robot arm's collision shapes are this much larger against everything else
+# v9: the part's own collision mesh (absolute path, metres after ``PART_LOW_SCALE``), made in the
+# Package builder; when set it replaces the simplified copy of the part mesh
+PART_LOW: str | None = None
+PART_LOW_SCALE = 1.0
 ROBOT_AUTO_FACES = 5000  # robot links: "auto" reduces links above this (URDF CAD meshes)
 
 
 def geom_state() -> tuple:
-    return dict(GEOM), tuple(PART_KEEP), float(ARM_PAD)
+    return dict(GEOM), tuple(PART_KEEP), float(ARM_PAD), PART_LOW, float(PART_LOW_SCALE)
 
 
 def set_geom_state(state) -> None:
-    global GEOM, PART_KEEP, ARM_PAD
+    global GEOM, PART_KEEP, ARM_PAD, PART_LOW, PART_LOW_SCALE
     if state is not None:
         GEOM, PART_KEEP = dict(state[0]), tuple(int(f) for f in state[1])
         ARM_PAD = float(state[2]) if len(state) > 2 else 0.0
+        PART_LOW = state[3] if len(state) > 3 else None
+        PART_LOW_SCALE = float(state[4]) if len(state) > 4 else 1.0
+
+
+_PART_LOW: dict = {}  # (path, mtime, scale) -> mesh
+
+
+def _part_low(part_mesh: trimesh.Trimesh) -> trimesh.Trimesh:
+    """The part's collision mesh: its own (``PART_LOW``) when there is one, else a copy of
+    ``part_mesh`` simplified by ``GEOM["part"]`` (``PART_KEEP`` faces exact)."""
+    from pathlib import Path
+
+    if PART_LOW:
+        p = Path(PART_LOW)
+        try:
+            key = (str(p), p.stat().st_mtime, PART_LOW_SCALE)
+            if key not in _PART_LOW:
+                m = trimesh.load(str(p), force="mesh")
+                m.apply_scale(PART_LOW_SCALE)
+                _PART_LOW.clear()
+                _PART_LOW[key] = m
+            return _PART_LOW[key]
+        except (OSError, ValueError):
+            pass  # missing / broken: the simplified copy of the visual mesh
+    return _low(part_mesh, "part", keep=PART_KEEP)
 
 
 def _geom(component: str):
@@ -97,47 +125,7 @@ def _robot_mesh(go) -> trimesh.Trimesh | None:
     return _ROBOT_MESHES[key]
 
 
-HITS = "collides with: "  # PointResult.notes prefix of ``describe_hits``
-
-
-def _mover(name: str) -> str:
-    """A moving geometry's short name: tool, hose, or the robot link (``forearm_link_0`` ->
-    ``forearm``)."""
-    if name.startswith("tool_"):
-        return "tool"
-    if name.startswith("hose_"):
-        return "hose"
-    base = re.sub(r"_\d+$", "", name)
-    return re.sub(r"_link$", "", base)
-
-
-def _obstacle(name: str) -> str | None:
-    if name in ("part", "floor"):
-        return name
-    if name.startswith("carrier_"):
-        return f"carrier {name[len('carrier_') :]}"
-    if name.startswith("stayout_"):
-        return f"stay-out zone {name[len('stayout_') :]}"
-    return None
-
-
-def describe_hits(pairs: list[tuple[str, str]]) -> str:
-    """``HITS`` + what collides, from ``CollisionScene.colliding_pairs``: "part (tool,
-    forearm); floor (upper_arm)", "arm itself (...)", "tool vs arm (...)"; "" for no pairs."""
-    hit: dict[str, list[str]] = {}
-    for a, b in pairs:
-        oa, ob = _obstacle(a), _obstacle(b)
-        if oa or ob:
-            key, movers = (oa, [b]) if oa else (ob, [a])
-        elif a.startswith("tool_") or b.startswith("tool_"):
-            key, movers = "tool vs arm", [b if a.startswith("tool_") else a]
-        else:
-            key, movers = "arm itself", [a, b]
-        lst = hit.setdefault(key, [])
-        lst += [m for m in map(_mover, movers) if m not in lst]
-    if not hit:
-        return ""
-    return HITS + "; ".join(f"{k} ({', '.join(v)})" for k, v in hit.items())
+from core.collision_hits import HITS, describe_hits  # noqa: E402,F401 (re-exported)
 
 
 def _bvh(mesh: trimesh.Trimesh) -> coal.BVHModelOBBRSS:
@@ -253,7 +241,7 @@ class CollisionScene:
 
         self.part_id = None
         if part_mesh is not None and T_world_part is not None:
-            low = _low(part_mesh, "part", keep=PART_KEEP)
+            low = _part_low(part_mesh)
             go = pin.GeometryObject("part", 0, _se3(self.T_univ_world @ T_world_part), _bvh(low))
             self.part_id = self.gm.addGeometryObject(go)
             self.shapes[self.part_id] = low

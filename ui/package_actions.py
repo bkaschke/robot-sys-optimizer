@@ -14,7 +14,6 @@ from core.urdf_package import (
     Part,
     check,
     collision_files,
-    open_package,
     safe,
     to_base,
     to_tool,
@@ -105,15 +104,36 @@ def export(self, e) -> None:
     notify(e, "Package exported", zp.name, ok=True)
 
 
-def use(self, e) -> None:
+def _tool_from(self, urdf_rel: str):
+    """The package as the project's tool. Editing the project's tool (``edit_source``) keeps its
+    process, extension and per-TCP contact settings; only the geometry and the TCP poses change."""
+    new = to_tool(self.pkg, urdf_rel)
+    src = getattr(self, "edit_source", None)
+    if not src or src[0] != "tool" or src[1] is None:
+        return new
+    old = src[1]
+    by_name = {safe(t.name): t for t in old.tcps}
+    tcps = [
+        by_name[t.name].model_copy(update={"T_head_tcp": t.T_head_tcp}) if t.name in by_name else t
+        for t in new.tcps
+    ]
+    return old.model_copy(update={"urdf": urdf_rel, "tcps": tcps})
+
+
+def use(self, e) -> bool:
+    """The package into the project (True when it was loaded)."""
+    from ui.package_edit import use_part
+
     dest = self.s.project_dir / "assets" / "packages" / safe(self.pkg.name)
     try:
         urdf = write(self, dest)
         if self.pkg.kind == "tool":
-            self.s.set_tool(to_tool(self.pkg, self.s.relative(urdf)))
+            self.s.set_tool(_tool_from(self, self.s.relative(urdf)))
             if self.tool_tab is not None:
                 self.tool_tab.refresh()
             where = "Tool tab: set the process and the extension ranges, then **Save to library**"
+        elif self.pkg.kind == "part":
+            where = use_part(self, dest)
         else:
             base = to_base(
                 self.pkg, self.s.relative(dest / "meshes"), self.s.base, collision_files(self.pkg, dest)
@@ -121,39 +141,35 @@ def use(self, e) -> None:
             if self.carrier is not None:
                 self.carrier.load(base)
                 if not self.carrier.commit(e):
-                    return
+                    return False
             else:
                 self.s.base = base
             where = "External axis tab: set the standoffs and keep-outs, then plan"
     except (ValueError, OSError) as err:
-        return notify(e, "Not loaded", str(err))
+        notify(e, "Not loaded", str(err))
+        return False
     self.status.content = f"Loaded **{self.pkg.name}** ({self.pkg.kind}). {where}."
     notify(e, "Package loaded", self.pkg.name, ok=True)
+    return True
 
 
 def open_zip(self, e) -> None:
+    from ui.package_edit import load_zip
+
     f = self.open.value
     if len(f.content) > MAX_UPLOAD:
         return notify(e, "Upload too large", "Limit is 200 MB")
     try:
-        with tempfile.TemporaryDirectory() as tmp:
-            pkg, urdf = open_package(f.content, Path(tmp) / "pkg")
-            mesh_dir = self.work / "meshes"
-            if mesh_dir.exists():
-                shutil.rmtree(mesh_dir)
-            mesh_dir.mkdir(parents=True)
-            if (urdf.parent / "meshes").is_dir():
-                shutil.copytree(urdf.parent / "meshes", mesh_dir, dirs_exist_ok=True)
+        pkg = load_zip(self, f.content)
     except Exception as err:  # malformed zips / URDFs: report, keep the current package
         return notify(e, "Could not open the package", f"{type(err).__name__}: {err}")
-    self.pkg, self.sel, self.sel_tcp = pkg, 0, 0
-    self.show.value = True
-    self.load_widgets()
+    self.edit_source = None
     self.status.content = f"Opened **{pkg.name}**: a {pkg.kind} with {len(pkg.parts)} part(s)."
     notify(e, "Package opened", pkg.name, ok=True)
 
 
 def reset(self) -> None:
+    self.edit_source = None
     kind = self.pkg.kind
     self.pkg = Package(kind=kind, name=f"my_{kind}", tcps=[Frame(name="tcp")] if kind == "tool" else [])
     self._set_kind(kind)

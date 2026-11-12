@@ -328,6 +328,14 @@ def build_app(
 
         builder_window = BuilderWindow(server, session, tool_tab=tool, carrier_panel=carrier)
         builder = builder_window.builder
+    builder.on_part = cell.refresh_part  # v9: a part package used in the project
+    builder.collision.get_selection = lambda: targets.selection  # surfaces kept exact
+    from ui.builder_window import open_html
+
+    with coll.folder:  # v9 #11: the part's collision geometry is made in the Package builder
+        server.gui.add_html(
+            open_html(builder_window.port, "Simplify the part in the package builder ↗", False)
+        )
     tool_opt.planner_options = stations.options
     workflow.gate(stations.run, stations.gate_md)  # optimizers need a confirmed setup (T5)
     workflow.gate(stations.quick_run, stations.quick_gate_md)
@@ -421,7 +429,6 @@ def build_app(
     state["drive"] = drive
     state["collision"] = coll
     state["collision_view"] = coll_view
-    coll.targets = targets
     state.update(
         tabs=tab_handles,
         cell=cell,
