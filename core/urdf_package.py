@@ -18,6 +18,11 @@ CAD (other link names, joint origins) are read through their kinematics at zero 
 roles come from the prismatic joints' axes (x / y / z in the root frame), ``robot_mount`` and
 ``tcp*`` frames. Box / cylinder parts use the app's convention (bottom face on z = 0, centred;
 URDF boxes and cylinders are centred, the offset is added / removed here).
+
+Collision geometry (2026-11-11): mesh parts get a low-detail collision copy
+(``Package.collision``, per part ``Part.collision``; core.collision_mesh) written to
+``meshes/collision/<part>.stl`` (metres) and used by the URDF's ``<collision>`` element; the
+visual element keeps the full mesh. Reading takes the visual geometry.
 """
 
 from __future__ import annotations
@@ -51,6 +56,8 @@ ATTACH = {"fixed": "fixed", "bridge": "x_axis", "carriage": "carriage", "lift": 
 UNIT_SCALE = {"m": 1.0, "mm": 1e-3, "in": 0.0254}
 MESH_EXTS = (".stl", ".obj", ".ply")
 NAME = re.compile(r"[^A-Za-z0-9_-]+")
+CollisionMode = Literal["auto", "visual", "reduce", "hull", "wrap"]
+MODES = ("auto", "visual", "reduce", "hull", "wrap")
 
 
 class _M(BaseModel):
@@ -69,6 +76,15 @@ class Part(_M):
     mesh: str | None = None  # file name in the package's meshes/ folder
     units: Literal["m", "mm", "in"] = "m"
     pose: Pose = Field(default_factory=Pose)
+    collision: CollisionMode | None = None  # None: the package's collision setting
+
+
+class Collision(_M):
+    """How mesh parts are simplified for collision (core.collision_mesh.Geom)."""
+
+    mode: CollisionMode = "auto"
+    faces: int = Field(default=4000, ge=50, le=200000)
+    wrap_mm: float = Field(default=5.0, gt=0, le=200)
 
 
 class Frame(_M):
@@ -86,6 +102,7 @@ class Package(_M):
     x: Range | None = None  # rail / gantry travel (m)
     y: Range | None = None  # gantry
     lift: Range | None = None  # optional on every carrier
+    collision: Collision = Field(default_factory=Collision)
 
 
 def safe(name: str) -> str:
@@ -144,7 +161,26 @@ def _geometry(part: Part) -> tuple[str, np.ndarray]:
     return f'<mesh filename="meshes/{part.mesh}" scale="{s:.6g} {s:.6g} {s:.6g}"/>', T
 
 
-def build_urdf(p: Package) -> str:
+def part_collision(p: Package, part: Part, mesh_dir: Path) -> trimesh.Trimesh | None:
+    """A mesh part's collision copy in metres (its own frame), or None when it is the visual
+    mesh itself (boxes, cylinders, "visual", small meshes under "auto")."""
+    from core.collision_mesh import Geom, collision_mesh
+
+    if part.shape != "mesh" or not part.mesh:
+        return None
+    c = p.collision
+    g = Geom(part.collision or c.mode, c.faces, c.wrap_mm)
+    if g.mode == "visual":
+        return None
+    m = trimesh.load(str(mesh_dir / part.mesh), force="mesh")
+    m.apply_scale(UNIT_SCALE[part.units])
+    out = collision_mesh(m, g)
+    return None if out is m else out
+
+
+def build_urdf(p: Package, collision: dict[str, str] | None = None) -> str:
+    """The URDF; ``collision``: part name -> its collision mesh file under meshes/ (metres)."""
+    collision = collision or {}
     stages = list(STAGES[p.kind])
     if p.kind != "tool" and p.lift is None:
         stages.remove("lift")
@@ -153,9 +189,11 @@ def build_urdf(p: Package) -> str:
         g, T = _geometry(part)
         o = f"<origin {_xyz_rpy(T)}/>"
         el = f"<geometry>{g}</geometry>"
+        cf = collision.get(part.name)
+        cel = f'<geometry><mesh filename="meshes/{cf}"/></geometry>' if cf else el
         links[LINK[part.stage]].append(
             f'    <visual name="{safe(part.name)}">{o}{el}</visual>\n'
-            f'    <collision name="{safe(part.name)}">{o}{el}</collision>\n'
+            f'    <collision name="{safe(part.name)}">{o}{cel}</collision>\n'
         )
     head = f'<?xml version="1.0"?>\n<!-- {p.kind} package {safe(p.name)} (Package builder) -->\n'
     out = [head + f'<robot name="{safe(p.name)}">']
@@ -206,7 +244,7 @@ README = """{name}: a {kind} package (URDF + meshes) written by the robot-sys-op
 
 {name}.urdf     the model (metres; frames as in the user guide, "Building URDF packages")
 package.yaml    the parts as authored (the builder reopens them from here)
-meshes/         mesh files referenced by the URDF
+meshes/         mesh files referenced by the URDF (meshes/collision: the low-detail collision copies)
 
 Load it in the app: Package builder -> Open package (.zip) -> Use in this project.
 """
@@ -227,8 +265,18 @@ def write_package(p: Package, mesh_dir: Path | None, dest: Path) -> Path:
                 raise FileNotFoundError(f"{part.name}: mesh file {part.mesh} not found")
             if src.resolve() != (dest / "meshes" / part.mesh).resolve():
                 shutil.copy(src, dest / "meshes" / part.mesh)
+    coll_dir = dest / "meshes" / "collision"
+    if coll_dir.is_dir():
+        shutil.rmtree(coll_dir)
+    collision: dict[str, str] = {}
+    for part in p.parts:
+        m = part_collision(p, part, dest / "meshes")
+        if m is not None:
+            coll_dir.mkdir(exist_ok=True)
+            collision[part.name] = f"collision/{safe(part.name)}.stl"
+            m.export(dest / "meshes" / collision[part.name])
     urdf = dest / f"{safe(p.name)}.urdf"
-    urdf.write_text(build_urdf(p), encoding="utf-8")
+    urdf.write_text(build_urdf(p, collision), encoding="utf-8")
     (dest / "package.yaml").write_text(
         yaml.safe_dump(p.model_dump(mode="json"), sort_keys=False), encoding="utf-8"
     )
@@ -245,170 +293,15 @@ def zip_folder(folder: Path) -> bytes:
     return buf.getvalue()
 
 
-# --- reading ------------------------------------------------------------------------------------
-
-
-def _scale_units(scale) -> str | None:
-    if scale is None:
-        return "m"
-    s = np.atleast_1d(np.asarray(scale, float))
-    if not np.allclose(s, s[0]):
-        return None
-    for k, v in UNIT_SCALE.items():
-        if abs(s[0] - v) < 1e-9:
-            return k
-    return None
-
-
-def read_urdf(urdf_path: Path, kind: str | None = None, name: str | None = None) -> Package:
-    """A Package from a URDF on disk (convention or CAD export), meshes in its folder. Meshes
-    in other formats or units are converted to STL in metres next to the URDF."""
-    import yourdfpy
-
-    folder = urdf_path.parent
-    u = yourdfpy.URDF.load(str(urdf_path), build_scene_graph=True, load_meshes=False, mesh_dir=str(folder))
-    root = u.base_link
-    zero = {j: 0.0 for j in u.actuated_joint_names}
-    u.update_cfg(zero)
-
-    def T_of(link: str) -> np.ndarray:
-        return np.asarray(u.get_transform(link, root), float)
-
-    roles: dict[str, str] = {}  # prismatic joint name -> x / y / lift
-    for j in u.robot.joints:
-        if j.type == "prismatic":
-            Ro = np.eye(3) if j.origin is None else np.asarray(j.origin, float)[:3, :3]
-            a = T_of(j.parent)[:3, :3] @ Ro @ np.asarray(j.axis, float)
-            k = int(np.argmax(np.abs(a)))
-            if abs(abs(a[k]) - 1) > 1e-6 or a[k] < 0:
-                raise ValueError(f"joint {j.name}: a travel axis must be +x, +y or +z of {root}")
-            roles[j.name] = ("x", "y", "lift")[k]
-        elif j.type in ("revolute", "continuous"):
-            raise ValueError(f"joint {j.name}: rotary joints are not supported in a package")
-    links = [lk.name for lk in u.robot.links]
-    tcps = [lk for lk in links if lk.lower().startswith("tcp")]
-    if kind is None:
-        found = set(roles.values())
-        kind = (
-            "gantry" if {"x", "y"} <= found else "rail" if "x" in found
-            else "mobile" if "robot_mount" in links else "tool"
-        )  # fmt: skip
-    if kind == "tool" and roles:
-        raise ValueError("a tool package has no moving joints")
-    # stage of each link: the travel joints above it
-    parent_joint = {j.child: j for j in u.robot.joints}
-
-    def stage(link: str) -> str:
-        above = set()
-        while link in parent_joint:
-            j = parent_joint[link]
-            if j.name in roles:
-                above.add(roles[j.name])
-            link = j.parent
-        if kind == "tool":
-            return "tool"
-        if "lift" in above:
-            return "lift"
-        if kind == "mobile":
-            return "chassis"
-        if "y" in above or (kind == "rail" and "x" in above):
-            return "carriage"
-        return "bridge" if "x" in above else "fixed"
-
-    parts: list[Part] = []
-    for lk in u.robot.links:
-        elems = lk.collisions or lk.visuals
-        for n, el in enumerate(elems):
-            g = el.geometry
-            T = T_of(lk.name) @ (np.eye(4) if el.origin is None else np.asarray(el.origin, float))
-            pname = safe(el.name or (f"{lk.name}_{n}" if len(elems) > 1 else lk.name))
-            if g.box is not None:
-                size = tuple(float(v) for v in g.box.size)
-                part = Part(
-                    name=pname,
-                    stage=stage(lk.name),
-                    shape="box",
-                    size=size,
-                    pose=matrix_to_pose(T @ make_T(p=(0, 0, -size[2] / 2))),
-                )
-            elif g.cylinder is not None:
-                r, h = float(g.cylinder.radius), float(g.cylinder.length)
-                part = Part(
-                    name=pname,
-                    stage=stage(lk.name),
-                    shape="cylinder",
-                    radius=r,
-                    height=h,
-                    pose=matrix_to_pose(T @ make_T(p=(0, 0, -h / 2))),
-                )
-            elif g.mesh is not None:
-                src = (folder / g.mesh.filename).resolve()
-                if not src.is_relative_to(folder.resolve()) or not src.is_file():
-                    raise ValueError(f"{lk.name}: mesh {g.mesh.filename} not found in the package")
-                units = _scale_units(g.mesh.scale)
-                rel = src.relative_to(folder.resolve()).as_posix()
-                if units is None or src.suffix.lower() not in MESH_EXTS:  # convert: STL in metres
-                    m = trimesh.load(str(src), force="mesh")
-                    m.apply_scale(np.asarray(g.mesh.scale if g.mesh.scale is not None else 1.0, float))
-                    rel = f"meshes/{pname}.stl"
-                    (folder / "meshes").mkdir(exist_ok=True)
-                    m.export(folder / rel)
-                    units = "m"
-                part = Part(
-                    name=pname,
-                    stage=stage(lk.name),
-                    shape="mesh",
-                    mesh=rel.removeprefix("meshes/"),
-                    units=units,
-                    pose=matrix_to_pose(T),
-                )
-                if not rel.startswith("meshes/"):
-                    (folder / "meshes").mkdir(exist_ok=True)
-                    shutil.copy(src, folder / "meshes" / Path(rel).name)
-                    part = part.model_copy(update={"mesh": Path(rel).name})
-            else:
-                continue
-            parts.append(part)
-    lim = {r: None for r in ("x", "y", "lift")}
-    for j in u.robot.joints:
-        if j.name in roles and j.limit is not None:
-            lim[roles[j.name]] = (float(j.limit.lower), float(j.limit.upper))
-    mount = matrix_to_pose(T_of("robot_mount")) if "robot_mount" in links else Pose()
-    return Package(
-        kind=kind,
-        name=name or safe(u.robot.name or urdf_path.stem),
-        parts=parts,
-        tcps=[Frame(name=t[4:].lstrip("_") or "tcp", pose=matrix_to_pose(T_of(t))) for t in tcps],
-        mount=mount,
-        x=lim["x"],
-        y=lim["y"],
-        lift=lim["lift"],
-    )
-
-
-def open_package(data: bytes, dest: Path) -> tuple[Package, Path]:
-    """Unpack a package zip into ``dest`` (guarded) and read it: (package, URDF path).
-    package.yaml (when there) gives the kind, name and description."""
-    from core.urdf_import import import_urdf_zip
-
-    info = import_urdf_zip(data, dest, require_actuated=False)
-    meta = {}
-    for f in (info.path.parent / "package.yaml", *dest.rglob("package.yaml")):
-        if f.is_file():
-            meta = yaml.safe_load(f.read_text(encoding="utf-8")) or {}
-            break
-    kind = meta.get("kind") if meta.get("kind") in KINDS else None
-    pkg = read_urdf(info.path, kind, meta.get("name"))
-    return pkg.model_copy(update={"description": str(meta.get("description", ""))}), info.path
-
-
 # --- into the project ---------------------------------------------------------------------------
 
 
-def to_base(p: Package, mesh_rel: str, current: Base) -> Base:
+def to_base(p: Package, mesh_rel: str, current: Base, collision: dict[str, str] | None = None) -> Base:
     """The carrier as the External axis tab's Base: bodies, travel, robot mount. Standoffs,
     keep-outs, the carrier frame and mobile settings come from ``current``. ``mesh_rel``:
-    the package's meshes folder relative to the project (or repo)."""
+    the package's meshes folder relative to the project (or repo); ``collision``: part name
+    -> collision mesh under it (``collision_files``)."""
+    collision = collision or {}
     if p.kind == "tool":
         raise ValueError("a tool package is not a carrier")
     bodies = [
@@ -419,6 +312,7 @@ def to_base(p: Package, mesh_rel: str, current: Base) -> Base:
             radius=part.radius,
             height=part.height,
             mesh=f"{mesh_rel}/{part.mesh}" if part.shape == "mesh" else None,
+            collision_mesh=f"{mesh_rel}/{collision[part.name]}" if part.name in collision else None,
             units=part.units,
             attach=ATTACH[part.stage],
             pose=part.pose,
@@ -466,3 +360,30 @@ def to_tool(p: Package, urdf_rel: str) -> EndEffector:
     ext = Extension(type="pose", x=zero, y=zero, z=zero, nominal=ExtensionValues(z=0.0))
     tcps = [TCP(name=t.name, T_head_tcp=t.pose) for t in p.tcps] or [TCP(name="tcp")]
     return EndEffector(name=p.name, urdf=urdf_rel, tcps=tcps, extension=ext)
+
+
+# --- reading (core.urdf_package_read; callers import these from here) -----------------------------
+
+
+def read_urdf(urdf_path: Path, kind: str | None = None, name: str | None = None) -> Package:
+    """The package of a URDF (convention or CAD export), see core.urdf_package_read."""
+    from core.urdf_package_read import read_urdf as read
+
+    return read(urdf_path, kind, name)
+
+
+def open_package(data: bytes, dest: Path) -> tuple[Package, Path]:
+    """Unpack a package zip into ``dest`` and read it (core.urdf_package_read)."""
+    from core.urdf_package_read import open_package as op
+
+    return op(data, dest)
+
+
+def collision_files(p: Package, dest: Path) -> dict[str, str]:
+    """Part name -> its collision mesh under ``dest/meshes`` (written by write_package)."""
+    out = {}
+    for part in p.parts:
+        rel = f"collision/{safe(part.name)}.stl"
+        if (dest / "meshes" / rel).is_file():
+            out[part.name] = rel
+    return out

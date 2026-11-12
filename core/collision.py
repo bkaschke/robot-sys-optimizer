@@ -50,17 +50,19 @@ HOSE = None
 # left panel's Collision geometry and shipped to the planner / worker processes (geom_state)
 GEOM: dict = {}
 PART_KEEP: tuple = ()
+ARM_PAD = 0.0  # m: the robot arm's collision shapes are this much larger against everything else
 ROBOT_AUTO_FACES = 5000  # robot links: "auto" reduces links above this (URDF CAD meshes)
 
 
 def geom_state() -> tuple:
-    return dict(GEOM), tuple(PART_KEEP)
+    return dict(GEOM), tuple(PART_KEEP), float(ARM_PAD)
 
 
 def set_geom_state(state) -> None:
-    global GEOM, PART_KEEP
+    global GEOM, PART_KEEP, ARM_PAD
     if state is not None:
         GEOM, PART_KEEP = dict(state[0]), tuple(int(f) for f in state[1])
+        ARM_PAD = float(state[2]) if len(state) > 2 else 0.0
 
 
 def _geom(component: str):
@@ -228,10 +230,7 @@ class CollisionScene:
                 self.tool_contact[self.tool_ids[-1]] = set()
             T_fh = tool.T_flange_head(values)
             for hl in tool.links:
-                for sig, faces in self._split_by_contact(tool, hl):
-                    piece = hl.mesh.submesh([np.array(sorted(faces))], append=True)
-                    if not sig:  # contact pieces stay exact: they meet the part at the contact edge
-                        piece = _low(piece, "tool")
+                for sig, piece in self._tool_pieces(tool, hl):
                     go = pin.GeometryObject(
                         f"tool_{hl.name}_{'+'.join(sorted(sig)) or 'body'}",
                         fr.parentJoint,
@@ -339,6 +338,13 @@ class CollisionScene:
                     margin_of[k] = self.margins.clearance + self.margins.dress
         for k in P.tool_robot + P.carrier:
             margin_of[k] = self.margins.self_clearance
+        self.arm_pad = float(ARM_PAD)
+        if self.arm_pad > 0:  # 2026-11-11: the arm bloated against everything but itself
+            robot = set(self.robot_ids)
+            for k in P.robot_part + P.obstacle + P.floor + P.carrier + P.tool_robot:
+                pair = self.gm.collisionPairs[k]
+                if pair.first in robot or pair.second in robot:
+                    margin_of[k] = margin_of.get(k, 0.0) + self.arm_pad
         for k, req in enumerate(self.gd.collisionRequests):
             req.security_margin = margin_of.get(k, 0.0)
             req.enable_contact = False
@@ -400,6 +406,23 @@ class CollisionScene:
             (gid, go.name, T_world_univ @ np.asarray(self.gd.oMg[gid].homogeneous))
             for gid, go in enumerate(self.gm.geometryObjects)
         ]
+
+    def _tool_pieces(self, tool: ToolModel, hl) -> list[tuple[frozenset, trimesh.Trimesh]]:
+        """A head link's collision pieces: (TCPs that may touch the part with it, mesh). A link
+        with its own URDF collision mesh (e.g. from the Package builder) uses that, unless a
+        TCP has picked contact faces on it (face ids of the visual mesh); otherwise the visual
+        mesh split by contact, the non-contact piece simplified (``GEOM["tool"]``)."""
+        coll = getattr(hl, "collision", None)
+        if coll is not None and not any(t.contact_faces.get(hl.name) for t in tool.ee.tcps):
+            sig = frozenset(t.name for t in tool.ee.tcps if hl.name in t.contact_links)
+            return [(sig, coll)]
+        out = []
+        for sig, faces in self._split_by_contact(tool, hl):
+            piece = hl.mesh.submesh([np.array(sorted(faces))], append=True)
+            if not sig:  # contact pieces stay exact: they meet the part at the contact edge
+                piece = _low(piece, "tool")
+            out.append((sig, piece))
+        return out
 
     @staticmethod
     def _split_by_contact(tool: ToolModel, hl) -> list[tuple[frozenset, set[int]]]:

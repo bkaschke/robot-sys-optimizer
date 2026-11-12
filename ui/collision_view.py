@@ -34,6 +34,7 @@ class CollisionPanel:
         self.cell = self.targets = None
         self._handles: dict[int, object] = {}
         self._drawn: dict[int, int] = {}  # gid -> id of the mesh drawn for it
+        self._pads: dict = {}  # (gid, id(mesh), pad) -> bloated copy for drawing
         self._lock = threading.Lock()
         gui = server.gui
         with gui.add_folder("Collision geometry", expand_by_default=False):
@@ -47,6 +48,15 @@ class CollisionPanel:
                 )
                 for name in COMPONENTS
             }
+            self.pad_mm = gui.add_number(
+                "Robot arm padding (mm)",
+                0.0,
+                min=0.0,
+                max=100.0,
+                step=1.0,
+                hint="the arm's collision shapes this much larger against the part, floor, carrier, "
+                "stay-out zones and tool (not against itself)",
+            )
             with gui.add_folder("Simplify for collision", expand_by_default=False):
                 options = tuple(MODE_LABELS[m] for m in MODES)
                 self.mode = {
@@ -80,7 +90,7 @@ class CollisionPanel:
                 self.keep_info = gui.add_markdown("")
         for box in self.show.values():
             box.on_update(lambda _e: self.redraw_soon())
-        for w in (*self.mode.values(), self.faces, self.wrap_mm):
+        for w in (*self.mode.values(), self.faces, self.wrap_mm, self.pad_mm):
             w.on_update(lambda _e: self.settings_changed())
         self.keep_btn.on_click(lambda _e: self.keep_selection())
         self.clear_btn.on_click(lambda _e: self.set_keep([]))
@@ -99,7 +109,8 @@ class CollisionPanel:
         now on use them; planner jobs take a copy)."""
         part = self.s.part
         keep = tuple(int(f) for f in part.collision_keep) if part is not None else ()
-        collision.set_geom_state(({c: self.geom(n) for n, c in COMPONENTS.items()}, keep))
+        pad = max(float(self.pad_mm.value), 0.0) / 1000
+        collision.set_geom_state(({c: self.geom(n) for n, c in COMPONENTS.items()}, keep, pad))
         n = len(keep)
         text = f"_{n} part faces kept exact._" if n else "_No part surfaces kept exact._"
         if self.keep_info.content != text:
@@ -156,6 +167,7 @@ class CollisionPanel:
             sc.set_base(np.asarray(self.s.T_world_base, float))
             poses = {gid: T for gid, _, T in sc.world_shapes(np.asarray(self.s.q, float))}
             keep = set()
+            pad = float(getattr(sc, "arm_pad", 0.0))
             for comp, gids in self._groups(sc).items():
                 if comp not in want:
                     continue
@@ -163,6 +175,8 @@ class CollisionPanel:
                     mesh = sc.shape(gid)
                     if mesh is None:
                         continue
+                    if comp == "robot" and pad > 0:  # drawn bloated like it is checked
+                        mesh = self._padded(gid, mesh, pad)
                     keep.add(gid)
                     T = poses[gid]
                     h = self._handles.get(gid)
@@ -183,6 +197,16 @@ class CollisionPanel:
             for gid in [g for g in self._handles if g not in keep]:
                 self._handles.pop(gid).remove()
                 self._drawn.pop(gid, None)
+
+    def _padded(self, gid: int, mesh, pad: float):
+        """The mesh pushed out along its vertex normals by ``pad`` (display; cached)."""
+        key = (gid, id(mesh), round(pad, 6))
+        if key not in self._pads:
+            out = mesh.copy()
+            out.vertices = np.asarray(mesh.vertices) + pad * np.asarray(mesh.vertex_normals)
+            self._pads = {k: v for k, v in self._pads.items() if k[0] != gid}
+            self._pads[key] = out
+        return self._pads[key]
 
     def clear(self) -> None:
         for h in self._handles.values():

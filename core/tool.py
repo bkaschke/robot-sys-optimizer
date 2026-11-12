@@ -46,11 +46,43 @@ def _tr(x=0.0, y=0.0, z=0.0) -> np.ndarray:
     return make_T(p=(x, y, z))
 
 
+def _collision_meshes(path: Path) -> dict[str, trimesh.Trimesh]:
+    """Link name -> its URDF collision geometry (meshes and primitives) in the link frame."""
+    try:
+        urdf = yourdfpy.URDF.load(
+            path,
+            build_scene_graph=False,
+            build_collision_scene_graph=True,
+            load_meshes=False,
+            load_collision_meshes=True,
+            filename_handler=partial(yourdfpy.filename_handler_magic, dir=path.parent),
+        )
+    except Exception:  # no or broken collision elements: the visual geometry is used
+        return {}
+    sc = urdf.collision_scene
+    if sc is None:
+        return {}
+    root = urdf.base_link
+    out: dict[str, list] = {}
+    for node in sc.graph.nodes_geometry:
+        T_root_node, gname = sc.graph.get(frame_to=node, frame_from=root)
+        link = node
+        while link not in urdf.link_map:
+            link = sc.graph.transforms.parents[link]
+        m = sc.geometry[gname].copy()
+        m.apply_transform(
+            np.linalg.inv(urdf.get_transform(link, root, collision_geometry=True)) @ T_root_node
+        )
+        out.setdefault(link, []).append(m)
+    return {k: trimesh.util.concatenate(v) for k, v in out.items()}
+
+
 @dataclass
 class HeadLink:
     name: str
     T_head_link: np.ndarray
     mesh: trimesh.Trimesh  # visual geometry in the link frame
+    collision: trimesh.Trimesh | None = None  # the URDF's own collision mesh, when it differs
 
 
 class ToolModel:
@@ -83,11 +115,19 @@ class ToolModel:
             m = geom[gname].copy()
             m.apply_transform(np.linalg.inv(T_root_link) @ T_root_node)
             per_link.setdefault(link, []).append(m)
+        coll = _collision_meshes(path)
         for name in urdf.link_map:
             meshes = per_link.get(name)
             if meshes:
                 mesh = trimesh.util.concatenate(meshes)
-                self.links.append(HeadLink(name, urdf.get_transform(name, root), mesh))
+                c = coll.get(name)
+                if (
+                    c is not None
+                    and np.array_equal(c.faces.shape, mesh.faces.shape)
+                    and np.allclose(c.vertices, mesh.vertices)
+                ):
+                    c = None  # the same geometry as the visual one
+                self.links.append(HeadLink(name, urdf.get_transform(name, root), mesh, c))
 
     def link(self, name: str) -> HeadLink:
         for hl in self.links:

@@ -574,6 +574,7 @@ $PY scripts/make_portable.py          # -&gt; dist/robot-sys-optimizer-portable-
 </tr>
 </tbody>
 </table>
+<p><strong>Robot arm padding (mm)</strong> (left panel → Collision geometry): makes the robot arm's collision shapes this much larger against the part, the floor, the carrier bodies, the stay-out zones and the tool (not against the arm itself), on top of the clearances; for example 10 mm to allow for cable ties, covers or model error. It applies to the planner, the paths and the jog, and <strong>Show robot</strong> draws the arm bloated by the same amount. Saved with the project's panel settings.</p>
 <p><strong>Keep selected part surfaces exact</strong>: select the surfaces the tool works on (Targets → selection), then press it: those faces are copied into the part's collision copy at full detail and only the rest of the part is simplified. <strong>Clear kept surfaces</strong> undoes it. The kept faces are saved with the project's part. Tick <strong>Show part</strong> to see the result. The tool's contact faces (Tool tab) always stay exact.</p>
 <p>Simplified meshes are cached in <code>cache/collision</code> (per PC), so a large mesh is only simplified once. The ABB GoFa 10, GoFa 12 and PoWa 30 ship with wrapped collision meshes (their URDFs used the CAD meshes, which made each check about 10× slower than for a UR or CRX).</p>
 <h3 id="package-builder-tab">Package builder tab</h3>
@@ -605,6 +606,10 @@ $PY scripts/make_portable.py          # -&gt; dist/robot-sys-optimizer-portable-
 <tr>
 <td><strong>Preview</strong></td>
 <td><em>Show preview</em> draws the package: parts coloured by stage, the TCP or robot-mount frames, the package frame's axes. A rail, gantry or mobile base stands at <em>Preview at</em>.</td>
+</tr>
+<tr>
+<td><strong>Collision geometry</strong></td>
+<td>How the package's <strong>mesh</strong> parts are simplified for collision (same modes as <a href="#collision-geometry">Collision geometry</a>: <em>Auto</em>, <em>Same as visual</em>, <em>Reduce triangles</em>, <em>Convex hull</em>, <em>Wrap</em>), with <em>Triangles</em> and <em>Wrap offset (mm)</em>; <strong>This part</strong> gives the selected part its own mode instead of the package setting. <strong>Show collision shapes</strong> draws what the checks will use (orange) and lists the triangle counts. Export and <strong>Use in this project</strong> write the copies to <code>meshes/collision/</code> and point the URDF's <code>&lt;collision&gt;</code> elements at them (the <code>&lt;visual&gt;</code> keeps the full mesh); the project's collision checks then use them for the tool or the carrier bodies. A tool link with picked contact faces (Tool tab) keeps using its visual mesh split at the contact faces. Boxes and cylinders are used as they are. The settings are saved in <code>package.yaml</code> and come back with <strong>Open package</strong>.</td>
 </tr>
 <tr>
 <td><strong>Preview on robot</strong></td>

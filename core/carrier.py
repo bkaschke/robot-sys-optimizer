@@ -156,6 +156,11 @@ class Body:
     name: str
     mesh: trimesh.Trimesh  # in its own frame
     T: np.ndarray  # world pose of that frame
+    coll: trimesh.Trimesh | None = None  # its collision mesh, when it has its own
+
+    @property
+    def collision(self) -> trimesh.Trimesh:
+        return self.mesh if self.coll is None else self.coll
 
 
 def lift_levels(lo: float, hi: float, step: float = 0.25) -> np.ndarray:
@@ -257,9 +262,24 @@ class Carrier:
             self._meshes[k] = primitive_mesh(self.specs[k], self.resolve)
         return self._meshes[k]
 
+    def collision_mesh(self, k: int) -> trimesh.Trimesh | None:
+        """Body k's own collision mesh (``Primitive.collision_mesh``), or None."""
+        p = self.specs[k]
+        if not p.collision_mesh:
+            return None
+        key = ("collision", k)
+        if key not in self._meshes:
+            try:
+                self._meshes[key] = primitive_mesh(
+                    Primitive(shape="mesh", mesh=p.collision_mesh), self.resolve
+                )
+            except (OSError, ValueError):  # missing / broken: the visual mesh is checked
+                self._meshes[key] = None
+        return self._meshes[key]
+
     def _bodies(self, attach: str, T_parent: np.ndarray) -> list[Body]:
         return [
-            Body(p.name, self.mesh(k), T_parent @ pose_to_matrix(p.pose))
+            Body(p.name, self.mesh(k), T_parent @ pose_to_matrix(p.pose), self.collision_mesh(k))
             for k, p in enumerate(self.specs)
             if p.attach == attach
         ]
