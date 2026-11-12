@@ -56,7 +56,9 @@ class ExportPanel:
         self.uframes.on_click(lambda e: self._run(e, self.export_userframes))
         self.urdf.on_click(lambda e: self._run(e, self.export_urdf))
         self.report.on_click(
-            lambda e: self._run(e, self.export_pdf if self.report_format.value == "PDF" else self.export_report)
+            lambda e: self._run(
+                e, self.export_pdf if self.report_format.value == "PDF" else self.export_report
+            )
         )
         self.step.on_click(lambda e: self._run(e, self.export_step))
         self.tube_od = lambda: None  # app.py: Tool geometry -> Tube OD
