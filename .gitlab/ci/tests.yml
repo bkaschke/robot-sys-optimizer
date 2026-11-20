@@ -1,0 +1,45 @@
+# = .github/workflows/tests.yml: lint and the fast tests on every branch push and merge request (not on
+# tags: the branch already tested that commit). Batches run 3 at a time (runner: 4 cores / 16 GB or more)
+# (Windows primary, Linux secondary; the conda env `rso`). Not in a manual release run (RELEASE_RUN),
+# just as GitHub's release workflow does not run the tests.
+# The slow tests (full plans, tool optimizer, paths) and the browser tests run locally:
+#   python scripts/test_batches.py          # everything (~60 min)
+#   python scripts/test_batches.py --e2e    # headless Edge
+
+.fast:
+  stage: test
+  timeout: 60 minutes
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "web" && $RELEASE_RUN == "true"
+      when: never
+    - if: $CI_COMMIT_TAG
+      when: never
+    - when: on_success
+  script:
+    # one command per line: the runner stops at the first one that fails, in PowerShell and in bash
+    - python scripts/build_guide.py --check
+    - python scripts/test_batches.py --fast --jobs 3
+
+# = GitHub's `lint` job (v12 #12): the pinned ruff from environment.yml on Linux, no conda env.
+lint:
+  stage: test
+  image: $LINUX_RELEASE_IMAGE
+  tags: [$RUNNER_TAG_LINUX]
+  timeout: 10 minutes
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "web" && $RELEASE_RUN == "true"
+      when: never
+    - if: $CI_COMMIT_TAG
+      when: never
+    - when: on_success
+  script:
+    - pip install "ruff==$(grep -oP 'ruff=\K[0-9.]+' environment.yml)"
+    - ruff check .
+    - ruff format --check .
+
+# The two jobs do not depend on each other (GitHub: fail-fast: false).
+fast:windows:
+  extends: [.windows-conda, .fast]
+
+fast:linux:
+  extends: [.linux-conda, .fast]

@@ -33,8 +33,8 @@ def card(s, sol) -> str:
     lim = f"{min(r.limit_margin_deg for r in ok):.0f}°" if ok else "—"
     if ok:
         mu = min(r.manipulability for r in ok)
-        top = getattr(s, "max_manip", None)  # set by a plan of this session (not saved)
-        low_mu = f"{100 * mu / top:.0f} %" if top else f"{mu:.3f} (\\|det J\\|)"
+        top = s.max_manip  # set by a plan of this session (not saved)
+        low_mu = f"{100 * mu / top:.0f} %" if top else f"{mu:.3f} (\\|det J\\|; % needs a plan)"
     else:
         low_mu = "—"
     reached = n - len(sol.unreached) - len(sol.unfit)  # v10 T12: left-out points are not reached

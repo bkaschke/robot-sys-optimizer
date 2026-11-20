@@ -11,6 +11,7 @@ import numpy as np
 import viser
 from pydantic import ValidationError
 
+from core import data_paths
 from core.mesh_select import grow_region
 from core.process import PRESETS, apply_preset
 from core.schema import TCP, EndEffector, Extension, Tolerances
@@ -18,7 +19,7 @@ from core.tool import list_tools, save_tool
 from core.transforms import matrix_to_pose, pose_to_matrix
 from core.urdf_import import URDFImportError, import_urdf_zip
 from ui import tool_extension
-from ui.session import REPO, Session
+from ui.session import Session
 from ui.tool_view import HEAD, ROOT, ToolView
 from ui.widgets import MAX_UPLOAD, PoseWidgets, notify, safe_name
 
@@ -71,6 +72,9 @@ class ToolSetupTab:
             self.tilt = gui.add_number("Tilt cone (deg)", 0.0, min=0.0, max=90.0, step=0.5)
             self.standoff = gui.add_vector2("Standoff min/max (mm)", (0.0, 0.0), step=1.0)
             self.spin = gui.add_text("Spin (deg)", "free", hint="'free', a half-width, or 'lo,hi'")
+            self.pad_radius = gui.add_number(
+                "Pad radius (mm)", 0.0, min=0.0, max=500.0, step=1.0, hint="0 = unknown; warns in Detect"
+            )
         with gui.add_folder("Flange mount"):
             self.mount = PoseWidgets(server, f"{ROOT}/mount", np.eye(4), self._on_mount, scale=0.12)
         with gui.add_folder("Extension"):
@@ -176,6 +180,14 @@ class ToolSetupTab:
             d["tolerances"] = Tolerances(
                 spin_deg=spin, tilt_deg=self.tilt.value, standoff_m=lo if lo == hi else (lo, hi)
             ).model_dump()
+
+        def pad(d: dict) -> None:
+            d["pad_radius_m"] = self.pad_radius.value / 1000 if self.pad_radius.value > 0 else None
+
+        @self.pad_radius.on_update
+        @g
+        def _(e) -> None:
+            self._commit(pad, e)
 
         for w in (self.tilt, self.standoff, self.spin):
 
@@ -345,15 +357,19 @@ class ToolSetupTab:
         name = self.name.value.strip() or ee.name
         try:
             urdf = self.s.resolve(ee.urdf) if ee.urdf else None
-            if urdf is not None and not urdf.is_relative_to(REPO / "assets" / "tools"):
+            if urdf is not None and not urdf.is_relative_to(data_paths.data_dir() / "assets" / "tools"):
                 # copy uploaded geometry into the repo so the library entry is self-contained
-                dest = REPO / "assets" / "tools" / safe_name(name)
+                dest = data_paths.data_dir() / "assets" / "tools" / safe_name(name)
                 shutil.copytree(urdf.parent, dest, dirs_exist_ok=True)
-                ee = ee.model_copy(update={"urdf": (dest / urdf.name).relative_to(REPO).as_posix()})
+                ee = ee.model_copy(
+                    update={"urdf": (dest / urdf.name).relative_to(data_paths.data_dir()).as_posix()}
+                )
             path = save_tool(ee.model_copy(update={"name": name}), name)
         except (OSError, ValueError) as err:
             return notify(e, "Save failed", str(err))
-        self.s.tool = ee.model_copy(update={"name": name, "tool": path.relative_to(REPO).as_posix()})
+        self.s.tool = ee.model_copy(
+            update={"name": name, "tool": path.relative_to(data_paths.data_dir()).as_posix()}
+        )
         self.s.tool_model.ee = self.s.tool
         self._busy = True
         try:
@@ -361,7 +377,7 @@ class ToolSetupTab:
             self.choice.value = name
         finally:
             self._busy = False
-        notify(e, "Saved", str(path.relative_to(REPO)), ok=True)
+        notify(e, "Saved", str(path.relative_to(data_paths.data_dir())), ok=True)
 
     # --- widget refresh -------------------------------------------------------------------------
 
@@ -435,6 +451,7 @@ class ToolSetupTab:
         self.name.value = ee.name
         self.process.value = ee.process
         self.notes.content = f"_{PRESETS[ee.process].notes}_"
+        self.pad_radius.value = (ee.pad_radius_m or 0.0) * 1000
         tol = ee.tolerances
         self.tilt.value = tol.tilt_deg
         so = tol.standoff_m if isinstance(tol.standoff_m, tuple) else (tol.standoff_m, tol.standoff_m)

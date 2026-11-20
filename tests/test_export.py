@@ -180,6 +180,7 @@ def test_report_is_self_contained(plate_plan, sander):
             envelope_svg=ex.envelope_svg(tm, V_OPT),
             images=[("view", png_data_uri(img))],
             notes=["n1"],
+            mesh_license="ur",
         )
     )
     assert "<h2>Points</h2>" not in html  # v9 #8: the CSV export has every point
@@ -222,6 +223,23 @@ def test_gui_exports(tmp_path):
             path, data = fn(res.selected(), None)
             assert path == tmp_path / "export" / name and path.read_bytes() == data and len(data) > 200
         assert (tmp_path / "export" / "orbital_sander_optimized" / "orbital_sander_optimized.urdf").is_file()
+        import io
+        import zipfile
+
+        zpath, zdata = exp.export_package(res.selected(), None)  # handover package: all of it in one zip
+        assert zpath == tmp_path / "export" / f"{tmp_path.name}_handover.zip"
+        with zipfile.ZipFile(io.BytesIO(zdata)) as z:
+            names = set(z.namelist())
+            readme = z.read("README.txt").decode()
+        assert names == {
+            "README.txt",
+            "tcp_poses.csv",
+            "userframes.csv",
+            "report.html",
+            "orbital_sander_optimized.zip",
+            "project.json",
+        }
+        assert "Not included" not in readme and "Stations: 1; points reached: 3 of 3." in readme
         exp._run(type("E", (), {"client": None})(), exp.export_csv)  # the button path, no browser attached
         assert "tcp_poses.csv" in exp.info.content
     finally:

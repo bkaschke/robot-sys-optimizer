@@ -1,0 +1,73 @@
+# GitLab CI twin of the two GitHub Actions workflows (.github/workflows/tests.yml and release.yml).
+# Both hosts are kept working: change a check in one place, change it in the other too.
+#   .gitlab/ci/setup.yml    conda env `rso` on Windows (PowerShell) and Linux (container), caches
+#   .gitlab/ci/tests.yml    lint, guide check, fast tests            (= tests.yml)
+#   .gitlab/ci/release.yml  exe, zip, installer, offline tests, release (= release.yml)
+# How to cut a release and what to set up in the project: packaging/README.md ("Releases from CI").
+# NOT YET RUN on a GitLab instance: written from the documentation and checked locally only
+# (tests/test_gitlab_ci.py checks the structure).
+
+stages: [test, build, release]
+
+variables:
+  # ---------------------------------------------------------------------------------------------------
+  # RUNNER ASSUMPTIONS: change these for self-hosted runners. Defaults are gitlab.com hosted runners.
+  # ---------------------------------------------------------------------------------------------------
+  # Windows runner tag. gitlab.com: saas-windows-medium-amd64 (Windows Server 2022, PowerShell shell
+  # executor, a fresh VM per job, elevated). A self-hosted runner needs: shell executor with powershell or
+  # pwsh, git, an administrator account (firewall rule in the release job), Microsoft Edge, and either
+  # Inno Setup 6 or Chocolatey. The release job changes the machine's firewall for a few minutes: use a
+  # dedicated machine.
+  RUNNER_TAG_WINDOWS: saas-windows-medium-amd64
+  # Linux runner tag (docker executor). gitlab.com: saas-linux-small-amd64 (2 vCPU) or -medium- (4 vCPU,
+  # what GitHub's ubuntu runner has).
+  RUNNER_TAG_LINUX: saas-linux-medium-amd64
+  # Image of the Linux test job: must provide conda (Miniforge) and bash. GitHub uses an ubuntu-22.04 VM.
+  LINUX_TEST_IMAGE: condaforge/miniforge3:latest
+  # System libraries the test image may lack (a GitHub VM has them); installed with apt-get when the image
+  # has it. Empty = install nothing.
+  LINUX_APT_PACKAGES: "libgl1 libegl1 libxrender1 libxext6"
+  # Image of the two Linux release jobs: needs python3 (3.9+) and git, nothing else.
+  LINUX_RELEASE_IMAGE: python:3.12
+  # Windows: where Miniforge is installed when no conda is found, and where the env is built
+  # (<dir>\slot<N>\rso, N = CI_CONCURRENT_ID). Short path without spaces. Kept between jobs on a
+  # self-hosted runner, so Miniforge is installed once.
+  WINDOWS_CI_DIR: 'C:\rso-ci'
+  WINDOWS_MINIFORGE_URL: https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Windows-x86_64.exe
+  # ---------------------------------------------------------------------------------------------------
+
+  PYTHONUTF8: "1"
+
+  # Manual release run = GitHub's workflow_dispatch of release.yml and its `draft` input:
+  # Build -> Pipelines -> New pipeline, pick the branch, set RELEASE_RUN to true.
+  RELEASE_RUN:
+    value: "false"
+    options: ["false", "true"]
+    description: "true = build the Windows release from this branch (exe, zip, installer, offline tests) instead of running the tests."
+  RELEASE_DRAFT:
+    value: "true"
+    options: ["true", "false"]
+    description: "Only with RELEASE_RUN. true = the `release` job waits for a click after you reviewed the files and notes (GitLab has no draft releases). false = publish at once."
+  # Generic package (Deploy -> Package registry) that holds the release files; the version is the tag.
+  RELEASE_PACKAGE: RobotCellOptimizer
+  # Per-file limit of the package registry in bytes (gitlab.com: 5 GB; self-managed: Admin -> Settings).
+  # GitHub's limit is 2 GB per release file; its workflow checks that one.
+  RELEASE_MAX_FILE_BYTES: "5368709120"
+
+# One pipeline per change: a merge request pipeline when the branch has an open merge request, else a
+# branch pipeline (GitHub runs `push` and `pull_request` side by side; the checks are the same).
+workflow:
+  rules:
+    # tags that the `release` job creates for manual runs must not start another pipeline
+    - if: $CI_COMMIT_TAG =~ /^manual-/
+      when: never
+    - if: $CI_COMMIT_TAG
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS && $CI_PIPELINE_SOURCE == "push"
+      when: never
+    - if: $CI_COMMIT_BRANCH
+
+include:
+  - local: .gitlab/ci/setup.yml
+  - local: .gitlab/ci/tests.yml
+  - local: .gitlab/ci/release.yml

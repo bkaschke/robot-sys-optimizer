@@ -63,6 +63,8 @@ class StationsPanel:
         self._cancel = threading.Event()
         self.on_done: Callable | None = None  # v10 T10: (best plan) after a full run, e.g. the edge check
         self.on_start: Callable[[], None] | None = None  # set by app.py: e.g. clear old paths
+        # set by the batch panel: a reason (one line) why planning must not start now, else None
+        self.blocked_reason: Callable[[], str | None] | None = None
         gui = server.gui
         self.folder = gui.add_folder("Station planner")
         with self.folder:
@@ -180,6 +182,22 @@ class StationsPanel:
             **req,
         }
 
+    def planner_settings(self) -> PlannerSettings:
+        """The Station planner's settings (also used by Compare robots, review R12)."""
+        s, o = self.s, self.options()
+        return PlannerSettings(
+            max_stations=1 if s.sites() is None else int(self.max_stations.value),  # static: one base
+            candidate_step=self.step.value / 1000,
+            refine=self.refine.key != "none",
+            refine_method=self.refine.key,
+            zoning=o["zoning"],
+            areas=o["areas"],
+            require_all=o["require_all"],
+            require_one_config=o["require_one_config"],
+            cycle=getattr(s, "cycle", None),  # v8 T6
+            wrap_limit_deg=float(self.cable.wrap.value) if self.cable else 360.0,  # v8 T18
+        )
+
     def _optimizer(self) -> Optimizer:
         return self.s.extra.get("optimizer") or Optimizer()
 
@@ -187,6 +205,8 @@ class StationsPanel:
         """Plan stations in a thread. ``quick`` (T14): the quick plan (no refinement, zones or
         station areas; results labelled "Quick: ...")."""
         s = self.s
+        if self.blocked_reason is not None and (why := self.blocked_reason()):
+            return notify(event, "Cannot plan now", why)
         if self._thread is not None and self._thread.is_alive():
             return notify(event, "Busy", "Planning is already running")
         from ui.workflow import setup_reason
@@ -205,20 +225,7 @@ class StationsPanel:
                 "or offset_wrist). "
                 "See the user guide, Adding a robot.",
             )
-        sites = s.sites()
-        static = sites is None
-        settings = PlannerSettings(
-            max_stations=1 if static else int(self.max_stations.value),
-            candidate_step=self.step.value / 1000,
-            refine=self.refine.key != "none",
-            refine_method=self.refine.key,
-            zoning=self.options()["zoning"],
-            areas=self.options()["areas"],
-            require_all=self.options()["require_all"],
-            require_one_config=self.options()["require_one_config"],
-            cycle=getattr(s, "cycle", None),  # v8 T6
-            wrap_limit_deg=float(self.cable.wrap.value) if self.cable else 360.0,  # v8 T18
-        )
+        settings = self.planner_settings()
         if quick:
             settings = PlannerSettings(
                 max_stations=settings.max_stations,
@@ -264,15 +271,43 @@ class StationsPanel:
         run.visible, stop.visible, progress.visible = False, True, True
         if self.on_start is not None:
             self.on_start()
-        s.results, s.result_points = [], {}
-        self.on_solution()
+        # review H1: the previous results stay until this run's first plan arrives (a failed, empty
+        # or early-cancelled run leaves them, and autosave never sees an empty list mid-run); a
+        # station run never drops tool-optimizer designs (tool_values set)
+        prev_results, prev_points, prev_stamps = list(s.results), dict(s.result_points), dict(s.stamps)
+        new: set[str] = set()  # keys (ui.plan_ids) of this run's plans
         stamp = stamp_for(s, "plan")  # the setup this run plans for (out-of-date tracking)
+
+        def drop_plans() -> None:
+            """Remove the station plans (not the tool designs) with their joint solutions."""
+            for r in s.results:
+                if r.tool_values is None:
+                    s.result_points.pop(key(r), None)
+                    s.stamps.pop(key(r), None)
+            s.results = [r for r in s.results if r.tool_values is not None]
+
+        def restore() -> None:
+            """A failed run: the previous station plans again (tool designs as they are now)."""
+            if not new:
+                return  # nothing was touched
+            drop_plans()
+            old = [r for r in prev_results if r.tool_values is None]
+            for r in old:
+                if key(r) in prev_points:
+                    s.result_points[key(r)] = prev_points[key(r)]
+                if key(r) in prev_stamps:
+                    s.stamps[key(r)] = prev_stamps[key(r)]
+            s.results = sorted([*s.results, *old], key=lambda x: (bool(x.violations), x.cost))
+            new.clear()
+            self.on_solution()
 
         def streamed(sol, res) -> None:
             if quick and not sol.label.startswith("Quick: "):
                 sol.label = f"Quick: {sol.label}"  # in place: the planner's list has the same object
             sol.planner = sol.planner or ("quick" if quick else "cost")
             sol.unfit = list(skip)  # v10 T12: left out of this plan
+            if not new:
+                drop_plans()  # the first plan of this run replaces the earlier station plans
             # a refined plan replaces the quick plan with the same number of stations
             for old in [
                 r for r in s.results if len(r.stations) == len(sol.stations) and r.tool_values is None
@@ -286,6 +321,7 @@ class StationsPanel:
             s.stamps[k] = stamp
             s.result_points[k] = res
             s.results = sorted([*keep, sol], key=lambda x: (bool(x.violations), x.cost))
+            new.add(k)
             self.on_solution()
 
         def say(msg: str, f: float) -> None:
@@ -302,17 +338,23 @@ class StationsPanel:
                 s.max_manip = float(data)
             elif kind == "warn":
                 log(f"{what}: {data}.", "warn")
-            elif kind == "replace":  # v8 T11 / T12: the front / robust plans replace the list
-                s.results, s.result_points = [], {}
+            elif kind == "replace":  # v8 T11 / T12: the front / robust plans replace the station plans
+                drop_plans()
+                plans = []
                 for sol, res in data:
-                    k = give_id(sol, s.results)
+                    k = give_id(sol, [*s.results, *plans])
                     s.stamps[k] = stamp
                     s.result_points[k] = res
-                    s.results.append(sol)
+                    plans.append(sol)
+                    new.add(k)
+                s.results = [*plans, *s.results]  # the tool designs after the front
                 self.on_solution()
 
+        def kept() -> str:
+            return f"{len(new)} plan(s) from this run kept" if new else "previous results kept"
+
         from ui import jobs
-        from ui.plan_job import payload_for
+        from ui.plan_job import failure_text, payload_for
 
         in_process = block or not jobs.USE_WORKER
         payload = payload_for(s, spec, live=in_process)
@@ -323,14 +365,14 @@ class StationsPanel:
                 rules_status = out["rules_status"]
                 best = out["best"]
                 if best is not None:  # the worker's copy: use the streamed object of that label
-                    best = next(
-                        (r for r in s.results if r.label in (best.label, f"Quick: {best.label}")), best
-                    )
+                    names = (best.label, f"Quick: {best.label}")
+                    best = next((r for r in s.results if key(r) in new and r.label in names), best)
                 for r in s.results:  # the run time, for the Results summary card
-                    if r.run_s is None and r.tool_values is None:
+                    if key(r) in new and r.run_s is None and r.tool_values is None:
                         r.run_s = round(time.monotonic() - self._t0, 1)
+                none = "_No solution found._" if new else "_No solution found; previous results kept._"
                 if rules:
-                    status.content = rules_status
+                    status.content = rules_status if new else f"{rules_status}  \n{none}"
                     for line in best.violations if best is not None else []:
                         log(f"Rules-only plan: {line}.", "warn")
                 elif quick:
@@ -338,7 +380,7 @@ class StationsPanel:
                         f"Best: **{best.label}**, cost {best.cost:.2f}: _not optimized; run **Plan "
                         "stations** to optimize._"
                         if best
-                        else "_No solution found._"
+                        else none
                     )
                 else:
                     status.content = (
@@ -346,7 +388,7 @@ class StationsPanel:
                         "Next: **Results → Paths & simulation → Build paths**, or *Results → Inspect result* "
                         "to step through the points."
                         if best
-                        else "_No solution found._"
+                        else none
                     )
                 plan_log(s, best, self._cancel.is_set(), self._t0, what=what)
                 if self.on_done is not None and not (quick or rules or self._cancel.is_set()):
@@ -355,18 +397,17 @@ class StationsPanel:
                     status.content = "**Cancelled.** " + (
                         f"Best so far: **{best.label}**, cost {best.cost:.2f}"
                         if best
-                        else "_No plan finished._"
+                        else f"_No plan finished; {kept()}._"
                     )
-            except CancelledError:  # Cancel while the reachability map was being built
-                status.content = "**Cancelled** (while building the reachability map)."
-                log(f"{what} cancelled (while building the reachability map).", "warn")
+            except CancelledError:  # Cancel inside the job (map build, Pareto / robust step, worker)
+                status.content = f"**Cancelled**; {kept()}."
+                log(f"{what} cancelled; {kept()}.", "warn", self._t0)
             except jobs.JobCancelledError as err:  # the worker was ended after Cancel
-                status.content = f"**Cancelled** ({err}); {len(s.results)} plan(s) kept."
-                log(f"{what} cancelled: {err}.", "warn", self._t0)
+                status.content = f"**Cancelled** ({err}); {kept()}."
+                log(f"{what} cancelled: {err}; {kept()}.", "warn", self._t0)
             except Exception as err:  # report in the GUI instead of dying silently in a thread
-                status.content = f"⚠ planning failed: {err}"
-                log(f"{what} failed: {err}", "error")
-                raise
+                restore()  # the user's choice: a failed run keeps the previous list
+                status.content = f"⚠ planning failed: {failure_text(what, err)}; previous results kept."
             finally:
                 run.visible, stop.visible, progress.visible = True, False, False
 

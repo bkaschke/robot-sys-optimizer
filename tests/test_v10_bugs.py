@@ -1,5 +1,6 @@
 """V10 part A (docs/V10_PLAN.md tasks 1-6): bugs found in the v9 review."""
 
+import time
 from types import SimpleNamespace
 
 import numpy as np
@@ -303,7 +304,13 @@ def test_collision_changes_flag_plans(app):
     sc2 = app["cell"].jog_panel.coll.scene()
     assert sc2 is not sc and np.allclose(sc2.shape(sc2.part_id).bounds, before * 1.5)
     gid = sc2.part_id
-    assert gid in view._handles and view._drawn[gid] == id(sc2.shape(gid))
+    # the checkbox's own redraw runs late on viser's thread pool (CLAUDE.md): when check() comes while
+    # it runs, ui.widgets.Latest hands the new redraw to that thread and returns at once (seen on a
+    # loaded CI runner), so wait until the overlay shows this scene's mesh
+    deadline = time.monotonic() + 10
+    while not (gid in view._handles and view._drawn.get(gid) == id(sc2.shape(gid))):
+        assert time.monotonic() < deadline, "the overlay never showed the new part collision mesh"
+        time.sleep(0.05)
     view.show["Part"].value = False
 
 

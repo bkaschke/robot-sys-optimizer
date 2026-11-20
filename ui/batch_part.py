@@ -105,8 +105,8 @@ def row_for(name: str, s, sol, cycle: float | None) -> dict:
 
 def run_part(job: dict, emit=None, cancelled=lambda: False) -> dict:
     """``job``: name, project_dir, pkg_dir, out_dir, frame_search (bool), check_workers (int),
-    port (first viser port to try). Returns the summary row; ``status`` is "done" or "failed"
-    with ``reason`` (a failure never raises)."""
+    port (first viser port to try), quick (bool: the quick station plan). Returns the summary row;
+    ``status`` is "done" or "failed" with ``reason`` (a failure never raises)."""
     os.environ.setdefault("RSO_TEXTURE_PX", "64")  # nobody looks at the robot here
     name = job["name"]
     out = Path(job["out_dir"]) / pp.safe(name)
@@ -145,7 +145,7 @@ def run_part(job: dict, emit=None, cancelled=lambda: False) -> dict:
                 raise ValueError("the axis frame search found no frame")
         else:
             _stage(emit, name, "planning")
-            app["stations"].start(block=True)
+            app["stations"].start(block=True, quick=bool(job.get("quick")))
         if cancelled():
             raise InterruptedError("cancelled")
         results = app["results"]

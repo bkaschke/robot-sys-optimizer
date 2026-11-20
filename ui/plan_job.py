@@ -10,13 +10,35 @@ Returns {"best": Solution | None, "rules_status": str | None}.
 from __future__ import annotations
 
 import hashlib
+import logging
 from pathlib import Path
 
 import numpy as np
 
 from core import schema
+from ui.plan_assets import _asset_stamp
 
 _CACHE: dict = {}  # worker: snapshot hash -> Session
+_LOG = logging.getLogger(__name__)
+
+
+def failure_text(what: str, err: BaseException) -> str:
+    """Review L6: the one-line summary of a job error for a status line. The full text (the
+    worker's traceback, else this process's) goes to the log panel and to ``logging``."""
+    import traceback
+
+    from ui.log_panel import log
+
+    lines = str(err).splitlines()
+    summary = getattr(err, "summary", None) or (lines[0] if lines else type(err).__name__)
+    tb = getattr(err, "worker_traceback", "") or "".join(
+        traceback.format_exception(type(err), err, err.__traceback__)
+    )
+    log(f"{what} failed: {summary}", "error")
+    if tb:
+        log(f"{what}: details\n{tb}", "info")
+    _LOG.error("%s failed: %s\n%s", what, summary, tb)
+    return summary
 
 
 def payload_for(s, spec: dict, live: bool) -> dict:
@@ -43,6 +65,7 @@ def session_from(payload: dict):
         (payload["project"] + payload["project_dir"]).encode()
         + payload["T_base"].tobytes()
         + (b"" if payload["T_part"] is None else payload["T_part"].tobytes())
+        + _asset_stamp(payload["project"], payload["project_dir"])
     ).hexdigest()
     s = _CACHE.get(key)
     if s is None:
@@ -56,6 +79,29 @@ def session_from(payload: dict):
     return s
 
 
+def project_margins(s):
+    """Review R13: the project's ``optimizer.margins`` (defaults for a project without them)."""
+    from core.schema import Optimizer
+
+    return (s.extra.get("optimizer") or Optimizer()).margins
+
+
+def checker_config(s):
+    """(collision Margins, CheckSettings) of every user-facing check, from ``optimizer.margins``."""
+    from core.collision import Margins
+    from core.feasibility import CheckSettings
+
+    m = project_margins(s)
+    return Margins(clearance=m.clearance_m), CheckSettings(
+        joint_margin_deg=m.joint_deg, clearance=m.clearance_m
+    )
+
+
+def margins_label(m) -> str:
+    """The margins for a plan's provenance text, e.g. ``25 mm / 8 deg``."""
+    return f"{m.clearance_m * 1000:g} mm / {m.joint_deg:g} deg"
+
+
 def build_checker(s, robot, sites, workers: int, say, emit):
     """The exact checker of the planners (part, carrier bodies, stay-out zones), with a check
     pool (v8 T2) when ``workers`` > 1 (kept for the next job with the same setup)."""
@@ -67,25 +113,67 @@ def build_checker(s, robot, sites, workers: int, say, emit):
     T_base0, T_part = s.T_world_base.copy(), s.part.T_world_part.copy()
     bb, wb = sites.scene_bodies() if sites is not None else ([], [])
     obstacles = s.obstacle_entries()  # stay-out zones
+    margins, settings = checker_config(s)  # review R13: optimizer.margins of the project
     scene = CollisionScene(
-        robot, s.tool_model, mesh, T_base0, T_part, base_bodies=bb, world_bodies=wb, obstacles=obstacles
+        robot,
+        s.tool_model,
+        mesh,
+        T_base0,
+        T_part,
+        margins,
+        base_bodies=bb,
+        world_bodies=wb,
+        obstacles=obstacles,
     )
-    checker = FeasibilityChecker(robot, make_ik(robot), s.tool_model, scene, T_base0, T_part)
+    checker = FeasibilityChecker(robot, make_ik(robot), s.tool_model, scene, T_base0, T_part, settings)
+    from core.collision_mesh import deviation_warning
+
+    warning = deviation_warning(scene.geometry_report(), margins.clearance)
+    if warning:  # simplified collision copies can deviate more than the clearance
+        emit("warn", warning)
     if workers > 1:
         from opt.parallel import CheckerSpec, pool_for
 
         say(f"starting {workers} check workers", 0.0)
+        from opt import parallel
+
+        # pool failures (fallback to serial checks) reach the user; reset when the job ends
+        parallel.on_warn = lambda m: emit("warn", m.splitlines()[0] if m else m)
         try:
             cs = CheckerSpec(robot.spec, s.tool_model, mesh, T_base0, T_part, bb, wb, obstacles)
             cs.collision = scene.config  # v12 #10: the collision settings, one value
+            cs.margins, cs.settings = margins, settings  # review R13 (read by CheckerSpec.build)
             checker.pool = pool_for(cs, workers)
         except Exception as err:  # e.g. a setup object that doesn't pickle: run serially
             emit("warn", f"parallel checks off for this run ({type(err).__name__}: {err})")
     return checker
 
 
+def _end_job() -> None:
+    from opt import parallel
+
+    parallel.on_warn = None  # a later job must not call this job's emit
+
+
 def station_job(payload: dict, emit, cancelled) -> dict:
     """Plan stations (normal, quick or rules only, from ``spec``)."""
+    try:
+        return _station_job(payload, emit, cancelled)
+    finally:
+        _end_job()
+
+
+def _cancelled_step(plans: list, step: str, breakdowns: list | None = None) -> list:
+    """Review R7: the plain plans after a cancelled Pareto / robust step keep their labels and
+    planner, say so in the label, and lose any partial robust score."""
+    for i, (sol, _res) in enumerate(plans):
+        sol.label = f"{sol.label} (cancelled before the {step} step)"
+        if breakdowns is not None:
+            sol.breakdown = breakdowns[i]
+    return plans
+
+
+def _station_job(payload: dict, emit, cancelled) -> dict:
     from core.feasibility import CancelledError
     from core.robot import Robot
     from core.schema import length_ref
@@ -117,8 +205,10 @@ def station_job(payload: dict, emit, cancelled) -> dict:
         {
             "refinement": getattr(settings, "refine_method", "cmaes") if settings.refine else "none",
             "objective": spec.get("objective") or ("rules" if spec.get("rules") else "weighted"),
+            "margins": margins_label(project_margins(s)),  # review R13
         },
         settings,
+        project_margins(s),
         spec["weights"],
         spec.get("rules"),
         spec.get("pareto_keys"),
@@ -192,11 +282,12 @@ def station_job(payload: dict, emit, cancelled) -> dict:
                 cancelled,
             )
         except CancelledError:
-            plans = out
-        n = len(plans)
-        for i, (sol, _res) in enumerate(plans):
-            sol.label = f"Pareto {i + 1}/{n}: {sol.label}"
-            sol.planner = "pareto"
+            plans = _cancelled_step(out, "Pareto")
+        else:
+            n = len(plans)
+            for i, (sol, _res) in enumerate(plans):
+                sol.label = f"Pareto {i + 1}/{n}: {sol.label}"
+                sol.planner = "pareto"
         for sol, _res in plans:
             sol.provenance = dict(prov)
         emit("replace", plans)
@@ -206,6 +297,7 @@ def station_job(payload: dict, emit, cancelled) -> dict:
 
         finish, used_sites = fin[0]
         r = spec.get("robust") or {}
+        breakdowns = [dict(sol.breakdown) for sol, _res in out]  # station_robust adds "robust"
         try:
             plans = station_robust(
                 finish,
@@ -222,10 +314,12 @@ def station_job(payload: dict, emit, cancelled) -> dict:
                 cancelled,
             )
         except CancelledError:
-            plans = out
+            plans = _cancelled_step(out, "robust", breakdowns)
+        else:
+            for sol, _res in plans:
+                sol.label = f"Robust: {sol.label}"
+                sol.planner = "robust"
         for sol, _res in plans:
-            sol.label = f"Robust: {sol.label}"
-            sol.planner = "robust"
             sol.provenance = dict(prov)
         emit("replace", plans)
         return {"best": plans[0][0] if plans else None, "rules_status": None}
@@ -250,6 +344,7 @@ def tool_job(payload: dict, emit, cancelled):
         x = ee.extension.model_copy(update={"radius": float(spec["tube_od_mm"]) / 2000})
         ee = ee.model_copy(update={"extension": x})
     sites = s.sites()
+    margins, check = checker_config(s)  # review R13: optimizer.margins of the project
     r = optimize_tool(
         Robot(s.robot.spec),
         ee,
@@ -266,14 +361,23 @@ def tool_job(payload: dict, emit, cancelled):
         cancelled=cancelled,
         sites=sites,
         obstacles=s.obstacle_entries(),  # stay-out zones
+        margins=margins,
+        settings=check,
     )
     from core.provenance import stamp
 
     st = spec["st"]
     prov = stamp(
-        {"shape": st.shape_method, "start": st.start, "loop": st.loop, "objective": st.objective},
+        {
+            "shape": st.shape_method,
+            "start": st.start,
+            "loop": st.loop,
+            "objective": st.objective,
+            "margins": margins_label(project_margins(s)),  # review R13
+        },
         st,
         spec["weights"],
+        project_margins(s),
     )
     for d in r.designs:  # v8 T21
         d.solution.provenance = dict(prov)
@@ -312,6 +416,13 @@ def family_parts(dirs: list[str]) -> list:
 def tolerance_job(payload: dict, emit, cancelled):
     """v8 T5: Monte Carlo tolerance check of a plan (``spec``: sol, results, settings, workers).
     Returns opt.tolerance.ToleranceResult."""
+    try:
+        return _tolerance_job(payload, emit, cancelled)
+    finally:
+        _end_job()
+
+
+def _tolerance_job(payload: dict, emit, cancelled):
     from core.export import station_pose
     from core.robot import Robot
     from opt.tolerance import tolerance_check

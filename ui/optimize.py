@@ -13,11 +13,12 @@ from collections.abc import Callable
 import numpy as np
 import viser
 
-from core.collision import CollisionScene, Margins
-from core.feasibility import CheckSettings, FeasibilityChecker
+from core.collision import CollisionScene
+from core.feasibility import FeasibilityChecker
 from core.ik import make_ik
 from core.robot import Robot
 from ui.log_panel import log, unreached_report
+from ui.plan_job import checker_config
 from ui.session import Session
 from ui.session_lock import LOCK
 from ui.staleness import stamp_for
@@ -44,8 +45,21 @@ class OptimizeTab:
         gui = server.gui
         self.folder = gui.add_folder("Feasibility check")
         with self.folder:
-            self.clearance = gui.add_number("Clearance (mm)", 10.0, min=0.0, step=1.0)
-            self.joint_margin = gui.add_number("Joint-limit margin (deg)", 5.0, min=0.0, step=1.0)
+            m = self._optimizer().margins  # review R13: the project's margins are the one source
+            self.clearance = gui.add_number(
+                "Clearance (mm)",
+                m.clearance_m * 1000,
+                min=0.0,
+                step=1.0,
+                hint="saved with the project; used by the check, the planners and Compare",
+            )
+            self.joint_margin = gui.add_number(
+                "Joint-limit margin (deg)",
+                m.joint_deg,
+                min=0.0,
+                step=1.0,
+                hint="saved with the project; used by the check, the planners and Compare",
+            )
             self.check_from = gui.add_dropdown(
                 "Check from", CHECK_FROM, hint="each point from its stop in the selected plan, or from here"
             )
@@ -55,6 +69,8 @@ class OptimizeTab:
             self.progress = gui.add_progress_bar(0.0, visible=False)
             self.summary = gui.add_markdown("_Not run yet._")
 
+        self.clearance.on_update(lambda e: self._store_margins())
+        self.joint_margin.on_update(lambda e: self._store_margins())
         self.run.on_click(lambda e: self.start(e))
         self.stop.on_click(lambda e: self._cancel.set())
         # set by app.py: () -> (Solution | None, {point id: PointResult}) of the Results selection
@@ -63,6 +79,29 @@ class OptimizeTab:
         self.go_station: Callable[[object, int], None] | None = None  # (solution, station index)
         self.station_of: dict[int, int] = {}  # plan check: point id -> stop it was checked from
         self.checked_plan = None  # the solution whose stops the last check used
+
+    def _optimizer(self):
+        from core.schema import Optimizer
+
+        return self.s.extra.get("optimizer") or Optimizer()
+
+    def _store_margins(self) -> None:
+        """The fields edit ``optimizer.margins`` (saved with the project, read by every checker)."""
+        opt = self._optimizer()
+        m = opt.margins.model_copy(
+            update={
+                "clearance_m": float(self.clearance.value) / 1000,
+                "joint_deg": float(self.joint_margin.value),
+            }
+        )
+        if m != opt.margins:
+            self.s.extra["optimizer"] = opt.model_copy(update={"margins": m})
+
+    def load_margins(self) -> None:
+        """Show the loaded project's margins (app.py calls this after a project is opened)."""
+        m = self._optimizer().margins
+        self.clearance.value = m.clearance_m * 1000
+        self.joint_margin.value = m.joint_deg
 
     def build_inspect(self) -> None:
         """The *Inspect result* folder; app.py builds it in the Results tab (v7 round 2, T18)."""
@@ -115,9 +154,7 @@ class OptimizeTab:
         if s.robot is None:
             raise ValueError("choose a robot first (tab 1 Robot & cell)")
         robot = Robot(s.robot.spec)  # private Pinocchio data for this thread
-        settings = CheckSettings(
-            joint_margin_deg=self.joint_margin.value, clearance=self.clearance.value / 1000
-        )
+        margins, settings = checker_config(s)
         sites = s.sites()  # carrier bodies collide with the arm and tool too
         bb, wb = sites.scene_bodies() if sites is not None else ([], [])
         scene = CollisionScene(
@@ -126,11 +163,16 @@ class OptimizeTab:
             s.part_mesh(),
             s.T_world_base,
             s.part.T_world_part,
-            Margins(clearance=settings.clearance),
+            margins,
             base_bodies=bb,
             world_bodies=wb,
             obstacles=s.obstacle_entries(),  # stay-out zones
         )
+        from core.collision_mesh import deviation_warning
+
+        warning = deviation_warning(scene.geometry_report(), margins.clearance)
+        if warning:  # simplified collision copies can deviate more than the clearance
+            log(warning, "warn")
         return FeasibilityChecker(
             robot, make_ik(robot), s.tool_model, scene, s.T_world_base, s.part.T_world_part, settings
         )

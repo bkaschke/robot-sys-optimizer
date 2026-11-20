@@ -111,14 +111,20 @@ def tool_choices(s) -> dict[str, object]:
 
 
 def compare_job(payload: dict, emit, cancelled) -> list[dict]:
-    """``spec``: setups (``setups``), settings (PlannerSettings), weights, workers."""
+    """``spec``: setups (``setups``), settings (PlannerSettings), weights, workers. Each finished
+    row is also sent as a ``row`` message, so a cancel keeps the rows done so far (review R4)."""
     from core import schema
-    from ui.plan_job import station_job
+    from ui import plan_job
     from ui.session import Session
 
     spec = payload["spec"]
     rows = []
     todo = spec["setups"]
+
+    def add(row: dict) -> None:
+        rows.append(row)
+        emit("row", row)
+
     for n, su in enumerate(todo):
         name = su["robot"]
         if cancelled():
@@ -149,7 +155,7 @@ def compare_job(payload: dict, emit, cancelled) -> list[dict]:
 
             base, note = place(s, su["axis"], _rmap(s, cancelled), cancelled)
             if note.startswith("not placed"):  # v11 #12: no usable frame for this part
-                rows.append({**tag, "axis": su.get("axis_name", ""), "label": f"no plan ({note})"})
+                add({**tag, "axis": su.get("axis_name", ""), "label": f"no plan ({note})"})
                 continue
             s.base = base
             if base.mode != "movable":
@@ -165,41 +171,47 @@ def compare_job(payload: dict, emit, cancelled) -> list[dict]:
             "workers": spec["workers"],
         }
 
-        def collect(kind, data, _sols=sols) -> None:
+        def collect(kind, data, _sols=sols, _name=name) -> None:
             if kind == "solution":
                 _sols[data[0].label] = data
             elif kind == "max_manip":
                 _sols["__max_manip"] = float(data)
+            elif kind == "warn":  # e.g. the check pool fell back to serial checks
+                emit("warn", f"{_name}: {data}")
 
-        out = station_job({"session": s, "spec": sub}, collect, cancelled)
+        out = plan_job.station_job({"session": s, "spec": sub}, collect, cancelled)
         best = out["best"]
+        stopped = bool(cancelled())  # the plan returned its best so far after Cancel
         if best is None:
-            rows.append({**tag, "label": "no plan"})
-            continue
-        _, res = sols.get(best.label, (best, {}))
-        m = _metrics(best, res, time.monotonic() - t0)
-        from core.report_svg import stops_text
+            add({**tag, "label": "no plan", "stopped": stopped})
+        else:
+            _, res = sols.get(best.label, (best, {}))
+            m = _metrics(best, res, time.monotonic() - t0)
+            from core.report_svg import stops_text
 
-        m["stops_xy"] = stops_text(best.stations)  # v10 T22: the report's picture of this setup
-        top = sols.get("__max_manip")
-        m["manip_pct"] = 100 * m["manip"] / top if m["manip"] is not None and top else None
-        from ui.staleness import stamp_for
+            m["stops_xy"] = stops_text(best.stations)  # v10 T22: the report's picture of this setup
+            top = sols.get("__max_manip")
+            m["manip_pct"] = 100 * m["manip"] / top if m["manip"] is not None and top else None
+            from ui.staleness import stamp_for
 
-        plans = sorted(
-            (v for k, v in sols.items() if k != "__max_manip"),
-            key=lambda sr: (bool(sr[0].violations), sr[0].cost),
-        )
-        give_ids([sol for sol, _ in plans])  # v12 #8
-        stamp = stamp_for(s, "plan")  # this robot's setup: its plans are up to date when viewed with it
-        rows.append(
-            {
-                **tag,
-                **m,
-                "plans": plans,
-                "stamps": {key(sol): dict(stamp) for sol, _ in plans},
-                "ee": su.get("tool"),
-            }
-        )
+            plans = sorted(
+                (v for k, v in sols.items() if k != "__max_manip"),
+                key=lambda sr: (bool(sr[0].violations), sr[0].cost),
+            )
+            give_ids([sol for sol, _ in plans])  # v12 #8
+            stamp = stamp_for(s, "plan")  # this robot's setup: its plans are up to date when viewed with it
+            add(
+                {
+                    **tag,
+                    **m,
+                    "plans": plans,
+                    "stamps": {key(sol): dict(stamp) for sol, _ in plans},
+                    "ee": su.get("tool"),
+                    "stopped": stopped,
+                }
+            )
+        if stopped:
+            raise CancelledError()
     return rows
 
 
@@ -252,8 +264,12 @@ def table(rows: list[dict], n_points: int) -> str:
     def f(v, fmt):
         return "—" if v is None else format(v, fmt)
 
+    def name(r):
+        label = r.get("setup", r["robot"])
+        return f"{label} (stopped early)" if r.get("stopped") else label
+
     lines = [
-        f"| {r.get('setup', r['robot'])}{' (project)' if r.get('project') else ''} | "
+        f"| {name(r)}{' (project)' if r.get('project') else ''} | "
         f"{f(r.get('stations'), 'd')} | {f(r.get('reached'), 'd')}/{n_points} | "
         f"{f(r.get('cycle_s'), '.0f')} | {f(r.get('clear_mm'), '.0f')} | {f(r.get('manip_pct'), '.0f')} | "
         f"{f(r.get('cost'), '.2f')}{' ✗' if r.get('violations') else ''} | {f(r.get('run_s'), '.0f')} |"
@@ -364,26 +380,14 @@ class ComparePanel:
             )
         if s.tool_model is None or s.part is None or not s.targets.points:
             return notify(event, "Cannot compare", "Need a tool, a part and targets")
-        from opt.placement import PlannerSettings
         from ui import jobs
-        from ui.plan_job import payload_for
+        from ui.plan_job import failure_text, payload_for
 
         st = self.stations
-        o = st.options()
-        settings = PlannerSettings(
-            max_stations=1 if s.sites() is None else int(st.max_stations.value),
-            candidate_step=st.step.value / 1000,
-            refine=st.refine.key != "none",
-            refine_method=st.refine.key,
-            zoning=o["zoning"],
-            areas=o["areas"],
-            require_all=o["require_all"],
-            require_one_config=o["require_one_config"],
-            cycle=getattr(s, "cycle", None),
-        )
+        todo = setups(robots, tools, s.robot_name, s.tool.name, axes)
         spec = {
-            "setups": setups(robots, tools, s.robot_name, s.tool.name, axes),
-            "settings": settings,
+            "setups": todo,
+            "settings": st.planner_settings(),  # review R12: exactly the station planner's settings
             "weights": st.costs.commit(),
             "workers": jobs.CHECK_WORKERS,
         }
@@ -393,31 +397,46 @@ class ComparePanel:
         self.run.visible, self.stop.visible, self.progress.visible = False, True, True
         t0 = time.monotonic()
         n = len(s.targets.points)
+        done: list[dict] = []  # rows finished so far (kept on cancel)
 
         def on_msg(kind: str, data) -> None:
             if kind == "progress":
                 self.status.content = f"_{data[0]}_"
                 self.progress.value = 100.0 * data[1]
+            elif kind == "row":
+                done.append(data)
+            elif kind == "warn":
+                log(f"Setup comparison: {data}.", "warn")
+
+        def show(rows: list[dict]) -> None:
+            with LOCK:  # v12 #9
+                self.rows = keep_plans(s, rows)  # v9 #6: each robot's plans, viewable in Results
+            if self.on_done is not None:
+                self.on_done()
+            names = tuple(r["setup"] for r in self.rows if r.get("stations") and not r.get("project"))
+            self.choice.options = names or ("—",)
+            self.choice.visible = self.use.visible = bool(names)
+
+        def finished() -> str:
+            return f"{len(done)} of {len(todo)} setup(s) finished"
 
         def work() -> None:
             try:
                 rows = jobs.call("ui.compare:compare_job", payload, on_msg, self._cancel.is_set, in_process)
-                with LOCK:  # v12 #9
-                    self.rows = keep_plans(s, rows)  # v9 #6: each robot's plans, viewable in Results
-                if self.on_done is not None:
-                    self.on_done()
+                show(rows)
                 self.status.content = table(self.rows, n)
-                names = tuple(r["setup"] for r in self.rows if r.get("stations") and not r.get("project"))
-                self.choice.options = names or ("—",)
-                self.choice.visible = self.use.visible = bool(names)
                 log(f"Setup comparison finished ({', '.join(r['setup'] for r in self.rows)}).", "done", t0)
-            except (CancelledError, jobs.JobCancelledError):
-                self.status.content = "**Cancelled.**"
-                log("Setup comparison cancelled.", "warn", t0)
+            except (CancelledError, jobs.JobCancelledError):  # any cancel: keep the finished rows
+                show(done)
+                self.status.content = f"**Cancelled** ({finished()})." + (
+                    f"\n\n{table(self.rows, n)}" if done else ""
+                )
+                log(f"Setup comparison cancelled ({finished()}).", "warn", t0)
             except Exception as err:
-                self.status.content = f"⚠ comparison failed: {err}"
-                log(f"Robot comparison failed: {err}", "error")
-                raise
+                show(done)
+                self.status.content = f"⚠ comparison failed: {failure_text('Setup comparison', err)}" + (
+                    f" ({finished()})\n\n{table(done, n)}" if done else ""
+                )
             finally:
                 self.run.visible, self.stop.visible, self.progress.visible = True, False, False
 

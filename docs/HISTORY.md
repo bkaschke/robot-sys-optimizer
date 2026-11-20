@@ -437,3 +437,155 @@ Launch with `scripts/run_app.bat` (Windows, uses the rso env) or `$PY app.py [--
   opening a part's project replaces the project. `scripts/batch_run.py` is the same code without
   the GUI; `scripts/make_batch_example.py` writes `examples/batch_parts/`.
 
+## One batch system (branch `feature/batch-merge`, 2026-11-19)
+
+v13's *Several parts (batch)* and our *Batch queue* were merged at the user's request ("combine the
+best parts"), with the trade-offs the user accepted: every job uses the cell's settings, and a
+cancelled job runs again from the start.
+
+- **Front: our queue** (`batch.json`, `core.batch`): statuses, remove / reorder / reset, resume,
+  needs_review with *Open for review*, review page, setup warnings, time left. New job source
+  `"package"` (`BatchJob.source` / `package`, manifest version 3): *Add folder* queues the part
+  packages of a folder (copied to `<batch>/packages/<job id>/`) beside part files (tool-surface
+  rule). `BatchManifest.frame_search` replaces the v13 checkbox state; `pdf` is unused.
+- **Engine: v13's runner.** `ui.batch_job.drive` makes a part package per pending job
+  (`ui.batch_materialize.make_package`: detection, target generation, pictures; the old study
+  folder per job is gone), then calls `ui.batch_run.run_batch` on `<batch>/_setup` (the open project,
+  written at Run when the batch belongs to it, `ui.batch_ui.write_setup`). Results land in
+  `<batch>/results` (v13 layout: `summary.json` for Results -> Batch results). Two small hooks in
+  v13's files: a part entry may carry extras (`{"quick": True}` -> `StationsPanel.start(quick=True)`
+  in `run_part`), and `on_row(row)` as each part ends (reading `summary.json` from the progress
+  thread failed with access denied while the runner replaced it).
+- **Removed:** `ui/batch_planner.py` (the per-job planner snapshot: the runner plans with the
+  project's saved panel settings), `run_job` / `batch_one` / the partial status on cancel, *Open
+  result* (Batch results opens a part), the per-job CSV / userframes exports (the saved project has
+  them one click away), the *Batch queue* entry of the Optimizer dropdown (app state `batch_queue`).
+- **Panel:** `ui/batch_ui.py` (batch folder, run, review page) + `ui/batch_queue_ui.QueueEdits`
+  (add / edit). CLI: `scripts/batch_run.py <batch folder>` runs a queue (`ui.batch_job.main`).
+- Tests: `tests/test_batch_job.py` fakes `run_batch` (`fake` fixture: package, status on disk and
+  extras per part); the slow `test_real_batch_of_a_mesh_job_and_a_package` and
+  `test_v13_batch_ui.test_run_from_the_panel` run the real runner.
+- **CI on GitHub (first runs, on the user's fork):** `tests` passed (Windows 1033, Ubuntu 1032; 18 min,
+  of which 4.7 min building the conda env and 12.8 min tests one batch after another). `release` took
+  38 min and failed in `packaging/ci_serve_check.ps1`: headless Edge (`--virtual-time-budget`, no
+  wall-clock cap) never exited behind the firewall rule, while locally it exits in 5 s. The script now
+  adds `--timeout` (2 x the budget), judges a page Edge wrote even if Edge has to be ended, and prints
+  `edge-err.txt` on failure. Speed: 22 of the 38 min were the 10 reachability maps built one at a time
+  (crx30ia 5.6 min; tag runs cannot read caches saved by branch runs), so `build_exe.py --map-jobs N`
+  builds them in worker processes (CI: 4); the conda env is cached on `environment.yml` (`ENV_CACHE`
+  bumps it); `test_batches.py --jobs N` runs batches at once with a pytest temp folder each (CI: 3, the
+  runners have 4 cores / 16 GB; a PC short of memory keeps 1); `tests.yml` runs on branch pushes only;
+  the release timeout is 45 min; actions moved to their Node 24 majors (checkout 7, setup-python 7,
+  cache 6, upload-artifact 7, download-artifact 8, setup-miniconda 4, which also drops the spurious
+  "EnvironmentNameNotFound: rso" line), `conda-remove-defaults` silences the defaults-channel warning.
+  The GitLab twin runs the same commands (`tests/test_gitlab_ci.py`). Build warnings judged harmless:
+  PyInstaller's missing hidden imports `scipy.special._cdflib`, `pysqlite2`, `MySQLdb` (hooks for
+  modules this env does not have), conda virtual package `__win`, SyntaxWarnings in the `future`
+  package's backports, and the selftest's `external URL markers: [b'http://']` (the report's SVG
+  namespace, not a link).
+
+## Our line rebased onto v13 (branch `rebase/v13`, 2026-11-18)
+
+The work of `fix/v8-review`, `feature/v8-batch-render-exe` and `feature/v9-usability` (51 commits on
+top of v8, sections below) was replayed onto `v13`. Where v9-v13 had rewritten the same code the
+change was ported, not merged as text:
+
+- **Collision settings:** the R11 deviation report and every caller use `CollisionConfig`
+  (`core.collision_config.low_info` / `part_low_info` / `exact_info` / `geom_fingerprint`). Our
+  `core/collision_report.py` was dropped (v12's `core/collision_hits.py` is the same split). The
+  batch queue stores the config in `batch.json` (`ui.batch_planner.collision_dict` /
+  `collision_from`, every field) and `ui.batch_job` puts it in place for the job
+  (`collision_config.use`), restoring the process's own afterwards.
+- **Plan ids:** the "keep previous results until the first new plan" bookkeeping
+  (`ui.stations`), the tolerance stamp (`ToleranceResult.plan_stamp`, looked up by key in
+  `ui.part_heatmap.tolerance_for`), `ui.report_make` and the batch runner key plans by
+  `ui.plan_ids.key`.
+- **Check pool:** v10's reusable workers (`_target` per spec file) keep the review M3 behaviour:
+  a build error is reported with its traceback (`_INIT_ERROR`), a broken pool is evicted
+  (spec + shared executor) and the run continues serially. `CheckerSpec.margins` / `settings`
+  ship the project margins (v13 still built pool checkers with default margins).
+- **Staleness:** v10's content fingerprints (`ui.fingerprint`) replace our `_file_sig`, with the
+  R2 settle rule ported (a file newer than 2 s is not cached: same size + mtime, new content).
+  New components `margins` (R13) and `collision_geom` (R11: simplified-copy modes; v13 hashed
+  only padding, kept faces and the part's own collision mesh); `migrate` fills `collision_geom`
+  for older stamps, and `changed` ignores keys a stamp lacks, so nothing is flagged on upgrade.
+- **Compare setups:** finished rows are streamed (`row`) and kept on Cancel; the settings are
+  `StationsPanel.planner_settings()`. The project's setup is planned first (v10 T17).
+- **Reports:** `ui.report_make` has v10-v12's sections (carrier motion, setup comparison, gantry
+  placement, tool fit) and takes `frame=`; the Export panel calls it. The handover zip adds the
+  robot program (v10 T21) when the plan's paths are built.
+- **Targets drawing:** v10's edge-gap and tool-fit markers (`draw_extras`) are drawn by
+  `ui.targets_draw.draw_points` (keys `edge_gaps*`, `unfit*`); the heatmap's edge mode paints
+  through our vertex-coloured GLB (`HeatmapLayer._paint`).
+- **Two batch systems:** v13's *Several parts (batch)* (part packages, `ui/batch_ui.py`) and our
+  queue (`ui/batch_queue_ui.py`, Optimizer -> **Batch queue**, app state `batch_queue`; meshes
+  queued with a selection or the tool-surface rule, review page, PDF per job). Which to keep is the
+  user's decision.
+- **Setup check** sits above the Optimizer dropdown (it applies to every optimizer).
+- **CI:** v12 moved lint to its own Linux job with the pinned ruff; the GitLab twin has the same
+  `lint` job (`tests/test_gitlab_ci.py` compares both jobs).
+- **scipy 1.14:** `core.transforms` (v12) passed read-only arrays to `Rotation.from_matrix`, which
+  that scipy refuses ("buffer source array is read-only"): it copies them now.
+- `app.py` is 546 lines (v13's own is 588): `tests/test_cleanups.py` only checks it does not grow.
+
+## v8 review fixes (2026-11, CODE_REVIEW_v8.md)
+
+- **Worker jobs (`ui/jobs.py`):** explicit pickling; a result or message that cannot be pickled becomes an error / `warn`, never a hang. A crashed worker reports the exit code and the likely cause. Cancel crosses the process as `core.feasibility.CancelledError`; any other job error is `WorkerError` with `.summary` (one line) and `.worker_traceback`. Status lines show the one-liner, the traceback goes to the log.
+- **Check pool (`opt/parallel.py`):** a broken pool is evicted and the run continues with serial checks plus a warning; pool-initializer errors are surfaced; `parallel.on_warn` is the UI hook for the message.
+- **Uploads (`core/safe_io.py`):** `replace_file` / `replace_dir` validate the new data first, then replace; a rejected upload keeps the old file; a replaced file gives a "replaced existing" notice. The part fingerprint includes the mesh content hash, so old plans show as out of date once after the upgrade.
+- **Reachability lookups** are memory-budgeted: `LOOKUP_ROWS` rows per block, at most `PAIR_BUDGET` (base, target) pairs per call (`opt/reachability.py`).
+- **Plan stations / Quick plan** keep the previous results until the first new plan arrives; a failed run restores them; a station run never drops tool-optimizer designs. Cancelled Pareto / robust steps keep their plain labels with "(cancelled before the ... step)". Compare keeps finished rows on cancel and uses the station planner's collision settings.
+- **Open project.json** loads into a new folder (`workspace/<stem>_<time>`), never over the current project; autosave and Save are blocked while loading.
+- **Jog:** if the collision scene cannot be built, steps are blocked unless "Allow collisions" is on, and the readout shows a warning.
+- **Collision geometry:** the deviation of a simplified mesh is measured and cached; a warning appears above half the clearance; the report lists collision geometry per body.
+- **Margins:** `optimizer.margins` in the project is the single source for clearance / joint margin (Optimize tab); all planners and checks read it, it is recorded in provenance, and changing it marks plans out of date.
+- **Reports / CSV:** `core/report.py` always has a "Not checked" section (payload / torque / dynamics, transit between stops, kinematic-only motion, sampled spin / tilt, collision geometry). The CSV starts with `#` comment rows (readers skip them); unmeasured clearance is an empty cell; "Export anyway" carries an OUT OF DATE banner; the UR notice only when `RobotSpec.mesh_license == "ur"`; PDF errors say whether the browser was missing or failed.
+- **Other:** Delete all points asks first and Undo restores them. Tool-optimizer costs include carrier travel and the standoff penalty (values differ from earlier versions). Numeric IK is deterministic. A CSV with a BOM keeps its first row. Contour mode supports multi-body carriages.
+
+## Batch queue (branch `feature/v8-batch-render-exe`)
+
+- **Manifest (`core/batch.py`, no viser):** `batch.json` = `BatchManifest(cell_project, jobs)`; `BatchJob` = part (relative to the batch folder, `mesh_sha1`), `units`, `pose`, `selection` (face ids) or `selection_rule="tool_surface"` (+ `min_confidence`, `confidence`), `gen: GenSettings`, `planner` (settings snapshot, `ui.batch_planner`), `status`, `error`, `summary`, `run_s`. Statuses: pending, running, done, failed, cancelled, partial, needs_review (`bt.NeedsReview`). `check_job` refuses a missing, changed (hash) or unreadable mesh with a one-line reason.
+- **Manifest on disk is the truth.** The GUI reloads before every edit; the runner writes one job at a time with `bt.update_job(path, job, fallback=)` so a panel edit and a run do not overwrite each other. `reset_interrupted` / `pending_jobs`: a job left `running` is pending again (resume); `done` jobs are skipped.
+- **Runner (`ui/batch_job.py`, no viser):** `run_job` = materialize (`ui/batch_materialize.materialize`: copy the cell, add the part, apply the rule, `generate_targets`, auto-confirm the setup steps) → `plan_job.station_job` → save project → `report_make.export_all` (csv, userframes, report.html, no PDF) into `<job>/export/`. Any error → `failed` + `error.txt`; `CancelledError` → `partial` / `cancelled`; `NeedsReview` → `needs_review`. `run_batch` runs **a fresh worker process per job** (private `ui.jobs.Runner`, killed after each job) unless `in_process`. CLI: `python -m ui.batch_job <dir> [--in-process]`. `summary.csv` / `summary.html` are rewritten from the manifest after the run (`bt.write_summary`).
+- **Lock:** `BatchPanel` sets `StationsPanel.blocked_reason` while a batch runs; plan buttons then notify "Cannot plan now". The panel also refuses to start while the Station planner runs.
+- **Reports without a browser:** `report_make.make_report(..., notes=[NO_VIEWS_BATCH])` when no pictures exist; the GUI's 3D views come from `report_views.capture`.
+- **Review pictures + page:** `core/soft_render.render(mesh, highlight=, secondary=, view=iso|top|front|side, size=, up=)` is a numpy z-buffer rasteriser (PNG bytes, 2x supersampled, double-sided, Lambert; triangles bucketed by screen size, no per-triangle loop below 32 px; 20k / 82k / 1.3M faces about 0.2 / 0.3 / 1.1 s at 480x360). `ui.batch_materialize.job_pictures` writes `<job>/review_iso.png` / `review_top.png` (needs_review jobs get a folder with just those), records `summary["review"]` (or `review_note` when rendering failed; it never fails a job), and `run_job` passes the images to `export_all(images=)`. Detection warnings are in `BatchJob.warnings`; detected / secondary faces are private attributes (not saved). `core/batch_review.review_html` / `write_review` build ONE self-contained `review.html` (data-URI pictures, inline CSS / JS, no URLs); `bt.write_summary` and `run_job` rewrite it; `ui.batch_materialize.build_review` renders missing pictures first (panel **Open review page**, CLI `--review-only`).
+- Not implemented from the plan: a tool-optimization step per job (per-job PDF: done in v9, see "Usability round"), a drawn target preview at queue time (only the target count is shown), drag reordering (Move up / down instead).
+
+## Rendering (R1-R3)
+
+- **Update in place, redraw only what changed** (`ui/targets_draw.py`): selection as chunks under one frame (an add sends only the new faces), point cloud and normals updated in place when the count is unchanged (`_put`), colours built in numpy. Playback updates are batched and throttled; the Cell readout is throttled.
+- **GLB vertex colours** (`ui/colour_mesh.py`): Viser 1.1.1 `add_mesh_simple` has no per-vertex colour, so heatmap and station areas are one GLB (`COLOR_0` with a hand-written material, since trimesh writes none). Modes and plans are cached as hidden nodes (`NodeCache`, `part_heatmap.KEEP`): switching only toggles visibility.
+- **Display LOD** (`ui/display_lod.py`): above `DISPLAY_FACES` (300k) the part is drawn as a quadric-decimated copy (`TARGET_FACES` 200k); planning, collision and picking use the full mesh (picking casts the click ray against it). `Session.part_display()` returns (shown, n_full); `MeshCache` keeps 2 meshes. **Overlay lift** (`overlay_lift`) offsets overlays by the display copy's measured deviation, so they do not sink into it.
+- **View (`ui/view_controls.py`):** Lighting Studio / Flat / Off from Viser's own lights and the bundled HDRI preset (`viser/_assets/hdri`), Shadows (key light, off by default), Fit view and Top/Front/Side/Iso (`view_pose`, `cell_bounds`). Refit on project load or a different part (`part_key` ignores `_refined_*mm`). **No external assets:** nothing is fetched at run time (check with the offline guard).
+- **Report views (`ui/report_views.py`):** `capture(server, client, session, plan, views)` hides grid, gizmos and selection, frames with `view_pose`, retries a blank PNG (empty-scene race), restores the camera; captioned image grid in the report (`report_make.make_report(images=)`).
+
+## Packaging (D1-D4)
+
+- **Onedir, not onefile** (`packaging/rso.spec`; reasons in `packaging/README.md`). CadQuery/OCP always included (STEP import needs it). `core.provenance` reads the generated `_version.py` (no git in the exe).
+- **Launcher order (`packaging/launch.py`) matters:** 1. `data_paths.configure_numba_cache()` before anything imports numba; 2. `multiprocessing.freeze_support()` (spawn workers branch off there); 3. app or `--selftest`. `numba` needs `module_collection_mode={"core.ik.offset_wrist_nb": "py"}`.
+- **Selftest (`RobotCellOptimizer.exe --selftest`):** headless; serves the Viser client over loopback, loads `mobile_amr`, runs a quick plan in the worker, writes the report, STEP export, numba IK. `build_exe.py` runs it with `RSO_DATA` in a temp folder and `RSO_OFFLINE_GUARD=1`.
+- **Offline guard:** `RSO_OFFLINE_GUARD=1` makes any non-loopback connect / DNS lookup in Python raise (workers inherit it). CI additionally blocks the network with a firewall rule and loads the page in headless Edge (`ci_serve_check.ps1`).
+- **`PYTHONNOUSERSITE=1`** in `build_exe.py` (user site-packages must not leak into the bundle); build only with the `rso` env (`--any-env` skips the check).
+- **Data vs resources:** `core/data_paths` only (see Assets above). Installer is per-user (`PrivilegesRequired=lowest`), the data folder survives uninstall. Unsigned: SmartScreen note in the guide. Release: tag `vX.Y.Z` → `release.yml` → draft release; **not yet run on GitHub**. Linux AppImage not built (placeholder job).
+- **GitLab twin (`.gitlab-ci.yml`, `.gitlab/ci/*.yml`; not yet run on GitLab):** same tests, build and offline checks in PowerShell (Miniforge installed in `before_script`, env folder on PATH, no activation). GitLab has no draft releases: the `release` job is manual (pipeline blocked until the click; `RELEASE_DRAFT=false` on a web run skips it). Manual run = web pipeline with `RELEASE_RUN=true`, tag `manual-<pipeline iid>`. `scripts/gitlab_release.py` (stdlib only): `changes` = commit subjects since the previous `v*` tag (stands in for `--generate-notes`), `publish` = generic package registry upload + release with asset links (job token). `.ci-cache/` (conda archives, pip) is gitignored so ruff skips it. Structure tests: `tests/test_gitlab_ci.py`. Setup steps and differences: `packaging/README.md`.
+- **Version and release notes:** `core/version.app_version()` (frozen: `_version.py` VERSION/COMMIT/DATE; source: `git describe`; never raises) is shown in Settings & help, the panel label, the ready line, `--selftest` and `RobotCellOptimizer.exe --version`. The Inno installer takes `AppVersion` and the file version from `build_exe.py`. The release job fills `packaging/RELEASE_NOTES.md.in` with `scripts/release_notes.py` and passes it as `--notes-file` plus `--generate-notes`. `release_notes.py --changes FILE` (GitLab only) appends a given change list under "Changes"; without it the output is unchanged.
+
+## Tool surface (T0-T4)
+
+- **Pipeline:** `core/tool_surface.segment` (smooth regions: dihedral feature angle on meshes; STEP CAD faces merged when tangent) → `tool_surface_features.region_features` (area, up-facing, ray visibility from a cone around +Z, smoothness, height, boundary kinds convex / concave-tangent) → `tool_surface_pick.detect_tool_surface` (seeds = up-facing visible regions; grow across tangent joints, creases, and concave / tangent joints into steep walls facing into the selection; never across convex breaks into steep regions = `secondary` candidates; best set score with a height/reach factor; confidence from margin, near-threshold area and open creases; sanding warnings for pad radius and steep areas). Returns `ToolSurfaceGuess` (faces, confidence, regions with reasons, secondary, warnings, summary).
+- **Every threshold is in `DEFAULT_PARAMS`** (`tool_surface_pick.py`); `detect_tool_surface(**params)` overrides and rejects unknown keys. Tune there, never inline.
+- **Steep-wall assumption (user can correct):** walls inside a female cavity (join the floor by concave / tangent transitions, face into the selection) are tool surface; flange returns and faceplate sides (convex break) are not, they are secondary candidates.
+- **Eval:** `core/tool_surface_eval` (area-weighted IoU / precision / recall, `load_sample`: `<name>/mandrel.(stl|step)` + `tool_surface.(stl|step)`, baselines) and `scripts/tool_surface_eval.py` (`--synthetic`, a samples folder with `--scale`, `--detector module:function`). Synthetic data: `core/mandrels.py` generators, `mandrel_cases.py` (EASY: smooth single patch; HARD in `mandrels_hard.py`: creases, steep female walls, decoy flanges and plinths, 25-30 deg tilts, perforations, pins; `expect` = `min_iou` or `ambiguous`). **Validated on synthetic data only**; real samples later in the two-file format.
+- **GUI (`ui/tool_surface_ui.py`):** Targets → Detect tool surface runs in a thread, shows a preview layer (not the selection), confidence (low under 0.7), warnings, secondary Add buttons, Replace / Add to selection / Discard. Up = world +Z in the part frame (`ui.batch_materialize.detect_for_pose`, shared with the batch). Batch: `selection_rule="tool_surface"` + `min_confidence` → `needs_review` (see Batch).
+- **STEP parts (`core/step_import.py`):** OCP tessellation (chord min(0.5 mm, 0.1 % diagonal)), `StepMesh.face_ids` per triangle, units come from the file, npz cache keyed by hash; `mesh.metadata["cad_face_ids"]` feeds segmentation.
+
+## Usability round (v9, branch `feature/v9-usability`)
+
+- **Setup check (`core/preflight.py`, no viser):** `Finding(level, code, text, fix, ids)`; `check_part` (under `SMALL_PART_M` 10 mm / over `LARGE_PART_M` 30 m = a unit mistake; below the floor), `check_targets` (none, off the surface > 5 mm, normal against the face normal, duplicates; surface queries on at most `MAX_SAMPLE` points), `check_tool` (group TCPs the tool lacks), `check_robot` (numeric IK), `check_span` (**static base only**: the planner places the base itself, so it tests whether one sphere of reach + tool length can hold the points, and the height from a floor mount; never judges carriers), `check_zones` (points inside a watertight stay-out zone). `run_checks` turns a raising check into an `info` finding and sorts errors first. **Every threshold is a module constant.** `ui/preflight_run.py` (no viser): `findings_for(session)`, `batch_warnings`, CLI `python -m ui.preflight_run <project>` (exit 1 on an error, 2 unreadable). `ui/preflight_ui.SetupCheckPanel` (Optimize, state `setup_check`): **Check setup** in a thread; `on_plan_start` (quiet, logs only errors / warnings) is hooked to `stations.on_start` / `tool_opt.on_start` **only in the real app** (`autosave_thread`), so app tests see no extra thread or log line. Advice only: nothing is blocked.
+- **Handover package (`ui/handover.py`, no viser):** `build(out_dir, stem, steps, lines)` runs `[(what, fn -> (path, bytes))]`, zips what was made into `<stem>_handover.zip` with a `README.txt` (`ABOUT` texts per file, failures under "Not included"); raises only when nothing was made. `ExportPanel.export_package` (button **Everything (zip)**, gated like the other exports) passes the panel's own exports, the path CSV when `sim` holds this plan's paths, and `project_step` (a snapshot copy in `export/`, the project's own file is not written).
+- **Log file (`core/app_log.py`):** `setup(version)` (called by `app.main` only; idempotent, never raises, returns None when the folder is not writable) adds a `RotatingFileHandler` at `data_dir()/logs/app.log` (1 MB x 4), INFO up, quiet `NOISY` loggers, and installs `sys.excepthook` / `threading.excepthook` once. `ui.log_panel.log` mirrors every panel message through `app_log.panel` (logger `rso.panel`, a NullHandler until setup, so tests write nothing). Workers do not write the file. `logs/` and `support/` are gitignored.
+- **Support bundle (`core/support_bundle.py`):** `make_bundle(project_dir, panel_entries, out_dir, batch_dir)` -> `data_dir()/support/support_<time>.zip`: `info.txt` (`system_info`), `panel_log.txt`, `logs/*`, `project/project.json`, `workspace/last_project.txt`, and for a study inside a batch `batch/batch.json` + `batch/<job>/error.txt`. **Never meshes** (tested). Files over `MAX_FILE` are cut to their tail; an unreadable piece is listed in info.txt. Button in Settings & help (`ui.app_state.save_bundle`; `build_settings(..., session)`).
+- **Batch:** `BatchManifest.pdf` (manifest `VERSION` 2; version 1 files load, an older program refuses a version 2 file with the "newer version" message) -> `export_all(pdf=)`; `bt.set_pdf(path, on)`; panel checkbox **PDF report per job** (written at Run, shown on Open batch), CLI `--pdf`. A PDF that cannot be made leaves the job done with "export failed: report.pdf (...)". `bt.eta_text(times, remaining)` (median of the done jobs' `run_s`, earlier runs included) is appended to the progress text by `batch_job._scaled(eta=)`. Setup findings: `materialize` adds `check_part` lines before target generation (a wrong unit is named even when generation then fails) and `_run` replaces them with the full `batch_warnings`; they are `BatchJob.warnings` entries starting with `preflight.BATCH_PREFIX` (`setup: `), shown on the review page. `job_table` moved to `core/batch.py` (`ui.batch_queue_ui.job_table` still imports).
+- **Tests:** tests/test_preflight.py, test_handover.py, test_support_bundle.py, test_batch_pdf_eta.py; additions in test_export.py (slow GUI export) and test_batch_ui.py.
+

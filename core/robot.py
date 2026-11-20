@@ -77,6 +77,8 @@ class RobotSpec(BaseModel):
     limits_deg: list[tuple[float, float]] | None = None
     dh: DHParams | None = None  # ik: ur_analytic
     opw: OPWParams | None = None  # ik: opw
+    # "ur": the meshes are Universal Robots' (their terms require the copyright notice in reports)
+    mesh_license: Literal["ur"] | None = None
     folder: Path | None = None  # filled in by load_spec
 
 

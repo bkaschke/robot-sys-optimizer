@@ -23,16 +23,22 @@ themselves when the process that made the pool ends (watchdog on the parent).
 from __future__ import annotations
 
 import hashlib
+import logging
 import multiprocessing as mp
 import os
 import pickle
 import tempfile
 import threading
+import traceback
 from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures.process import BrokenProcessPool
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
+
+log = logging.getLogger(__name__)
+on_warn = None  # optional callable(str): the UI hook that shows the user a pool failure
 
 MIN_CALLS = 24  # fewer calls than this: not worth the round trip
 CHUNK = 8  # calls per task
@@ -56,6 +62,8 @@ class CheckerSpec:
     world_bodies: list = field(default_factory=list)
     obstacles: list = field(default_factory=list)
     collision: object = None  # v12 #10: the parent's core.collision_config.CollisionConfig
+    margins: object = None  # core.collision.Margins of the session (None: defaults; review R13)
+    settings: object = None  # core.feasibility.CheckSettings of the session (None: defaults)
 
     def build(self):
         from core.collision import CollisionScene
@@ -70,13 +78,14 @@ class CheckerSpec:
             self.mesh,
             self.T_world_base,
             self.T_world_part,
+            self.margins,
             base_bodies=self.base_bodies,
             world_bodies=self.world_bodies,
             obstacles=self.obstacles,
             config=self.collision,
         )
         return FeasibilityChecker(
-            robot, make_ik(robot), self.tool, scene, self.T_world_base, self.T_world_part
+            robot, make_ik(robot), self.tool, scene, self.T_world_base, self.T_world_part, self.settings
         )
 
     def key(self) -> str:
@@ -85,6 +94,7 @@ class CheckerSpec:
 
 _CHECKER = None  # in a pool worker: the checker of the current setup
 _KEY = None  # its key
+_INIT_ERROR = None  # in a pool worker: text of the exception spec.build() raised (review M3)
 
 
 def _watch_parent() -> None:  # pragma: no cover - runs in pool workers
@@ -101,20 +111,31 @@ def _init() -> None:  # pragma: no cover - runs in pool workers
 
 
 def _target(key: str, path: str):  # pragma: no cover - runs in pool workers
-    """This worker's checker for setup ``key`` (built from the spec file when it changed)."""
-    global _CHECKER, _KEY
+    """This worker's checker for setup ``key`` (built from the spec file when it changed). A build
+    that raises is reported by ``_run`` with its traceback (it would otherwise only break the pool)."""
+    global _CHECKER, _KEY, _INIT_ERROR
     if key != _KEY:
-        with open(path, "rb") as f:
-            spec = pickle.load(f)
-        _CHECKER, _KEY = None, None  # the old setup's robot / scene go first (memory)
-        _CHECKER, _KEY = spec.build(), key
+        _CHECKER, _KEY, _INIT_ERROR = None, None, None  # the old setup's robot / scene go first (memory)
+        try:
+            with open(path, "rb") as f:
+                spec = pickle.load(f)
+            _CHECKER = spec.build()
+        except BaseException:
+            _INIT_ERROR = traceback.format_exc()
+        _KEY = key
     return _CHECKER
 
 
 def _run(key: str, path: str, settings, calls: list) -> list:  # pragma: no cover - in pool workers
+    c = _target(key, path)
+    if c is None:
+        raise RuntimeError(f"check worker could not build its checker: {_INIT_ERROR}")
+    return _run_on(c, settings, calls)
+
+
+def _run_on(c, settings, calls: list) -> list:
     from opt.tolerance import set_part
 
-    c = _target(key, path)
     c.settings = settings
     T_part0 = getattr(c, "_T_part0", None)
     if T_part0 is None:
@@ -176,6 +197,8 @@ class CheckPool:
             with open(tmp, "wb") as f:
                 pickle.dump(spec, f, protocol=5)
             os.replace(tmp, self.path)
+        self._spec = spec
+        self._local = None  # serial fallback checker (built on first failure; review M3)
         self._ex = _executor(self.workers)
 
     def run(self, settings, calls: list, cancelled=None) -> list:
@@ -192,8 +215,35 @@ class CheckPool:
                 from core.feasibility import CancelledError
 
                 raise CancelledError()
-            out += f.result()
+            try:
+                out += f.result()
+            except (BrokenProcessPool, RuntimeError) as err:
+                for g in futs:
+                    g.cancel()
+                return self._fallback(settings, calls, err)
         return out
+
+    def _fallback(self, settings, calls: list, err: BaseException) -> list:
+        """The pool is broken (a worker died or could not build): evict it so the next
+        ``pool_for`` builds a fresh one, tell the user, and do this run's calls serially."""
+        self.shutdown()
+        if _POOLS.get(self.key) is self:
+            del _POOLS[self.key]
+        with _LOCK:  # the shared processes too: the next pool starts fresh ones
+            ex = _EXECUTORS.pop(self.workers, None)
+        if ex is not None:
+            ex.shutdown(wait=False, cancel_futures=True)
+        cause = f"{type(err).__name__}: {err}".strip()
+        msg = f"parallel checks failed ({cause}); continuing with serial checks"
+        log.warning(msg)
+        if on_warn is not None:
+            try:
+                on_warn(msg)
+            except Exception:  # a UI hook must never break the plan
+                log.exception("parallel warn hook failed")
+        if self._local is None:
+            self._local = self._spec.build()  # raises the real error if the setup itself is bad
+        return _run_on(self._local, settings, calls)
 
     def shutdown(self) -> None:
         """Forget this setup (the processes stay for the next one: ``shutdown_all`` ends them)."""

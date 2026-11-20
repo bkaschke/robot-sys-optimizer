@@ -1,11 +1,16 @@
-# v8 T21: lint (Linux, v12) and the fast tests (Windows, the conda env `rso`) on every push / PR.
+# v8 T21: lint (Linux, v12) and the fast tests (Windows primary, Ubuntu secondary; the conda env `rso`)
+# on every branch push / pull request (not on tags: a tag points at a commit its branch already tested).
+# Speed (2026-11-19): the conda env is cached on environment.yml (rebuilt only when it changes), and the
+# test batches run 3 at a time (runners have 4 cores / 16 GB; on a small PC keep --jobs 1).
 # The slow tests (full plans, tool optimizer, paths) and the browser tests run locally:
 #   python scripts/test_batches.py          # everything (~60 min)
 #   python scripts/test_batches.py --e2e    # headless Edge
+# GitLab twin: .gitlab-ci.yml + .gitlab/ci/tests.yml. Keep the checks the same on both.
 name: tests
 
 on:
   push:
+    branches: ["**"]
   pull_request:
   workflow_dispatch:
 
@@ -16,8 +21,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: Lint
@@ -27,31 +32,52 @@ jobs:
           ruff format --check .
 
   fast:
-    runs-on: windows-latest
+    name: fast (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-22.04]
     timeout-minutes: 60
+    env:
+      PYTHONUTF8: "1"
+      ENV_CACHE: "1" # bump to rebuild the cached conda env without changing environment.yml
     defaults:
       run:
         shell: bash -el {0}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: conda-incubator/setup-miniconda@v3
+      # Miniforge with an empty env `rso`; the cache below fills it, else environment.yml does
+      - uses: conda-incubator/setup-miniconda@v4
         with:
           miniforge-version: latest
-          environment-file: environment.yml
           activate-environment: rso
+          conda-remove-defaults: "true"
           use-mamba: true
 
+      - name: Conda env cache
+        id: env-cache
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.CONDA }}/envs/rso
+          key: env-${{ runner.os }}-${{ hashFiles('environment.yml') }}-${{ env.ENV_CACHE }}
+
+      - name: Create the env from environment.yml (cache miss)
+        if: steps.env-cache.outputs.cache-hit != 'true'
+        # conda, not mamba: on Windows `mamba` in bash is a cmd shim that opened a prompt and did nothing
+        run: |
+          conda env update -n rso -f environment.yml
+          python -c "import viser, pinocchio, coal, trimesh"  # fail here, not three steps later
+
       - name: Reachability map cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: cache/reachability
-          key: maps-${{ hashFiles('assets/robots/**/spec.yaml', 'opt/reachability.py') }}
+          key: maps-${{ runner.os }}-${{ hashFiles('assets/robots/**/spec.yaml', 'opt/reachability.py') }}
 
       - name: Guide up to date
         run: python scripts/build_guide.py --check
 
       - name: Fast tests
-        env:
-          PYTHONUTF8: "1"
-        run: python scripts/test_batches.py --fast
+        run: python scripts/test_batches.py --fast --jobs 3

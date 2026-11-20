@@ -22,11 +22,17 @@ from pathlib import Path
 
 import numpy as np
 
+from core import data_paths
 from core.ik import make_ik
 from core.robot import Robot
 
 MAP_VERSION = 1
-CACHE_DIR = Path(__file__).resolve().parents[1] / "cache" / "reachability"
+CACHE_DIR = data_paths.cache_dir("reachability")
+# Memory budget of the queries (review v8 M1). A lookup row needs about 9 kB of temporaries per
+# block (600 directions: cos, cone mask, reach and manip gathers), so LOOKUP_ROWS = 4096 keeps a
+# block near 40 MB; callers send at most PAIR_BUDGET (base, target) pairs per lookup.
+LOOKUP_ROWS = 4096
+PAIR_BUDGET = 1 << 16
 
 
 @dataclass(frozen=True)
@@ -177,6 +183,8 @@ class ReachMap:
         cancelled: Callable[[], bool] | None = None,
     ) -> ReachMap:
         path = cache_dir / f"{cls.cache_key(robot, T_flange_tcp, settings)}.npz"
+        if cache_dir == CACHE_DIR:  # read-through: user data first, then the bundled seed maps
+            path = data_paths.find_cached("reachability", path.name) or path
         if path.is_file():
             d = np.load(path)
             return cls(
@@ -190,6 +198,7 @@ class ReachMap:
             )
         m = cls.build(robot, T_flange_tcp, settings, progress, cancelled)
         cache_dir.mkdir(parents=True, exist_ok=True)
+        path = cache_dir / path.name  # write only to the writable folder, never the bundled seed
         tmp = path.with_suffix(".tmp.npz")
         np.savez_compressed(
             tmp, r0=m.r0, z0=m.z0, res=m.res, dirs=m.dirs, reach=m.reach, manip=m.manip, max_manip=m.max_manip
@@ -214,9 +223,6 @@ class ReachMap:
         phi = np.arctan2(p[:, 1], p[:, 0])
         c, s = np.cos(-phi), np.sin(-phi)
         a_loc = np.column_stack([c * a[:, 0] - s * a[:, 1], s * a[:, 0] + c * a[:, 1], a[:, 2]])
-        cos = a_loc @ self.dirs.T  # (M, D)
-        in_cone = cos >= np.cos(np.radians(cone_deg))
-        in_cone[np.arange(len(p)), np.argmax(cos, axis=1)] = True
         fi = (r - self.r0) / self.res
         fj = (p[:, 2] - self.z0) / self.res
         nr, nz = self.shape
@@ -224,16 +230,32 @@ class ReachMap:
         fi, fj = np.clip(fi, 0, nr - 1 - 1e-9), np.clip(fj, 0, nz - 1 - 1e-9)
         i0, j0 = fi.astype(int), fj.astype(int)
         ti, tj = fi - i0, fj - j0
-        score = np.zeros(len(p))
-        mu = np.zeros(len(p))
-        for di, dj, w in (
+        corners = (
             (0, 0, (1 - ti) * (1 - tj)),
             (1, 0, ti * (1 - tj)),
             (0, 1, (1 - ti) * tj),
             (1, 1, ti * tj),
-        ):
-            score += w * (self.reach[i0 + di, j0 + dj] & in_cone).any(axis=1)
-            mu += w * np.where(in_cone, self.manip[i0 + di, j0 + dj], 0.0).max(axis=1)
+        )
+        cos_cone = np.cos(np.radians(cone_deg))
+        score = np.zeros(len(p))
+        mu = np.zeros(len(p))
+        # Rows in blocks: the (rows, D) temporaries stay bounded whatever the query size. Each
+        # row is independent, and cos stays float64, so the result is bit-identical to one block.
+        for k in range(0, len(p), LOOKUP_ROWS):
+            sl = slice(k, k + LOOKUP_ROWS)
+            cos = a_loc[sl] @ self.dirs.T  # (n, D)
+            in_cone = cos >= cos_cone
+            in_cone[np.arange(len(cos)), np.argmax(cos, axis=1)] = True
+            del cos
+            out_cone = ~in_cone
+            for di, dj, w in corners:
+                ii, jj = i0[sl] + di, j0[sl] + dj
+                hit = self.reach[ii, jj]  # gather = a fresh copy, safe to modify in place
+                hit &= in_cone
+                score[sl] += w[sl] * hit.any(axis=1)
+                g = self.manip[ii, jj]
+                g[out_cone] = 0  # = np.where(in_cone, manip, 0.0) without a float64 copy
+                mu[sl] += w[sl] * g.max(axis=1)
         return np.where(inside, score, 0.0), np.where(inside, mu, 0.0)
 
 
@@ -278,6 +300,12 @@ class PoseOffsetMap:
     def lookup(self, p_base: np.ndarray, axis_base: np.ndarray, cone_deg: float = 0.0):
         p = np.asarray(p_base, float)
         a = np.asarray(axis_base, float)
+        if len(p) > PAIR_BUDGET:  # rows are independent: bounded (M, 3, 3) frames per spin
+            out = [
+                self.lookup(p[k : k + PAIR_BUDGET], a[k : k + PAIR_BUDGET], cone_deg)
+                for k in range(0, len(p), PAIR_BUDGET)
+            ]
+            return np.concatenate([o[0] for o in out]), np.concatenate([o[1] for o in out])
         a = a / np.linalg.norm(a, axis=1, keepdims=True)
         ref = np.where(np.abs(a[:, :1]) < 0.9, [[1.0, 0, 0]], [[0, 1.0, 0]])
         x = ref - (ref * a).sum(1, keepdims=True) * a
@@ -370,19 +398,20 @@ def vote_bases(
     cov = np.zeros(len(bases))
     qual = np.zeros(len(bases)) if quality == "mean" else np.full(len(bases), np.inf)
     for cone in np.unique(cones):
-        sel = cones == cone
-        Pt, At = P[sel], A[sel]
-        for s in range(0, len(bases), chunk):
-            b = bases[s : s + chunk]
-            pb = ((Pt[None, :, :] - b[:, None, :]) @ R).reshape(-1, 3)
-            ab = np.broadcast_to(At[None], (len(b), len(At), 3)).reshape(-1, 3)
-            sc, mu = rmap.lookup(pb, ab, cone)
-            cov[s : s + chunk] += sc.reshape(len(b), -1).sum(1)
-            mu_n = (mu / rmap.max_manip).reshape(len(b), -1)
-            if quality == "mean":
-                qual[s : s + chunk] += mu_n.sum(1)
-            else:
-                qual[s : s + chunk] = np.minimum(qual[s : s + chunk], mu_n.min(1))
+        sel = np.flatnonzero(cones == cone)
+        for tb, bc in _blocks(len(sel), chunk):  # at most PAIR_BUDGET pairs per lookup
+            Pt, At = P[sel[tb]], A[sel[tb]]
+            for s in range(0, len(bases), bc):
+                b = bases[s : s + bc]
+                pb = ((Pt[None, :, :] - b[:, None, :]) @ R).reshape(-1, 3)
+                ab = np.broadcast_to(At[None], (len(b), len(At), 3)).reshape(-1, 3)
+                sc, mu = rmap.lookup(pb, ab, cone)
+                cov[s : s + bc] += sc.reshape(len(b), -1).sum(1)
+                mu_n = (mu / rmap.max_manip).reshape(len(b), -1)
+                if quality == "mean":
+                    qual[s : s + bc] += mu_n.sum(1)
+                else:
+                    qual[s : s + bc] = np.minimum(qual[s : s + bc], mu_n.min(1))
     qual = qual / max(1, len(P)) if quality == "mean" else np.where(np.isfinite(qual), qual, 0.0)
     shape = gx.shape
     return VoteGrid(xs, ys, cov.reshape(shape), qual.reshape(shape), (cov + qual).reshape(shape))
@@ -405,15 +434,26 @@ def coverage_matrix(
     score = np.zeros((B, T))
     mu = np.zeros((B, T))
     for cone in np.unique(cones):
-        cols = np.flatnonzero(cones == cone)
-        for s in range(0, B, 1024):
-            b = bases[s : s + 1024]
-            pb = ((P[cols][None] - b[:, None]) @ R).reshape(-1, 3)
-            ab = np.broadcast_to(A[cols][None], (len(b), len(cols), 3)).reshape(-1, 3)
-            sc, m = rmap.lookup(pb, ab, cone)
-            score[s : s + len(b), cols] = sc.reshape(len(b), -1)
-            mu[s : s + len(b), cols] = m.reshape(len(b), -1)
+        for tb, bc in _blocks(int((cones == cone).sum())):  # at most PAIR_BUDGET pairs per lookup
+            cols = np.flatnonzero(cones == cone)[tb]
+            for s in range(0, B, bc):
+                b = bases[s : s + bc]
+                pb = ((P[cols][None] - b[:, None]) @ R).reshape(-1, 3)
+                ab = np.broadcast_to(A[cols][None], (len(b), len(cols), 3)).reshape(-1, 3)
+                sc, m = rmap.lookup(pb, ab, cone)
+                score[s : s + len(b), cols] = sc.reshape(len(b), -1)
+                mu[s : s + len(b), cols] = m.reshape(len(b), -1)
     return score, mu
+
+
+def _blocks(n_targets: int, max_bases: int | None = None):
+    """(target slice, bases per lookup) so that bases x targets stays within PAIR_BUDGET:
+    all targets at once with fewer bases, or target blocks when the targets alone exceed it."""
+    tc = max(1, min(n_targets, PAIR_BUDGET))
+    bc = max(1, PAIR_BUDGET // tc)
+    if max_bases is not None:
+        bc = min(bc, max_bases)
+    return [(slice(k, k + tc), bc) for k in range(0, n_targets, tc)]
 
 
 class MultiMap:

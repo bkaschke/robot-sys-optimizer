@@ -13,11 +13,12 @@ import html
 import re
 import threading
 import time
-from collections import Counter
 
 import viser
 
+from core import app_log
 from ui.plan_ids import key as plan_key
+from ui.report_text import REASONS, _hit_objects, reason_text, unreached_report  # noqa: F401 (re-export)
 
 ICONS = {"error": "✘", "warn": "⚠", "done": "✔", "info": "•"}
 # row colours per level (light theme, dark theme), v7 round 2 T7
@@ -34,15 +35,6 @@ MAX_KEEP = 300  # entries kept
 MAX_SHOW = 60  # entries shown (newest first)
 WIDTH, HEIGHT = 620.0, 210.0
 MIN_HEIGHT = 64.0  # minimized: the newest message only
-
-# why a point is unreachable (core.feasibility stages, opt.sites checks), in plain words
-REASONS = {
-    "no_ik": "out of reach: no arm pose reaches it at any allowed tool angle",
-    "joint_limits": "only reachable beyond the joint limits (incl. the margin)",
-    "singular": "only reachable close to a singularity",
-    "collision": "every arm pose collides (part, carrier, stay-out zone or floor)",
-    "": "not covered by any stop",
-}
 
 _lock = threading.Lock()
 _entries: list[tuple[float, str, str]] = []
@@ -92,6 +84,7 @@ def log(msg: str, level: str = "info", since: float | None = None) -> None:
     with _lock:
         _entries.append((time.time(), level if level in ICONS else "info", str(msg)))
         del _entries[:-MAX_KEEP]
+    app_log.panel(str(msg), level)  # also into the log file (the real app; a no-op elsewhere)
     if _panel is not None:
         _panel.render()
 
@@ -106,35 +99,6 @@ def clear() -> None:
         _entries.clear()
     if _panel is not None:
         _panel.render()
-
-
-def reason_text(code: str) -> str:
-    return REASONS.get(code, code.replace("_", " "))
-
-
-def _hit_objects(r) -> list[str]:
-    """What the arm hits at an unreachable point ("part", "floor", ...), from its notes."""
-    from ui.unreached_view import why
-
-    w = why(r) if r is not None and getattr(r, "reason", "") == "collision" else ""
-    return w.split(": ", 1)[1].split(", ") if ": " in w else []
-
-
-def unreached_report(results: dict, ids, what: str) -> str | None:
-    """One message on the points of ``ids`` that are unreachable in ``results`` (point id ->
-    PointResult), grouped by reason with up to 12 point ids each; None when all are reached."""
-    bad = [i for i in ids if (r := results.get(i)) is None or r.status == "unreachable"]
-    if not bad:
-        return None
-    why = Counter((getattr(results.get(i), "reason", "") or "") for i in bad)
-    parts = []
-    for code, n in why.most_common():
-        pts = [i for i in bad if (getattr(results.get(i), "reason", "") or "") == code]
-        more = f" … +{len(pts) - 12}" if len(pts) > 12 else ""
-        hits = Counter(o for i in pts for o in _hit_objects(results.get(i)))
-        what_hit = f", hitting {', '.join(f'{o} ({c})' for o, c in hits.most_common())}" if hits else ""
-        parts.append(f"{n} × {reason_text(code)}{what_hit} (points {', '.join(map(str, pts[:12]))}{more})")
-    return f"{what}: **{len(bad)} point(s) unreachable**: " + "; ".join(parts)
 
 
 class LogPanel:

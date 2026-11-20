@@ -25,10 +25,17 @@ import numpy as np
 import pinocchio as pin
 import trimesh
 
-from core.collision_config import ROBOT_AUTO_FACES, CollisionConfig, current, link_joints  # noqa: F401
+from core.collision_config import (  # noqa: F401
+    ROBOT_AUTO_FACES,
+    CollisionConfig,
+    current,
+    geom_fingerprint,  # noqa: F401 (re-exported)
+    link_joints,
+)
+from core.collision_config import exact_info as _exact
 from core.collision_config import geom_of as _geom_of
-from core.collision_config import low as _low_cfg
-from core.collision_config import part_low as _part_low_cfg
+from core.collision_config import low_info as _low_info
+from core.collision_config import part_low_info as _part_low_info
 from core.robot import Robot
 from core.schema import ExtensionValues
 from core.tool import ToolModel
@@ -126,6 +133,7 @@ class CollisionScene:
         )
         self.robot_ids = list(range(self.gm.ngeoms))
         self.shapes: dict[int, trimesh.Trimesh] = {}  # gid -> collision mesh (geometry frame), for showing
+        self._geometry: dict[str, dict] = {}  # geometry name -> MeshInfo dict + component (R11)
         self._simplify_robot()
         # the joint each robot shape moves with (0 = fixed base): pairs are chosen by link, not by
         # the shape's position in the list (a URDF link may have several collision shapes)
@@ -157,9 +165,11 @@ class CollisionScene:
                 self.tool_contact[self.tool_ids[-1]] = set()
             T_fh = tool.T_flange_head(values)
             for hl in tool.links:
-                for sig, piece in self._tool_pieces(tool, hl):
+                for sig, piece, info in self._tool_pieces(tool, hl):
+                    name = f"tool_{hl.name}_{'+'.join(sorted(sig)) or 'body'}"
+                    self._record(name, "tool", info)
                     go = pin.GeometryObject(
-                        f"tool_{hl.name}_{'+'.join(sorted(sig)) or 'body'}",
+                        name,
                         fr.parentJoint,
                         _se3(T_joint_flange @ T_fh @ hl.T_head_link),
                         _bvh(piece),
@@ -180,7 +190,8 @@ class CollisionScene:
 
         self.part_id = None
         if part_mesh is not None and T_world_part is not None:
-            low = _part_low_cfg(part_mesh, cfg)
+            low, info = _part_low_info(part_mesh, cfg)
+            self._record("part", "part", info)
             go = pin.GeometryObject("part", 0, _se3(self.T_univ_world @ T_world_part), _bvh(low))
             self.part_id = self.gm.addGeometryObject(go)
             self.shapes[self.part_id] = low
@@ -199,7 +210,8 @@ class CollisionScene:
         for name, mesh, T_base_body, *follow in base_bodies or []:
             if follow:
                 T_base_body = follow[0](T_world_base)
-            mesh = _low_cfg(mesh, "carrier", cfg)
+            mesh, info = _low_info(mesh, "carrier", cfg)
+            self._record(f"carrier_{name}", "carrier", info)
             go = pin.GeometryObject(f"carrier_{name}", 0, _se3(self.T_univ_base @ T_base_body), _bvh(mesh))
             gid = self.gm.addGeometryObject(go)
             self.carrier_ids.append(gid)
@@ -207,7 +219,8 @@ class CollisionScene:
             if follow:
                 self.follow[gid] = follow[0]
         for name, mesh, T_world_body in world_bodies or []:
-            mesh = _low_cfg(mesh, "carrier", cfg)
+            mesh, info = _low_info(mesh, "carrier", cfg)
+            self._record(f"carrier_{name}", "carrier", info)
             go = pin.GeometryObject(f"carrier_{name}", 0, _se3(self.T_univ_world @ T_world_body), _bvh(mesh))
             gid = self.gm.addGeometryObject(go)
             self.carrier_ids.append(gid)
@@ -295,19 +308,32 @@ class CollisionScene:
         """Robot link meshes above ``ROBOT_AUTO_FACES`` triangles (or all, for an explicit
         mode) are replaced by their collision copy (``config.geom["robot"]``)."""
         g = _geom_of(self.config, "robot")
-        if g.mode == "visual":
-            return
         for gid in self.robot_ids:
             go = self.gm.geometryObjects[gid]
             n = getattr(go.geometry, "num_tris", 0)
-            if not n or (g.mode == "auto" and n <= ROBOT_AUTO_FACES):
+            if not n:
+                continue
+            if g.mode == "visual" or (g.mode == "auto" and n <= ROBOT_AUTO_FACES):
+                self._record(go.name, "robot", _exact(n, g.mode))
                 continue
             mesh = _robot_mesh(go)
             if mesh is None:
+                self._record(go.name, "robot", _exact(n, g.mode))
                 continue
-            low = _low_cfg(mesh, "robot", self.config, auto_faces=ROBOT_AUTO_FACES)
+            low, info = _low_info(mesh, "robot", self.config, auto_faces=ROBOT_AUTO_FACES)
+            self._record(go.name, "robot", info)
             go.geometry = _bvh(low)
             self.shapes[gid] = low
+
+    def _record(self, name: str, component: str, info) -> None:
+        self._geometry[name] = {"component": component, **info.as_dict()}
+
+    def geometry_report(self) -> dict[str, dict]:
+        """R11: geometry name (robot links, tool pieces, "part", "carrier_<name>") -> plain dict
+        of ``component`` (robot / tool / part / carrier) + core.collision_mesh.MeshInfo fields
+        (mode, used, kind, faces_before, faces_after, deviation_m, kept). Capsules, the floor and
+        stay-outs are exact and not listed. See ``collision_mesh.deviation_warning``."""
+        return {k: dict(v) for k, v in self._geometry.items()}
 
     def shape(self, gid: int) -> trimesh.Trimesh | None:
         """The collision mesh of geometry ``gid`` in its own frame: meshes and capsules (None
@@ -336,21 +362,23 @@ class CollisionScene:
             for gid, go in enumerate(self.gm.geometryObjects)
         ]
 
-    def _tool_pieces(self, tool: ToolModel, hl) -> list[tuple[frozenset, trimesh.Trimesh]]:
-        """A head link's collision pieces: (TCPs that may touch the part with it, mesh). A link
+    def _tool_pieces(self, tool: ToolModel, hl) -> list[tuple[frozenset, trimesh.Trimesh, object]]:
+        """A head link's collision pieces: (TCPs that may touch the part with it, mesh, its
+        core.collision_mesh.MeshInfo; a URDF collision mesh counts as exact). A link
         with its own URDF collision mesh (e.g. from the Package builder) uses that, unless a
         TCP has picked contact faces on it (face ids of the visual mesh); otherwise the visual
         mesh split by contact, the non-contact piece simplified (``config.geom["tool"]``)."""
         coll = getattr(hl, "collision", None)
         if coll is not None and not any(t.contact_faces.get(hl.name) for t in tool.ee.tcps):
             sig = frozenset(t.name for t in tool.ee.tcps if hl.name in t.contact_links)
-            return [(sig, coll)]
+            return [(sig, coll, _exact(len(coll.faces), "urdf"))]
         out = []
         for sig, faces in self._split_by_contact(tool, hl):
             piece = hl.mesh.submesh([np.array(sorted(faces))], append=True)
+            info = _exact(len(piece.faces))
             if not sig:  # contact pieces stay exact: they meet the part at the contact edge
-                piece = _low_cfg(piece, "tool", self.config)
-            out.append((sig, piece))
+                piece, info = _low_info(piece, "tool", self.config)
+            out.append((sig, piece, info))
         return out
 
     @staticmethod

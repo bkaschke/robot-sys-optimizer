@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import io
 import json
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -36,7 +37,15 @@ class ToolImportError(ValueError):
 
 def step_mesh(path: Path, tolerance_mm: float = 0.1) -> trimesh.Trimesh:
     """Tessellate a STEP file (metres)."""
-    import cadquery as cq
+    try:
+        import cadquery as cq
+    except ImportError as err:
+        frozen = getattr(sys, "frozen", False)
+        raise ToolImportError(
+            "STEP import is not included in this build; use an STL / OBJ / PLY mesh"
+            if frozen
+            else "STEP import needs CadQuery (pip install cadquery); STL / OBJ / PLY meshes work without"
+        ) from err
 
     shape = cq.importers.importStep(str(path)).val()
     verts, tris = shape.tessellate(tolerance_mm, 0.2)

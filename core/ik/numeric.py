@@ -6,6 +6,8 @@ arm as one chain) or to cross-check analytic solvers.
 
 from __future__ import annotations
 
+import hashlib
+
 import numpy as np
 import pinocchio as pin
 
@@ -76,8 +78,10 @@ class NumericIK:
         self, T_base_flange: np.ndarray, seed=None, rng: np.random.Generator | None = None
     ) -> np.ndarray:
         """Unique converged solutions within joint limits, nearest to ``seed`` first."""
-        rng = rng or np.random.default_rng()
         T = np.asarray(T_base_flange, float)
+        if rng is None:  # same pose, same starts: results do not change between calls
+            digest = hashlib.sha256(np.round(T, 9).tobytes()).digest()
+            rng = np.random.default_rng(int.from_bytes(digest[:8], "little"))
         target = pin.SE3(T[:3, :3], T[:3, 3])
         starts = [self.robot.random_q(rng) for _ in range(self.n_starts)]
         if seed is not None:

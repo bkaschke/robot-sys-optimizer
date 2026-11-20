@@ -11,6 +11,7 @@ from __future__ import annotations
 import threading
 import time
 from collections.abc import Callable
+from contextlib import nullcontext
 
 import numpy as np
 import viser
@@ -26,8 +27,10 @@ from ui.session_lock import LOCK
 from ui.sim_build import carrier_path as sim_carrier_path
 from ui.sim_build import path_checker
 from ui.sim_fields import BETWEEN_LABELS, PLANNER_ORDER  # noqa: F401 (re-export)
+from ui.sim_status import status_text
 from ui.widgets import Latest, notify
 
+STATUS_PERIOD = 0.3  # s: shortest gap between status-text updates while playing
 ROOT = "/results/paths"
 ZONE_COLORS = [(250, 120, 30), (30, 160, 230), (200, 60, 200), (40, 200, 120), (230, 200, 40), (120, 90, 220)]
 ISSUE_COLOR = (230, 30, 30)
@@ -58,6 +61,7 @@ class SimPanel:
         self._thread: threading.Thread | None = None
         self._cancel = threading.Event()
         self._playing = threading.Event()
+        self._status_t = 0.0  # last status update (throttled while playing)
         self._station = None
         self._targets_key = None
         gui = server.gui
@@ -395,7 +399,11 @@ class SimPanel:
     # --- playback ------------------------------------------------------------------------------
 
     def go_to(self, i: int) -> None:
-        """Show sample i: carrier / base at its stop (when it changes), arm at its joints."""
+        """Show sample i: carrier / base at its stop, arm at its joints (one atomic batch when playing)."""
+        with self.server.atomic() if self._playing.is_set() else nullcontext():
+            self._go_to(i)
+
+    def _go_to(self, i: int) -> None:
         if self.plan is None:
             return
         samples = self.plan.samples
@@ -421,16 +429,10 @@ class SimPanel:
             q = next((x.q for x in reversed(samples[:i]) if x.q is not None), None)
         if q is not None:
             (self.show_q if self._playing.is_set() else self.set_q)(np.asarray(q))
-        zone = "" if p.zone is None else f", zone {p.zone + 1}"
-        flag = f" · **{p.issue.replace('_', ' ')}**" if p.issue else ""
-        ends = ("home" if p.a == 0 else p.a, "home" if p.b == 0 else p.b)
-        what = {
-            "carrier": "carrier moving, arm parked",
-            "home": f"{ends[0]} → {ends[1]} (joint move)",
-            "retreat": f"backing off point {p.a}",
-            "lift": f"point {p.a} → {p.b} (lifted)",
-        }.get(p.kind, f"point {p.a} → {p.b}")
-        self.status.content = f"Stop S{p.station + 1}{zone}: {what} ({100 * p.s:.0f} %){flag}"
+        now = time.monotonic()
+        if not self._playing.is_set() or now - self._status_t >= STATUS_PERIOD:  # playing: ~3 Hz
+            self._status_t = now
+            self.status.content = status_text(p)
 
     def toggle(self) -> None:
         if self._playing.is_set():

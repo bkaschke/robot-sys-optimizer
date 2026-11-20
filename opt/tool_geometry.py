@@ -176,6 +176,8 @@ def _optimize_tool(
     obstacles: list | None = None,
     seen: list | None = None,
     holder: dict | None = None,
+    margins=None,
+    settings=None,
 ) -> GeometryResult:
     st = st or GeometrySettings()
     say = progress or (lambda m, f: None)
@@ -195,6 +197,7 @@ def _optimize_tool(
     )
     ev.cancelled = cancelled
     ev.obstacles = list(obstacles or [])
+    ev.margins, ev.settings = margins, settings  # the project's clearance / joint margins
     ev.seen = seen if seen is not None else []  # v8 T11: every evaluated design
     if holder is not None:
         holder["ev"] = ev
@@ -204,6 +207,7 @@ def _optimize_tool(
             robot, ee, urdf, f.part, f.T_part, f.T_base0, f.t, f.fp, weights, max_stations, st, sites=f.sites
         )
         other.cancelled, other.obstacles, other.seen, other.family = cancelled, list(f.obstacles), [], []
+        other.margins, other.settings = margins, settings
         ev.family.append(other)
     x = ee.extension
     if x.type == "pose":  # v2: head pose x y z rx ry rz, best overall cost (opt.tool_pose)

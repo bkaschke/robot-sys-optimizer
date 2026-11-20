@@ -3,12 +3,15 @@ of the selected plan (or the feasibility check), red = poor to green = good, wit
 
 Each face takes the score of the nearest target within 1.5 x the point spacing of its centre
 (the station-area rule, ui.station_areas; coarse meshes are subdivided first). Scores are
-binned into ``BINS`` colours, one mesh per bin, drawn just above the surface under the part.
+binned into ``BINS`` colours and drawn as ONE vertex-coloured mesh (R1b, ui.colour_mesh) just
+above the surface under the part. The last ``KEEP`` pictures stay in the scene hidden, so
+switching back to a mode or plan shown before only toggles visibility (no re-upload).
 """
 
 from __future__ import annotations
 
 import math
+from types import SimpleNamespace
 
 import numpy as np
 from scipy.spatial import cKDTree
@@ -18,6 +21,7 @@ from core import targets as tg
 PATH = "/cell/part/heatmap"
 BINS = 10
 OFFSET = 1.1e-3  # m above the surface (station areas are at 0.8 mm)
+KEEP = 4  # cached heatmap pictures (e.g. 2 plans x 2 modes)
 OFF = "Reached / unreached (points)"
 EDGE = "Edge check"
 FIT = "Surface radius (tool fit)"  # no surface colour: the points' own colours (pre-v8)
@@ -42,7 +46,21 @@ def colour(f: float) -> tuple[int, int, int]:
     return (int(220 - 2 * (f - 0.5) * 180), 220, 40)
 
 
-def point_scores(s, what: str, sel: dict) -> dict[int, float]:
+def tolerance_for(s, sol, tol=None):
+    """The session's tolerance result if it belongs to ``sol`` (a plan, or None = the result's own
+    label) *as it is now*: same label and the plan stamp recorded when it was computed equals
+    ``s.stamps[label]`` (review R8). No recorded stamp = unknown = not shown."""
+    tol = getattr(s, "tolerance", None) if tol is None else tol
+    if tol is None:
+        return None
+    own = getattr(tol, "key", "") or tol.label  # v12 #8: plans are keyed by id (label before v12)
+    k = own if sol is None else (getattr(sol, "id", None) or sol.label)
+    if own != k or not hasattr(tol, "plan_stamp"):
+        return None
+    return tol if (tol.plan_stamp or {}) == (s.stamps.get(k) or {}) else None
+
+
+def point_scores(s, what: str, sel: dict, label: str | None = None) -> dict[int, float]:
     """{point id: score} for ``what`` from the selected plan's results (else the feasibility
     check); the tolerance rate from the session's last tolerance check."""
     res = sel or s.feasibility or {}
@@ -59,6 +77,8 @@ def point_scores(s, what: str, sel: dict) -> dict[int, float]:
         return fit_scores(s)
     if what == "Tolerance reach rate":
         tol = getattr(s, "tolerance", None)
+        if tol is not None:
+            tol = tolerance_for(s, None if label is None else SimpleNamespace(label=label), tol)
         return {int(p): 100 * t.rate for p, t in tol.points.items()} if tol is not None else {}
     return {}
 
@@ -93,7 +113,10 @@ class HeatmapLayer:
         self.choice = gui.add_dropdown("Colour part by", tuple(SCORES), hint="the selected plan (Results)")
         self.legend = gui.add_markdown("")
         self.choice.on_update(lambda _e: self.draw())
-        self._handles: list = []
+        self._handles: list = []  # the shown node (ui.targets_draw checks this list's identity)
+        from ui.colour_mesh import NodeCache
+
+        self._cache = NodeCache(KEEP)
         self.cones = gui.add_checkbox(  # v8 T15
             "Show approach cones",
             False,
@@ -131,13 +154,13 @@ class HeatmapLayer:
             else "every point has one._"
         )
 
-    def _draw_edges(self, unit: str, lo: float, hi: float) -> None:
+    def _draw_edges(self, unit: str, lo: float, hi: float) -> bool:
         """v10 T10: faces near the edge check's points, red at gaps, green where reached."""
         get = getattr(self.tab, "edge_result", None)
         r = get() if get is not None else None
         if r is None:
             self.legend.content = "_Nothing to show yet: run Results → Edge check on the selected plan._"
-            return
+            return False
         from ui.station_areas import display_mesh
 
         Pe = np.array([e.p for e in r.points])
@@ -147,41 +170,41 @@ class HeatmapLayer:
         val = np.array([100.0 if e.reached else 0.0 for e in r.points])
         fb = np.full(len(mesh.faces), -1)
         fb[near] = bins(val[j[near]], lo, hi)
-        self._paint(mesh, fb)
+        shown = self._paint(mesh, fb)
         self.legend.content = f"🟥 gap → 🟩 reached  \n_{r.summary()}._"
+        return shown
 
-    def _paint(self, mesh, fb: np.ndarray) -> None:
+    def _paint(self, mesh, fb: np.ndarray) -> bool:
+        """The faces with a bin (>= 0) as ONE vertex-coloured GLB (cached by picture)."""
+        from ui.colour_mesh import show_patch
+
         self.face_bins = fb
-        for b in range(BINS):
-            faces = np.flatnonzero(fb == b)
-            if len(faces) == 0:
-                continue
-            sub = mesh.submesh([faces], append=True)
-            v = sub.vertices + sub.vertex_normals * OFFSET
-            self._handles.append(
-                self.tab.server.scene.add_mesh_simple(
-                    f"{PATH}/b{b}",
-                    v,
-                    sub.faces,
-                    color=colour((b + 0.5) / BINS),
-                    side="double",
-                    flat_shading=False,
-                )
-            )
+        faces = np.flatnonzero(fb >= 0)
+        if len(faces):
+            table = np.array([colour((b + 0.5) / BINS) for b in range(BINS)], np.uint8)
+            scene = self.tab.server.scene
+            self._handles = [show_patch(scene, self._cache, PATH, mesh, faces, table[fb[faces]], OFFSET)]
+        return bool(len(faces))
 
     def clear(self) -> None:
-        for h in self._handles:
-            h.remove()
+        """Hide the heatmap (its node stays cached, hidden) and empty the legend."""
+        self._cache.hide()
         self._handles = []
         self.legend.content = ""
 
     def draw(self) -> None:
-        self.clear()
+        self._handles = []  # a new list: a redraw is visible to ui.targets_draw
+        self.legend.content = ""
+        if not self._draw():
+            self._cache.hide()
+
+    def _draw(self) -> bool:
+        """Show the picture for the current mode and plan; False = nothing to show."""
         what = self.choice.value
         s = self.tab.s
         spec = SCORES.get(what)
         if spec is None or s.part is None:
-            return
+            return False
         unit, lo, hi = spec
         sel = self.tab.selected_results() if self.tab.selected_results else {}
         if what == EDGE:
@@ -191,7 +214,7 @@ class HeatmapLayer:
             tol = what == "Tolerance reach rate"
             src = "a tolerance check (Results)" if tol else "a plan or a feasibility check"
             self.legend.content = f"_Nothing to show yet: run {src}._"
-            return
+            return False
         from ui.station_areas import display_mesh, face_labels
 
         ids, P, _, _ = tg.as_arrays(s.targets)
@@ -201,9 +224,10 @@ class HeatmapLayer:
         painted = lab >= 0
         fb = np.full(len(mesh.faces), -1)
         fb[painted] = bins(val[lab[painted]], lo, hi)
-        self._paint(mesh, fb)
+        shown = self._paint(mesh, fb)
         vals = np.array(list(scores.values()))
         self.legend.content = (
             f"🟥 {lo:g} {unit} or less → 🟨 → 🟩 {hi:g} {unit} or more  \n"
             f"_{len(scores)} points: lowest {np.min(vals):.0f}, median {np.median(vals):.0f} {unit}._"
         )
+        return shown

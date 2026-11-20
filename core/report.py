@@ -12,6 +12,8 @@ from pathlib import Path
 
 import numpy as np
 
+from core.export import NOT_CHECKED
+
 UR_NOTICE = (
     "UR robot models © 2023 Universal Robots A/S. Use hereof is subject to Universal Robots A/S' "
     "Terms and Conditions for Use of Graphical Documentation."
@@ -28,14 +30,19 @@ h2{font-size:18px;margin:28px 0 8px;border-bottom:1px solid #ddd;padding-bottom:
 table{border-collapse:collapse;width:100%;font-size:12px;margin:6px 0}
 th,td{border-bottom:1px solid #eee;padding:4px 6px;text-align:right}th{background:#f6f7f9}
 td:first-child,th:first-child{text-align:left}.bar{background:#5a8cdc;height:10px;display:inline-block}
+.stale{border:2px solid #c62828;background:#fdecea;color:#8c1c1c;padding:8px 12px;
+border-radius:6px;font-weight:600}
 .ok{color:#1f8a43}.warn{color:#b07800}.bad{color:#c62828}.note{color:#666;font-size:12px}
+figure{margin:0}
+.figs{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:12px;margin:12px 0}
 img{max-width:100%;border:1px solid #ddd;border-radius:6px}.scroll{max-height:420px;overflow:auto}
 section{margin:0 0 8px}figure{margin:12px 0}
 @page{margin:14mm 12mm}
 @media print{body{max-width:none;margin:0;padding:0;font-size:12px}.scroll{max-height:none;overflow:visible}
 h2{break-after:avoid;page-break-after:avoid}tr,figure,.kpis,.kpi,img{break-inside:avoid;page-break-inside:avoid}
 section{break-inside:avoid-page}}
-@media (prefers-color-scheme: dark){body{background:#16181c;color:#e6e8eb}th{background:#23262c}
+@media (prefers-color-scheme: dark){.stale{background:#3a1b1b;color:#ffb4ab}
+body{background:#16181c;color:#e6e8eb}th{background:#23262c}
 th,td{border-color:#2c3038}.kpi,h2,img{border-color:#2c3038}.meta,.note,.kpi span{color:#9aa0a8}
 .ok{color:#4cc27a}.warn{color:#e0a83a}.bad{color:#ef6b6b}svg{border-radius:6px}}
 """
@@ -66,6 +73,11 @@ class ReportInput:
     notes: list[str] = field(default_factory=list)
     settings: dict = field(default_factory=dict)
     sections: list[tuple[str, str]] = field(default_factory=list)  # v8 T19: (heading, HTML)
+    stale: list[str] = field(default_factory=list)  # components changed since the result (R15)
+    geometry: list[dict] = field(default_factory=list)  # name, mode, kind, deviation_m (M8)
+    geometry_warning: str | None = None  # core.collision_mesh.deviation_warning
+    motion_checked: bool | None = None  # paths built with the motion check; None = not known
+    mesh_license: str | None = None  # RobotSpec.mesh_license: "ur" shows UR_NOTICE
 
 
 def md_html(md: str) -> str:
@@ -75,9 +87,13 @@ def md_html(md: str) -> str:
     return MarkdownIt("commonmark", {"html": False}).enable("table").render(md)
 
 
+class PdfError(RuntimeError):
+    """The PDF could not be made; the message says why (the HTML report is still written)."""
+
+
 def html_to_pdf(html_path: Path, pdf_path: Path, timeout: float = 90.0) -> bool:
-    """v8 T19: print an HTML file to PDF with Edge (or Chrome) headless. False when no browser
-    is found (the HTML report is still there)."""
+    """v8 T19: print an HTML file to PDF with Edge, Chrome or Chromium headless. Raises PdfError when no
+    browser is found, when it ran but wrote no PDF (exit code, first stderr line) or timed out."""
     import shutil
     import subprocess
     import tempfile
@@ -86,35 +102,81 @@ def html_to_pdf(html_path: Path, pdf_path: Path, timeout: float = 90.0) -> bool:
         r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
         r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
         shutil.which("msedge"),
+        shutil.which("microsoft-edge"),
         shutil.which("google-chrome"),
         shutil.which("chromium"),
+        shutil.which("chromium-browser"),
     ]
     exe = next((c for c in cands if c and Path(c).is_file()), None)
     if exe is None:
-        return False
+        raise PdfError("No Edge / Chrome found to print the PDF; the HTML report was written")
     pdf_path = Path(pdf_path)
     pdf_path.unlink(missing_ok=True)
-    with tempfile.TemporaryDirectory() as prof:
-        subprocess.run(
-            [
-                exe,
-                "--headless=new",
-                "--disable-gpu",
-                f"--user-data-dir={prof}",
-                "--no-pdf-header-footer",
-                f"--print-to-pdf={pdf_path}",
-                Path(html_path).resolve().as_uri(),
-            ],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=timeout,
-            check=False,
-        )
-    return pdf_path.is_file() and pdf_path.stat().st_size > 0
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as prof:
+        try:
+            run = subprocess.run(
+                [
+                    exe,
+                    "--headless=new",
+                    "--disable-gpu",
+                    f"--user-data-dir={prof}",
+                    "--no-pdf-header-footer",
+                    f"--print-to-pdf={pdf_path}",
+                    Path(html_path).resolve().as_uri(),
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=timeout,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as err:
+            raise PdfError(
+                f"The browser timed out after {timeout:.0f} s making the PDF; the HTML report was written"
+            ) from err
+    if pdf_path.is_file() and pdf_path.stat().st_size > 0:
+        return True
+    first = ((run.stderr or "").strip().splitlines() or [""])[0][:200]
+    raise PdfError(
+        f"{Path(exe).name} ran (exit code {run.returncode}) but produced no PDF"
+        + (f": {first}" if first else "")
+        + "; the HTML report was written"
+    )
 
 
 def _e(x) -> str:
     return html.escape(str(x))
+
+
+def not_checked_html(r: ReportInput) -> str:
+    """The fixed 'Not checked' section: what this plan does NOT guarantee."""
+    items = list(NOT_CHECKED)
+    items[2] = (
+        "motion between points is kinematic only"
+        if r.motion_checked is None
+        else "motion between points was collision-checked (every 2 degrees of joint motion)"
+        if r.motion_checked
+        else "motion between points is kinematic only (paths were built without the motion check)"
+    )
+    items = [i[0].upper() + i[1:] for i in items]
+    out = ["<h2>Not checked</h2><ul>" + "".join(f"<li>{_e(i)}</li>" for i in items) + "</ul>"]
+    out.append("<p><b>Collision geometry.</b> Clearance results hold for the collision copies used:</p>")
+    if r.geometry_warning:
+        out.append(f"<p class='bad'><b>Warning:</b> {_e(r.geometry_warning)}</p>")
+    if r.geometry:
+        out.append("<table><tr><th>body</th><th>mode</th><th>kind</th><th>max deviation (mm)</th></tr>")
+        for g in r.geometry:
+            kind = g.get("kind", "")
+            cls = "warn" if kind == "approximate" else ""
+            out.append(
+                f"<tr><td>{_e(g.get('name', ''))}</td><td>{_e(g.get('mode', ''))}</td>"
+                f"<td class='{cls}'>{_e(kind)}</td>"
+                f"<td>{float(g.get('deviation_m', 0.0)) * 1000:.2f}</td></tr>"
+            )
+        out.append("</table>")
+    else:
+        out.append("<p class='note'>Collision geometry not recorded for this report.</p>")
+    return "".join(out)
 
 
 def build_report(r: ReportInput) -> str:
@@ -127,6 +189,14 @@ def build_report(r: ReportInput) -> str:
         f"<!doctype html><html lang='en'><head><meta charset='utf-8'>"
         f"<meta name='viewport' content='width=device-width,initial-scale=1'>"
         f"<title>{_e(r.title)}</title><style>{CSS}</style></head><body>",
+        *(
+            [
+                f"<div class='stale'>OUT OF DATE: {_e(', '.join(r.stale))} changed since this result was "
+                "computed. This report describes the old setup.</div>"
+            ]
+            if r.stale
+            else []
+        ),
         f"<h1>{_e(r.title)}</h1><div class='meta'>Generated {datetime.now():%Y-%m-%d %H:%M} · "
         f"robot {_e(r.robot)} · tool {_e(r.tool)} ({_e(r.process)}) · base {_e(r.base_mode)}</div>",
         "<div class='kpis'>",
@@ -142,11 +212,14 @@ def build_report(r: ReportInput) -> str:
         parts.append(f"<div class='kpi'><b>{tv.L * 1000:.0f} mm</b><span>tool length L</span></div>")
     parts.append("</div>")
 
-    for caption, uri in r.images:
-        parts.append(
-            f"<figure><img src='{uri}' alt='{_e(caption)}'><figcaption class='note'>{_e(caption)}"
-            "</figcaption></figure>"
-        )
+    if r.images:
+        parts.append("<div class='figs'>")
+        for caption, uri in r.images:
+            parts.append(
+                f"<figure><img src='{uri}' alt='{_e(caption)}'><figcaption class='note'>{_e(caption)}"
+                "</figcaption></figure>"
+            )
+        parts.append("</div>")
 
     for heading, body in r.sections:  # summary, cycle time, comparison, tolerance, unreached points
         parts.append(f"<section><h2>{_e(heading)}</h2>{body}</section>")
@@ -217,7 +290,8 @@ def build_report(r: ReportInput) -> str:
         for k, v in r.settings.items():
             parts.append(f"<tr><td>{_e(k)}</td><td style='text-align:left'>{_e(v)}</td></tr>")
         parts.append("</table>")
-    notes = [*r.notes, UR_NOTICE]
+    parts.append(not_checked_html(r))
+    notes = [*r.notes, *([UR_NOTICE] if r.mesh_license == "ur" else [])]
     parts.append("<h2>Notes</h2><ul class='note'>" + "".join(f"<li>{_e(n)}</li>" for n in notes) + "</ul>")
     parts.append("</body></html>")
     return "\n".join(parts)

@@ -1,0 +1,216 @@
+# Release build (D4): Windows exe folder, zip and per-user installer, tested offline, attached to a DRAFT release.
+#   git tag vX.Y.Z && git push origin vX.Y.Z      -> builds and creates a draft release; review it, then publish
+#   Actions -> release -> Run workflow             -> same, draft by default (input `draft`)
+# See packaging/README.md ("Releases from CI").
+# GitLab twin: .gitlab-ci.yml + .gitlab/ci/release.yml. Keep the steps the same on both.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      draft:
+        description: "Create the GitHub release as a draft (untick only to publish at once)"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    name: windows build + offline test
+    runs-on: windows-latest
+    # 2026-11-19 first GitHub run: 38 min, 22 of them building the maps one at a time (now 4 at once)
+    timeout-minutes: 45
+    env:
+      PYTHONUTF8: "1"
+      ENV_CACHE: "1" # bump to rebuild the cached conda env without changing environment.yml
+    defaults:
+      run:
+        shell: bash -el {0}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # git describe needs the tags
+
+      # Miniforge with an empty env `rso`; the cache below fills it, else environment.yml does
+      # (same steps as tests.yml)
+      - uses: conda-incubator/setup-miniconda@v4
+        with:
+          miniforge-version: latest
+          activate-environment: rso
+          conda-remove-defaults: "true"
+          use-mamba: true
+
+      - name: Conda env cache
+        id: env-cache
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.CONDA }}/envs/rso
+          key: env-${{ runner.os }}-${{ hashFiles('environment.yml') }}-${{ env.ENV_CACHE }}
+
+      - name: Create the env from environment.yml (cache miss)
+        if: steps.env-cache.outputs.cache-hit != 'true'
+        # conda, not mamba: on Windows `mamba` in bash is a cmd shim that opened a prompt and did nothing
+        run: |
+          conda env update -n rso -f environment.yml
+          python -c "import viser, pinocchio, coal, trimesh"  # fail here, not three steps later
+
+      - name: Reachability map cache
+        uses: actions/cache@v6
+        with:
+          path: cache/reachability
+          key: maps-${{ runner.os }}-${{ hashFiles('assets/robots/**/spec.yaml', 'opt/reachability.py') }}
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          # scripts/build_exe.py finds ISCC.exe under "Program Files (x86)\Inno Setup 6"; PATH as well
+          $dir = "${env:ProgramFiles(x86)}\Inno Setup 6"
+          if (-not (Test-Path "$dir\ISCC.exe")) { throw "ISCC.exe not found in $dir" }
+          $dir | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+
+      - name: Build exe, zip and installer (includes the exe's own selftest)
+        run: python scripts/build_exe.py --maps --zip --installer --map-jobs 4
+
+      - name: Block outbound network (firewall rule)
+        shell: pwsh
+        run: |
+          # GitHub-hosted Windows runners run as administrator. Loopback is not "Internet", so the app's
+          # own localhost server keeps working. Removed again in the always() step below.
+          New-NetFirewallRule -DisplayName "rso-offline-test" -Direction Outbound -Action Block `
+            -RemoteAddress Internet -Profile Any | Out-Null
+          $reached = $false
+          try { Invoke-WebRequest https://example.com -TimeoutSec 15 -UseBasicParsing | Out-Null; $reached = $true }
+          catch { Write-Host "outbound blocked as intended: $($_.Exception.Message)" }
+          if ($reached) { throw "the firewall rule did not block outbound traffic" }
+
+      - name: Offline selftest of the built exe
+        shell: pwsh
+        env:
+          RSO_OFFLINE_GUARD: "1"
+        run: |
+          $env:RSO_DATA = Join-Path $env:RUNNER_TEMP "rso-data-selftest"
+          & dist\RobotCellOptimizer\RobotCellOptimizer.exe --selftest
+          if ($LASTEXITCODE -ne 0) { throw "selftest failed with exit code $LASTEXITCODE" }
+
+      - name: Offline serve check (exe + headless Edge)
+        shell: pwsh
+        env:
+          RSO_OFFLINE_GUARD: "1"
+        run: |
+          $env:RSO_DATA = Join-Path $env:RUNNER_TEMP "rso-data-serve"
+          powershell -NoProfile -File packaging\ci_serve_check.ps1 -Exe dist\RobotCellOptimizer\RobotCellOptimizer.exe -Port 8765
+          if ($LASTEXITCODE -ne 0) { throw "serve check failed" }
+
+      - name: Remove firewall rule
+        if: always()
+        shell: pwsh
+        run: Remove-NetFirewallRule -DisplayName "rso-offline-test" -ErrorAction SilentlyContinue
+
+      - name: Install test (silent, per user), selftest of the installed app, uninstall
+        shell: pwsh
+        env:
+          RSO_OFFLINE_GUARD: "1"
+        run: |
+          $setup = Get-ChildItem dist -Filter "RobotCellOptimizer-*-setup.exe" | Select-Object -First 1
+          if (-not $setup) { throw "no setup exe in dist" }
+          $dir = Join-Path $env:LOCALAPPDATA "Programs\RobotCellOptimizer"
+          $p = Start-Process $setup.FullName -ArgumentList "/VERYSILENT", "/CURRENTUSER", "/SUPPRESSMSGBOXES", "/NORESTART", "/NOCANCEL" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "installer exit code $($p.ExitCode)" }
+          $exe = Join-Path $dir "RobotCellOptimizer.exe"
+          if (-not (Test-Path $exe)) { throw "installed exe missing: $exe" }
+          try {
+            $env:RSO_DATA = Join-Path $env:RUNNER_TEMP "rso-data-installed"
+            & $exe --selftest
+            if ($LASTEXITCODE -ne 0) { throw "selftest of the installed app failed with exit code $LASTEXITCODE" }
+          } finally {
+            $un = Get-ChildItem $dir -Filter "unins*.exe" | Select-Object -First 1
+            if ($un) { Start-Process $un.FullName -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait }
+          }
+          if (Test-Path $exe) { throw "uninstall left $exe behind" }
+
+      - name: Checksums and sizes
+        run: |
+          cat dist/SHA256SUMS.txt
+          ls -l dist/*.zip dist/*-setup.exe
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: windows-release
+          path: |
+            dist/RobotCellOptimizer-*-win64.zip
+            dist/RobotCellOptimizer-*-setup.exe
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
+          compression-level: 0 # already compressed
+
+  release:
+    name: draft GitHub release
+    needs: windows
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    permissions:
+      contents: write # only this job may create releases
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7 # only the notes template and its script (sparse)
+        with:
+          sparse-checkout: |
+            packaging/RELEASE_NOTES.md.in
+            scripts/release_notes.py
+          sparse-checkout-cone-mode: false
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: windows-release
+          path: release
+
+      - name: Check asset sizes (GitHub allows at most 2 GB per release file)
+        run: |
+          limit=$((2 * 1024 * 1024 * 1024 - 1))
+          ls -l release
+          for f in release/*; do
+            size=$(stat -c %s "$f")
+            if [ "$size" -gt "$limit" ]; then
+              echo "::error::$f is $size bytes, over GitHub's 2 GB per-file release limit. Build with --no-cad or split the asset."
+              exit 1
+            fi
+          done
+
+      - name: Write the release notes (download steps, SmartScreen, checksums)
+        env:
+          TAG: ${{ github.ref_type == 'tag' && github.ref_name || format('manual-{0}', github.run_number) }}
+        run: python3 scripts/release_notes.py release --version "$TAG" --out notes.md
+
+      - name: Create the release (draft)
+        env:
+          # tag pushes always make a draft; a manual run follows the `draft` input
+          DRAFT: ${{ github.event_name == 'workflow_dispatch' && format('{0}', inputs.draft) || 'true' }}
+          TAG: ${{ github.ref_type == 'tag' && github.ref_name || format('manual-{0}', github.run_number) }}
+        run: |
+          flags="--draft"
+          [ "$DRAFT" = "false" ] && flags=""
+          if [ "${{ github.ref_type }}" != "tag" ]; then
+            flags="$flags --target ${{ github.sha }} --prerelease"
+          fi
+          # notes.md first, then GitHub's generated change list: gh sends the file as the body with
+          # generate_release_notes set, and the API puts the given body before the generated text
+          gh release create "$TAG" release/* --repo "${{ github.repository }}" \
+            --title "Robot Cell Optimizer $TAG" --notes-file notes.md --generate-notes $flags
+
+  # Linux AppImage: NOT yet (user decision: after the first Windows release). Placeholder only.
+  # linux:
+  #   name: linux AppImage
+  #   runs-on: ubuntu-22.04      # old glibc so the AppImage runs on older distributions
+  #   timeout-minutes: 90
+  #   steps:
+  #     - checkout, setup-miniconda (environment.yml), PyInstaller onedir like packaging/rso.spec
+  #     - package the onedir folder as an AppImage (appimagetool, AppRun -> launch.py entry)
+  #     - offline selftest: `unshare -n` (no network namespace) + --selftest, then the headless-browser page check
+  #     - upload the AppImage to the same draft release (the `release` job then needs: [windows, linux])

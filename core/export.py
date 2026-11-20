@@ -158,7 +158,7 @@ def tcp_rows(
             spin_deg=f"{r.spin_deg:.1f}",
             tilt_deg=f"{r.tilt_deg:.2f}",
             standoff_mm=f"{r.standoff * 1000:.1f}",
-            clearance_mm=f"{min(r.clearance, 99.999) * 1000:.1f}",
+            clearance_mm=clearance_cell(r.clearance),
             manipulability=f"{r.manipulability:.4f}",
             limit_margin_deg=f"{r.limit_margin_deg:.1f}",
         )
@@ -178,8 +178,36 @@ def tcp_rows(
     return rows
 
 
-def rows_to_csv(rows: list[dict]) -> str:
+NOT_CHECKED = (
+    "payload, torque and dynamics (removed by design)",
+    "transit between stops is not collision-checked",
+    "motion between points is kinematic only, unless paths were built with 'Check moves between points'",
+    "spin and tilt are sampled, not searched continuously",
+)
+
+
+def clearance_cell(clearance: float) -> str:
+    """Clearance in mm for the CSV; empty when it was not measured (inf / no obstacle in range)."""
+    if not np.isfinite(clearance) or clearance >= 99.999:
+        return ""
+    return f"{clearance * 1000:.1f}"
+
+
+def csv_comments(stale: list[str] | None, geometry: str | None) -> list[str]:
+    """``#`` comment lines for the top of an exported CSV (parse_csv skips them)."""
+    out = []
+    if stale:
+        out.append(f"OUT OF DATE: {', '.join(stale)} changed since this result was computed")
+    out.append("not checked: " + "; ".join(NOT_CHECKED))
+    if geometry:
+        out.append(f"collision geometry: {geometry}")
+    return out
+
+
+def rows_to_csv(rows: list[dict], comments: list[str] | tuple = ()) -> str:
     buf = io.StringIO()
+    for c in comments:
+        buf.write("# " + " ".join(str(c).split()) + "\n")
     w = csv.DictWriter(buf, fieldnames=CSV_COLUMNS, lineterminator="\n")
     w.writeheader()
     w.writerows(rows)

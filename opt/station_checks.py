@@ -136,6 +136,13 @@ def verify(
     return assignment, results
 
 
+def station_terms(stations: list[dict], sites) -> tuple[float, float]:
+    """(carrier travel along the stops in order, mean preferred-standoff penalty): the two
+    cost terms of a station set that the planner and the tool optimizer must price alike."""
+    penalty = float(np.mean([sites.accept(v)[1] for v in stations])) if stations else 0.0
+    return path_travel(stations, sites), penalty
+
+
 def path_travel(stations: list[dict], sites) -> float:
     return float(sum(sites.travel(a, b) for a, b in zip(stations[:-1], stations[1:], strict=True)))
 

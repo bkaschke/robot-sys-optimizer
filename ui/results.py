@@ -47,7 +47,10 @@ class ResultsTab:
         # costs ~0.4 s, and the planner thread redraws after every streamed plan)
         self._pool: dict[int, tuple] = {}
         self._used: set[int] = set()
-        self._areas: list = []  # station areas painted on the part
+        self._areas: list = []  # station areas painted on the part (the shown node)
+        from ui.colour_mesh import NodeCache
+
+        self._area_cache = NodeCache(4)  # R1b: the last 4 area pictures, hidden when not shown
         self._busy = False
         self.chosen_listeners: list = []  # () -> None after the user picks another plan
         gui = server.gui
@@ -197,8 +200,9 @@ class ResultsTab:
     # --- drawing -------------------------------------------------------------------------------
 
     def _drop(self) -> None:
-        for h in self._handles + self._areas:
+        for h in self._handles:
             quiet_remove(h)
+        self._area_cache.hide()  # R1b: the station areas stay cached (hidden), see draw_areas
         self._handles, self._ghosts, self._areas = [], [], []
         self._used = set()
 
@@ -224,19 +228,21 @@ class ResultsTab:
         return {p: config_label(self._ik, np.asarray(q, float)) for p, q in ok.items()}
 
     def draw_areas(self, sol) -> None:
-        from ui.station_areas import PATH, area_meshes, display_mesh
+        """The station areas as one vertex-coloured mesh (R1b); a picture shown before is only
+        made visible again (``_area_cache``). ``area_names`` = its groups ``S<k>_G<g>``."""
+        from ui.colour_mesh import show_patch
+        from ui.station_areas import OFFSET, PATH, area_faces, display_mesh
 
+        self.area_names: list[str] = []
         mesh = self.s.part_mesh() if self.s.part else None
         if mesh is None or not self.show_areas.value:
             return
         ids, P, _, _ = tg.as_arrays(self.s.targets)
         mesh = display_mesh(mesh, P)
-        for name, v, f, color in area_meshes(mesh, ids, P, sol, STATION_COLORS, self._configs(sol)):
-            self._areas.append(
-                self.server.scene.add_mesh_simple(
-                    f"{PATH}/{name}", v, f, color=color, opacity=0.55, side="double", flat_shading=False
-                )
-            )
+        faces, rgb, self.area_names = area_faces(mesh, ids, P, sol, STATION_COLORS, self._configs(sol))
+        if len(faces):
+            h = show_patch(self.server.scene, self._area_cache, PATH, mesh, faces, rgb, OFFSET, 0.55)
+            self._areas = [h]
 
     def draw(self) -> None:
         self.compare.content = self._compare_table()

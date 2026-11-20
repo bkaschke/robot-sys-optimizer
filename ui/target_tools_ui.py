@@ -30,6 +30,10 @@ if TYPE_CHECKING:
 BRUSH = "/cell/part/brush"
 
 
+class Deleted(list):
+    """Undo-stack entry: the points removed by 'Delete all points' (restored by undo)."""
+
+
 class PointTools:
     def __init__(self, server: viser.ViserServer, tab: TargetsTab):
         self.server = server
@@ -91,12 +95,27 @@ class PointTools:
         if not self.undo_stack:
             notify(event, "Nothing to undo", "No points added since the tab opened")
             return 0
+        if isinstance(self.undo_stack[-1], Deleted):  # "Undo last add" also restores a "Delete all points"
+            return self._restore_deleted(event)
         drop = set(self.undo_stack.pop())
         pts = [p for p in self.s.targets.points if p.id not in drop]
         self.s.targets = self.s.targets.model_copy(update={"points": pts})
         self.tab.refresh()
         self.info.content = f"Removed {len(drop)} points."
         return len(drop)
+
+    def _restore_deleted(self, event=None) -> int:
+        stack = self.undo_stack
+        old = stack.pop()
+        have = {p.id for p in self.s.targets.points}
+        if have & {p.id for p in old}:  # cannot happen in LIFO order; never merge clashing ids
+            stack.append(old)
+            notify(event, "Cannot undo", "Point ids clash with newer points; undo those first")
+            return 0
+        self.s.targets = self.s.targets.model_copy(update={"points": [*old, *self.s.targets.points]})
+        self.tab.refresh()
+        self.info.content = f"Restored {len(old)} deleted points."
+        return len(old)
 
     # --- clicks -------------------------------------------------------------------------------
 
@@ -204,3 +223,37 @@ class PointTools:
         self.mesh_info.content = f"{len(m.faces):,} → **{len(reloaded.faces):,}** faces (`{path.name}`)"
         notify(event, "Mesh refined", f"{len(reloaded.faces):,} faces", ok=True)
         return True
+
+
+def ask_delete_all(tab, event) -> None:
+    """Delete all points of a TargetsTab: confirm (modal for the clicking browser), then delete;
+    undoable via PointTools.undo_last (review R16)."""
+    n = len(tab.s.targets.points)
+    if n == 0:
+        return notify(event, "Nothing to delete", "There are no points")
+    client = getattr(event, "client", None)
+    if client is None:  # no browser to ask (scripts, tests): the delete can be undone
+        return delete_all(tab, event)
+    with client.gui.add_modal("Delete all points?") as modal:
+        client.gui.add_markdown(
+            f"This deletes **{n}** points. Plans and feasibility results computed for them will be "
+            "marked out of date or removed. 'Undo last add' restores the points (not the plans)."
+        )
+        go = client.gui.add_button("Delete all points", color="red")
+        stop = client.gui.add_button("Cancel")
+
+    @go.on_click
+    def _(e) -> None:
+        modal.close()
+        delete_all(tab, e)
+
+    stop.on_click(lambda e: modal.close())
+
+
+def delete_all(tab, event=None) -> None:
+    old = list(tab.s.targets.points)
+    tab.tools.undo_stack.append(Deleted(old))
+    tab.s.targets = tab.s.targets.model_copy(update={"points": []})
+    tab.refresh()
+    tab.tools.info.content = f"Deleted **{len(old)}** points (Undo last add restores them)."
+    notify(event, "Points deleted", f"{len(old)} points; undo with 'Undo last add'", ok=True)

@@ -10,10 +10,12 @@ from __future__ import annotations
 
 import hashlib
 import threading
+import time
 from pathlib import Path
 
 _CACHE: dict[str, tuple[tuple[int, int], str]] = {}
 _LOCK = threading.Lock()
+SETTLE_NS = 2_000_000_000  # newer files are hashed again on every call (see file_hash)
 MAX_FOLDER_FILES = 2000  # a URDF folder larger than this: only the URDF file itself counts
 
 
@@ -31,8 +33,11 @@ def file_hash(path: Path) -> str:
         for chunk in iter(lambda: f.read(1 << 20), b""):
             h.update(chunk)
     out = h.hexdigest()[:12]
-    with _LOCK:
-        _CACHE[key] = (sig, out)
+    # review R2: a file written in the last 2 s may be rewritten within the same mtime tick (coarse
+    # clocks on Windows): same size + mtime, new content. Cache it only once it has settled.
+    if time.time_ns() - st.st_mtime_ns > SETTLE_NS:
+        with _LOCK:
+            _CACHE[key] = (sig, out)
     return out
 
 

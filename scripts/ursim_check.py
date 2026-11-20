@@ -30,7 +30,7 @@ def read_stops(csv_path: Path) -> dict[int, list[list[float]]]:
     """{stop: [q (deg) per reached point, in CSV order]}."""
     stops: dict[int, list[list[float]]] = {}
     with open(csv_path, newline="", encoding="utf-8") as f:
-        for row in csv.DictReader(f):
+        for row in csv.DictReader(line for line in f if not line.startswith("#")):  # comment rows
             if row.get("status") == "unreachable" or not row.get("q1_deg"):
                 continue
             k = int(float(row["station"]))

@@ -13,7 +13,9 @@ def path_checker(s: Session):
     from core.feasibility import FeasibilityChecker
     from core.ik import make_ik
     from core.robot import Robot
+    from ui.plan_job import checker_config
 
+    margins, settings = checker_config(s)  # the project's optimizer.margins
     robot = Robot(s.robot.spec)
     sites = s.sites()
     bb, wb = sites.scene_bodies() if sites is not None else ([], [])
@@ -23,11 +25,14 @@ def path_checker(s: Session):
         s.part_mesh(),
         s.T_world_base,
         s.part.T_world_part,
+        margins,
         base_bodies=bb,
         world_bodies=wb,
         obstacles=s.obstacle_entries(),  # stay-out zones
     )
-    return FeasibilityChecker(robot, make_ik(robot), s.tool_model, scene, s.T_world_base, s.part.T_world_part)
+    return FeasibilityChecker(
+        robot, make_ik(robot), s.tool_model, scene, s.T_world_base, s.part.T_world_part, settings
+    )
 
 
 def carrier_path(s: Session, sol, step: float, checker=None):

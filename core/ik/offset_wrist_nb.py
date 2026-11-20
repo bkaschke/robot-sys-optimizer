@@ -18,7 +18,12 @@ from __future__ import annotations
 import math
 
 import numpy as np
-from numba import njit, prange
+
+from core import data_paths
+
+data_paths.configure_numba_cache()  # frozen builds cache compiled code in the user data folder
+
+from numba import njit, prange  # noqa: E402
 
 B = 16
 TOL_FK = 1e-6

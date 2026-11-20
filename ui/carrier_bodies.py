@@ -19,6 +19,7 @@ import viser
 from pydantic import ValidationError
 
 from core.carrier import MESH_EXTS, UNIT_SCALE, body_top
+from core.safe_io import replace_file
 from core.schema import Pose, Primitive
 from core.transforms import (
     make_T,
@@ -28,6 +29,7 @@ from core.transforms import (
     rpy_to_matrix,
     wxyz_to_matrix,
 )
+from ui.session import load_mesh
 from ui.widgets import MAX_UPLOAD, GizmoStyle, notify, safe_name
 
 if TYPE_CHECKING:
@@ -227,8 +229,15 @@ class BodyEditor:
             return False
         dest = self.p.s.project_dir / "assets" / "carriers" / fname
         dest.parent.mkdir(parents=True, exist_ok=True)
-        existed = dest.exists()
-        dest.write_bytes(content)
+        units = self.mesh_units.value
+        try:  # validated as a temp file first: a bad upload never overwrites the old one
+            existed = replace_file(dest, content, lambda p: load_mesh(p, units))
+        except Exception as err:  # trimesh raises many types on bad files
+            kept = " The existing file was kept." if dest.exists() else ""
+            notify(event, "Upload rejected", f"{fname}: {err}.{kept}")
+            return False
+        if existed:
+            notify(event, "Body file replaced", f"replaced existing {fname}", ok=True)
         stem = re.sub(r"[^A-Za-z0-9_]", "_", fname.rsplit(".", 1)[0])
         body = Primitive(
             shape="mesh", mesh=self.p.s.relative(dest), units=self.mesh_units.value, name=self._new_name(stem)

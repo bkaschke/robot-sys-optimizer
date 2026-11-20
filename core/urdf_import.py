@@ -159,7 +159,24 @@ def inspect_urdf(path: Path) -> URDFInfo:
 
 
 def import_urdf_zip(data: bytes, dest: Path, require_actuated: bool = True) -> URDFInfo:
-    if dest.exists():
-        shutil.rmtree(dest)
-    safe_extract_zip(data, dest)
-    return import_urdf(dest, dest, require_actuated)
+    """Extract and validate in a temp folder, then swap it in for ``dest``: a broken zip
+    leaves an existing ``dest`` untouched."""
+    from core.safe_io import replace_dir
+
+    dest = Path(dest).resolve()
+    built: list[tuple[Path, URDFInfo]] = []
+
+    def build(tmp: Path) -> None:
+        built.append((tmp.resolve(), import_urdf_after_extract(data, tmp, require_actuated)))
+
+    replace_dir(dest, build)
+    tmp, info = built[0]
+    # the validated URDF path points into the temp folder: map it to the final folder
+    return URDFInfo(
+        dest / info.path.relative_to(tmp), info.name, info.root_link, info.leaf_link, info.actuated_joints
+    )
+
+
+def import_urdf_after_extract(data: bytes, folder: Path, require_actuated: bool) -> URDFInfo:
+    safe_extract_zip(data, folder)
+    return import_urdf(folder, folder, require_actuated)

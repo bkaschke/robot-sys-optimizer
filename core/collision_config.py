@@ -126,3 +126,38 @@ def part_low(part_mesh: trimesh.Trimesh, cfg: CollisionConfig) -> trimesh.Trimes
         except (OSError, ValueError):
             pass  # missing / broken: the simplified copy of the visual mesh
     return low(part_mesh, "part", cfg, keep=cfg.part_keep)
+
+
+# R11 (review fixes, rebased onto v12's config): the same copies plus what they are
+# (core.collision_mesh.MeshInfo), for CollisionScene.geometry_report and the report's deviation note.
+def exact_info(n_faces: int, mode: str = "visual"):
+    """MeshInfo of a mesh used as it is (no simplified copy)."""
+    from core.collision_mesh import MeshInfo
+
+    return MeshInfo(mode, "visual", "exact", int(n_faces), int(n_faces))
+
+
+def low_info(mesh: trimesh.Trimesh, component: str, cfg: CollisionConfig, keep=None, auto_faces=None):
+    """(collision copy, MeshInfo) of a mesh of this component (``low`` plus the measured deviation)."""
+    from core.collision_mesh import collision_mesh_info
+
+    return collision_mesh_info(mesh, geom_of(cfg, component), keep=keep, auto_faces=auto_faces)
+
+
+def part_low_info(part_mesh: trimesh.Trimesh, cfg: CollisionConfig):
+    """``part_low`` plus its MeshInfo; the package builder's own collision mesh counts as exact
+    (``used`` = "package")."""
+    if cfg.part_low and Path(cfg.part_low).is_file():
+        from core.collision_mesh import MeshInfo
+
+        own = part_low(part_mesh, cfg)  # falls back to the simplified copy when it cannot be read
+        if cfg.part_low and (str(Path(cfg.part_low)), cfg.part_low_scale) in {
+            (k[0], k[2]) for k in _PART_LOW
+        }:
+            return own, MeshInfo("package", "package", "exact", len(part_mesh.faces), len(own.faces))
+    return low_info(part_mesh, "part", cfg, keep=cfg.part_keep)
+
+
+def geom_fingerprint(cfg: CollisionConfig | None = None) -> str:
+    """The collision-geometry identity for staleness stamps (every setting, ``CollisionConfig.key``)."""
+    return f"{(cfg or current()).key()}|robot_auto={ROBOT_AUTO_FACES}"

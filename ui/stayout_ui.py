@@ -18,10 +18,11 @@ import viser
 from pydantic import ValidationError
 
 from core.carrier import primitive_mesh
+from core.safe_io import replace_file
 from core.schema import Pose, Primitive
 from core.transforms import make_T, matrix_to_rpy, matrix_to_wxyz, pose_to_matrix, wxyz_to_matrix
 from ui.robot_view import quiet_remove
-from ui.session import MESH_EXTS, UNIT_SCALE, Session
+from ui.session import MESH_EXTS, UNIT_SCALE, Session, load_mesh
 from ui.widgets import MAX_UPLOAD, GizmoStyle, Latest, notify, safe_name
 
 ROOT = "/cell/stayout"
@@ -155,8 +156,14 @@ class StayoutPanel:
             notify(event, "Unsupported mesh", f"Use {', '.join(MESH_EXTS)} under 200 MB")
             return False
         path = self.s.project_dir / "assets" / "stayouts" / safe_name(filename)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(data)
+        try:  # validated as a temp file first: a bad upload never overwrites the old one
+            replaced = replace_file(path, data, lambda p: load_mesh(p, self.units.value))
+        except Exception as err:  # trimesh raises many types on bad files
+            kept = " The existing file was kept." if path.exists() else ""
+            notify(event, "Upload rejected", f"{path.name}: {err}.{kept}")
+            return False
+        if replaced:
+            notify(event, "Stay-out mesh replaced", f"replaced existing {path.name}", ok=True)
         name = self._unique(safe_name(Path(filename).stem).replace(".", "_")[:40] or "mesh")
         z = Primitive(
             shape="mesh",

@@ -26,9 +26,20 @@ per-task notes to `docs/HISTORY.md`.**
   (`core/feasibility.py`) is the cost of planning (collision checks); reach maps are cached on disk
   (`cache/reachability/`); robot textures are downscaled before viser sends them
   (`ui.robot_view.light_urdf`, v13: PNG encoding of the 2048 px UR atlases was most of the app start).
-- **Batch runs (v13):** part packages (`core/part_package.py`) are planned by `ui/batch_run.py`, one
-  spawned process per part that drives a browserless app (`ui/batch_part.py`); GUI: Optimize ->
-  Several parts, Results -> Batch results; CLI: `scripts/batch_run.py`.
+- **Our line on v13 (branch `rebase/v13`, 2026-11-18):** the v8 review fixes, the batch queue,
+  rendering, Windows exe / installer / release workflow (GitHub and GitLab), tool-surface detection,
+  STEP parts and the v9 usability round, rebased onto `v13` (51 commits, not pushed). How each was
+  ported: `docs/HISTORY.md`, "Our line rebased onto v13".
+- **Batch (one system since 2026-11-19, branch `feature/batch-merge`):** the queue (`core/batch.py`,
+  `batch.json`; jobs from the current part + selection, part files with the tool-surface rule, or
+  v13 part packages) turns each job into a part package (`ui.batch_materialize.make_package`), and
+  v13's runner plans them (`ui/batch_run.py`: one spawned process per part driving a browserless
+  app, `ui/batch_part.py`; several at once). Every job uses the cell's settings (`_setup/`, the
+  open project at Run); per job only *Quick plan*. Cancel sends unfinished jobs back to pending.
+  GUI: Optimize -> Several parts (batch) (`ui/batch_ui.py` + `ui/batch_queue_ui.py`), Results ->
+  Batch results (`<batch>/results`); CLI: `scripts/batch_run.py` (a batch folder, or project +
+  parts folder). Keep v13's runner files close to upstream (small hooks only: part extras,
+  `on_row`) so later upstream rounds rebase easily.
 
 ## Working notes for this repo
 
@@ -59,7 +70,7 @@ per-task notes to `docs/HISTORY.md`.**
 - `core/` and `opt/` must **never import viser** or anything in `ui/`. The math must stay usable without the viewer. `tests/test_v12_layers.py` enforces it.
 - Robots are looked up by name from `assets/robots/<name>/` (URDF + meshes + `spec.yaml` + IK solver name). **Never hard-code the UR20.**
 - The end effector is **mount + parametric extension (L, θ, d) + head + TCPs**. It is never a static URDF alone.
-- The optimizer has three nested layers: tool geometry (outer) → base/station placement (middle) → per-point IK (inner). The reachability map depends only on robot + tool geometry, and is cached on disk keyed by a hash of those inputs.
+- The optimizer has three nested layers: tool geometry (outer) → base/station placement (middle) → per-point IK (inner). The reachability map depends only on robot + tool geometry, and is cached on disk (`data_paths.cache_dir('reachability')`, read-through to the bundled maps) keyed by a hash of those inputs.
 - Long optimizer runs go in a background thread or process. The GUI must stay responsive.
 - **Robot-agnostic (v7):** no payload, torque, mass or tip-over checks (removed at the user's request). Code never asks the IK solver for UR internals: use the solver interface in `core/ik/__init__.py` (`solve`, `solve_batch`, `manipulability`, `config_label`, `n_branches`, `batch`, `base_height`).
 
@@ -102,22 +113,47 @@ The v1 layout below still holds for the top level; `core/`, `opt/` and `ui/` hav
 ```
 app.py            Viser entry point (build_app(server, dark=...) is testable without blocking)
 README.md         landing page -> docs/USER_GUIDE.md (user guide)
+CHANGELOG.md      user-facing changes per development round since main (newest first); add to it with each round
+packaging/        Windows exe: rso.spec (PyInstaller onedir), launch.py (entry point + --selftest + offline guard),
+                  RobotCellOptimizer.iss (Inno Setup, per-user), ci_serve_check.ps1, README.md
+.github/workflows tests.yml (lint on Linux; guide check + fast tests on Windows + ubuntu-22.04), release.yml (tag -> exe, zip, setup, draft release)
+.gitlab-ci.yml    GitLab twin of both workflows: variables (runner tags, images) + workflow rules; includes .gitlab/ci/setup.yml
+                  (conda env, caches), tests.yml, release.yml. Change a check on one host, change it on the other.
 environment.yml   conda env `rso` (all dependencies)
 docs/             PROJECT_PLAN.md (the spec)
 scripts/          run_app.bat (Windows launcher); make_examples.py → examples/{rail_long_part,mobile_amr}/project.json;
                   make_golden_parts.py → assets/parts/*.stl; import_ur_description.py;
-                  make_sample_tools.py → assets/tools/{orbital_sander,scanner} + tools/*.yaml
+                  make_sample_tools.py → assets/tools/{orbital_sander,scanner} + tools/*.yaml;
+                  build_exe.py (PyInstaller build, selftest, zip, installer, SHA256SUMS); tool_surface_eval.py (detector
+                  accuracy on the synthetic set or a folder of labelled samples); run_app.sh (Linux)
 ui/               session (state ↔ project file), widgets (PoseWidgets, notify), cell, robot_view,
                   tool_setup, tool_view, targets_ui, optimize (feasibility run/inspect),
                   placement (heatmap), stations (planner panel), tool_opt (tool-geometry panel),
                   results (Results tab), carrier_ui + carrier_bodies (External Axis tab), target_tools_ui
                   (brush / single points / tessellate), project_panel (+ Examples)
+                  batch_ui + batch_queue_ui (Optimizer → Several parts (batch) panel: run / queue edits), batch_job (queue runner
+                  over v13's batch_run + CLI `python -m ui.batch_job`, no viser), batch_materialize (job → part package, auto tool
+                  surface rule, review pictures),
+                  report_make (report / CSV / userframes without the GUI), report_text (viser-free texts), report_views (framed Iso/Top
+                  3D pictures for the report), view_controls (Lighting, Shadows, Fit view, Top/Front/Side/Iso), display_lod (simplified
+                  display copy above 300k triangles, overlay lift, mesh cache), colour_mesh (vertex-coloured GLB overlays),
+                  targets_draw (Targets scene drawing, updated in place), tool_surface_ui (Targets → Detect tool surface),
+                  preflight_run (setup check of a session, CLI) + preflight_ui (Optimize -> Setup check), handover (Everything (zip)),
+                  app_state (Settings & help folder + project hooks, support bundle button), plan_assets (asset stamps for the worker), sim_status (playback status text)
 core/             schema, golden_parts, robot, ik/{ur,opw,numeric}, transforms, urdf_import,
                   tool (parametric EE + library I/O), process (presets), mesh_select (pick + region grow),
                   targets (selection, normals, generators, CSV, target-set edits), target_tools (lattice,
                   brush dab, dedupe, refine_mesh),
-                  collision (Coal via Pinocchio), payload (static torque), feasibility (per-point check),
-                  carrier (rail/gantry/mobile from primitives, URDF, tip-over), standoff (shapely zones)
+                  collision (Coal via Pinocchio), feasibility (per-point check),
+                  carrier (rail/gantry/mobile from primitives, URDF), standoff (shapely zones),
+                  data_paths (resources() read-only vs data_dir()/workspace_dir()/cache_dir() writable; frozen-aware),
+                  batch (batch.json manifest, status, summary; no viser), target_gen (GenSettings, generate_targets without the GUI),
+                  step_import (STEP → mesh + CAD face id per triangle, OCP, cached), tool_surface (smooth-region segmentation),
+                  tool_surface_features (per-region features, ray visibility), tool_surface_pick (scoring, pick-and-grow, confidence,
+                  DEFAULT_PARAMS), tool_surface_eval (IoU metrics, labelled-sample loader, baselines), mandrels / mandrel_cases /
+                  mandrels_hard (synthetic mandrels with ground truth; EASY and HARD sets), safe_io (validate, then replace),
+                  preflight (setup-check findings), app_log (log file),
+                  support_bundle (zip for problem reports, no meshes)
 opt/              reachability (map, offset map, lookup, voting, coverage matrix), placement (stations),
                   sites (floor / carrier search spaces), tool_geometry (L bisection + shape CMA-ES), cost
 tools/            tool library (one YAML per EE)
@@ -126,7 +162,7 @@ assets/tools/     EE URDFs + meshes
 assets/parts/     test parts
 examples/         ready-to-run project files
 tests/            pytest + golden scenes
-cache/            reachability maps (*.npz, gitignored, keyed by robot+TCP+settings hash)
+cache/            reachability maps (*.npz, gitignored, keyed by robot+TCP+settings hash); source checkout only, see core/data_paths
 ```
 
 **Golden parts** (`core/golden_parts.py`, built procedurally so tests can compare against analytic geometry), used in every milestone's tests:
@@ -140,7 +176,7 @@ The STLs in `assets/parts/` are generated from these; regenerate them if the bui
 
 ## Environment
 
-- Windows 10, Git Bash or PowerShell. **Miniforge** is at `C:\Users\Ben\miniforge3`, not on PATH. The conda env **`rso`** (Python 3.12) is defined in `environment.yml`, the single source of dependencies.
+- Windows 10/11, Git Bash or PowerShell (Linux is tested in CI). Miniforge/conda may not be on PATH: call its `conda.exe` by path. The conda env **`rso`** (Python 3.12) is created from `environment.yml`, the single source of dependencies. **`$PY` below = that env's `python.exe`** (e.g. `<miniforge>/envs/rso/python.exe`; find it with `conda env list`). Builds and tests must use this env, not a venv.
 - Pinocchio and Coal come from conda-forge; there are no Windows wheels on PyPI. Pip-only packages (viser, yourdfpy, pydantic, trimesh, xacro) go in the `pip:` section of `environment.yml`.
 - **BLAS must be OpenBLAS.** The conda-forge MKL build kills the process (0xc06d007f) on any numpy matmul on this machine. `environment.yml` pins `libblas=*=*openblas`.
 - The old `.venv/` from M0 is obsolete (gitignored); do not use it.
@@ -149,19 +185,25 @@ The STLs in `assets/parts/` are generated from these; regenerate them if the bui
 
 ## Commands
 
-Git Bash paths (in PowerShell use `$env:USERPROFILE\miniforge3\...`):
+Set `PY` and `RUFF` to your `rso` env (Git Bash style paths; in PowerShell use backslashes):
 
 ```
-PY=/c/Users/Ben/miniforge3/envs/rso/python.exe
-RUFF=/c/Users/Ben/miniforge3/envs/rso/Library/bin/ruff.exe
-/c/Users/Ben/miniforge3/Scripts/conda.exe env update -n rso -f environment.yml --prune   # setup / sync
+PY=<rso env>/python.exe
+RUFF=<rso env>/Library/bin/ruff.exe
+<miniforge>/Scripts/conda.exe env update -n rso -f environment.yml --prune   # setup / sync (create: env create)
 $PY app.py [--port 8080]                  # serve the GUI → http://localhost:8080
 $PY -m pytest -q                          # all tests in one process (~13 min; can run out of memory)
 $PY scripts/test_batches.py               # same tests, 4 files per process (low memory, ~60 min)
 $PY scripts/test_batches.py --fast        # skip the tests marked slow (plans, tool optimizer, paths; ~14 min, v13)
+                                          # --jobs N: N batches at once (CI uses 3; keep 1 on this PC)
 # tests/conftest.py points RSO_WORKSPACE at a temporary folder: tests never write the user's workspace/
 $RUFF check . && $RUFF format --check .   # lint + format
-$PY scripts/make_portable.py              # dist/*-portable-<sha>.zip: last commit + conda-pack'd env (offline PCs; guide 2.5)
+$PY scripts/make_portable.py              # dist/*-portable-<sha>.zip: last commit + conda-pack'd env (offline PCs; guide 2.6; the installer is the recommended route, guide 2.1)
+$PY scripts/build_exe.py --zip            # PyInstaller onedir + selftest + zip (--maps --installer for a release; packaging/README.md;
+                                          # --map-jobs N builds N maps at once, CI uses 4)
+$PY scripts/tool_surface_eval.py --synthetic --detector core.tool_surface_pick:detect   # IoU table of the detector
+$PY scripts/batch_run.py <batch dir>       # run the pending jobs of a batch without the GUI (or <project> <parts> <out>)
+$PY -m ui.preflight_run <project dir>     # setup check of a saved project (exit 1 on an error)
 $PY scripts/make_golden_parts.py          # regenerate assets/parts/*.stl
 $PY scripts/import_ur_description.py <clone> ur20   # re-import a UR model (see the script docstring)
 ```

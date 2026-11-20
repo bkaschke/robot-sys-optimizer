@@ -34,6 +34,51 @@ pause
 """
 
 
+# Import names of the runtime packages in environment.yml (tests/test_packaging.py keeps this in sync).
+# Checked in the env being packed before the zip is written: a missing package would otherwise only
+# show up on the offline target PC.
+RUNTIME_MODULES = (
+    "pinocchio", "coal", "numpy", "scipy", "numba", "rtree", "yaml", "PIL", "lxml", "pyparsing",
+    "dateutil", "fontTools", "viser", "yourdfpy", "pydantic", "trimesh", "ortools", "cma", "shapely",
+    "optuna", "fast_simplification", "cadquery", "collada", "manifold3d",
+)  # fmt: skip
+
+
+def env_python(prefix: str | Path) -> Path:
+    p = Path(prefix)
+    for c in (p / "python.exe", p / "bin" / "python"):
+        if c.exists():
+            return c
+    sys.exit(f"no Python found in the env to pack: {p}")
+
+
+def check_env(prefix: str | Path, modules=RUNTIME_MODULES) -> None:
+    """Import every runtime package with the env's own Python (isolated, no user site-packages,
+    which conda-pack would not include). Exits with the missing packages named."""
+    code = (
+        "import importlib, sys\n"
+        "bad = []\n"
+        "for m in sys.argv[1:]:\n"
+        "    try:\n"
+        "        importlib.import_module(m)\n"
+        "    except Exception as e:\n"
+        "        bad.append(f'{m}: {type(e).__name__}: {e}')\n"
+        "print('\\n'.join(bad))\n"
+        "sys.exit(1 if bad else 0)\n"
+    )
+    env = {**os.environ, "PYTHONNOUSERSITE": "1"}
+    print(f"Checking {len(modules)} packages import in {prefix} ...", flush=True)
+    r = subprocess.run(
+        [str(env_python(prefix)), "-I", "-c", code, *modules], capture_output=True, text=True, env=env
+    )
+    if r.returncode != 0:
+        lines = r.stdout.strip() or r.stderr.strip()[-2000:]
+        sys.exit(
+            "The env to pack is missing packages (the zip was not written):\n"
+            f"{lines}\nUpdate it: conda env update -n rso -f environment.yml --prune"
+        )
+
+
 def find_conda_pack() -> str:
     for c in (
         os.environ.get("CONDA_PACK"),
@@ -77,6 +122,7 @@ def main(argv: list[str] | None = None) -> Path:
     if git("status", "--porcelain", "--untracked-files=no"):
         print("WARNING: uncommitted changes are not included (the bundle uses the last commit).")
     sha = git("rev-parse", "--short", "HEAD")
+    check_env(a.prefix)
     a.out.mkdir(parents=True, exist_ok=True)
     final = a.out / f"{TOP}-portable-{sha}.zip"
 

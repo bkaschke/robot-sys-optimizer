@@ -54,6 +54,7 @@ class ToleranceResult:
     unplanned: list[int] = field(default_factory=list)  # unreached in the plan itself: not tested
     lost: list[int] = field(default_factory=list)  # per sample: planned points not reached (v8 T12)
     key: str = ""  # v12 #8: the plan's key (Solution.key)
+    plan_stamp: dict | None = None  # the plan's setup stamp when this check started (ui.tolerance_ui)
 
     def worst(self, n: int = 10) -> list[PointTolerance]:
         return sorted(self.points.values(), key=lambda p: (p.rate, p.fail_mm or np.inf))[:n]

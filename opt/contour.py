@@ -52,7 +52,9 @@ class ContourSites(CarrierSites):
         self.sides = b.robot_sides()
         for k, name in enumerate(self.sides):
             side = np.array(SIDES[name])
-            reach = float(np.max(np.asarray(local.exterior.coords) @ side))  # centre -> facing edge
+            reach = float(
+                np.max(np.asarray(local.convex_hull.exterior.coords) @ side)
+            )  # centre -> facing edge
             tb = self._build(reach, step, float(np.arctan2(side[1], side[0])))
             tb[:, 0] += t0
             t0 = float(tb[-1, 0]) + 1e-6  # segments end to end (no interpolation across them)

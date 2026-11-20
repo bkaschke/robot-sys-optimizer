@@ -279,7 +279,7 @@ class ToolOptPanel:
             self.progress.value = 100.0 * f
 
         from ui import jobs
-        from ui.plan_job import payload_for
+        from ui.plan_job import failure_text, payload_for
 
         in_process = block or not jobs.USE_WORKER
         payload = payload_for(s, spec, live=in_process)
@@ -288,6 +288,8 @@ class ToolOptPanel:
         def on_msg(kind: str, data) -> None:
             if kind == "progress":
                 say(*data)
+            elif kind == "warn":
+                log(f"Tool optimization: {data}.", "warn")
 
         def work() -> None:
             try:
@@ -296,15 +298,13 @@ class ToolOptPanel:
                 )
                 self._show()
             except jobs.JobCancelledError as err:  # the worker was ended after Cancel
-                self.info.content = f"**Cancelled** ({err})."
+                self.info.content = f"**Cancelled** ({err}); no design from this run."
                 log(f"Tool optimization cancelled: {err}.", "warn", self._t0)
-            except CancelledError:  # Cancel while a reachability map was being built
-                self.info.content = "**Cancelled** (while building the reachability map)."
-                log("Tool optimization cancelled (while building the reachability map).", "warn")
+            except CancelledError:  # Cancel inside the job (map build, or any step in worker mode)
+                self.info.content = "**Cancelled**; no design from this run."
+                log("Tool optimization cancelled.", "warn", self._t0)
             except Exception as err:
-                self.info.content = f"⚠ tool optimization failed: {err}"
-                log(f"Tool optimization failed: {err}", "error")
-                raise
+                self.info.content = f"⚠ tool optimization failed: {failure_text('Tool optimization', err)}"
             finally:
                 self.run.visible, self.stop.visible, self.progress.visible = True, False, False
 

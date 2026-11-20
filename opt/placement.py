@@ -28,7 +28,16 @@ from core.schema import Solution, Station, TargetGroup, Weights
 from opt.cost import cost_breakdown, cycle_estimate, path_length, wrap_excess
 from opt.reachability import coverage_matrix
 from opt.set_cover import _solve, greedy_cover, min_stations, set_cover  # noqa: F401
-from opt.station_checks import CheckMemo, _nn, _robust, order_by, path_travel, sites_start, verify  # noqa: F401
+from opt.station_checks import (  # noqa: F401
+    CheckMemo,
+    _nn,
+    _robust,
+    order_by,
+    path_travel,
+    sites_start,
+    station_terms,
+    verify,
+)
 
 
 @dataclass
@@ -262,7 +271,7 @@ def plan_stations(
             if not zones:  # v6: unzoned plans pay for their configuration changes too
                 groups = config_changes(seqs)
             Tst = [sites.T(v) for v in stations]
-            penalty = float(np.mean([sites.accept(v)[1] for v in stations]))
+            travel, penalty = station_terms(stations, sites)
             cyc = cycle_estimate(seqs, results, stations, sites, checker.robot, st.cycle, st.speed_zones, t)
             cyc = cyc["total"]
             cost, breakdown = cost_breakdown(
@@ -273,7 +282,7 @@ def plan_stations(
                 tool_length,
                 L_ref,
                 rmap.max_manip,
-                travel=path_travel(stations, sites),
+                travel=travel,
                 standoff_penalty=penalty,
                 groups=groups,
                 wrist_flips=flips,
@@ -362,23 +371,25 @@ def plan_stations(
                 # refine the most promising plans (fewest unreached, then cost); a refined plan
                 # replaces the quick one when it is better
                 quick = {len(sol.stations): sol for sol, _ in out}
-                order = sorted(jobs, key=lambda j: rank(quick[j[0]]) if j[0] in quick else (True, 1e9, 0))
-                best = quick[order[0][0]] if order and order[0][0] in quick else None
+                # a job's plan has len(stations) stops, which repair_cover can make more than k
+                nk = lambda j: len(j[1])  # noqa: E731
+                order = sorted(jobs, key=lambda j: rank(quick[nk(j)]) if nk(j) in quick else (True, 1e9, 0))
+                best = quick[nk(order[0])] if order and nk(order[0]) in quick else None
                 top = [  # skip plans that are clearly worse than the best quick one
                     j
                     for j in order[: st.refine_top]
                     if best is None
-                    or j[0] not in quick
+                    or nk(j) not in quick
                     or (
-                        len(quick[j[0]].unreached) <= len(best.unreached)
-                        and quick[j[0]].cost <= 1.3 * best.cost + 1.0
+                        len(quick[nk(j)].unreached) <= len(best.unreached)
+                        and quick[nk(j)].cost <= 1.3 * best.cost + 1.0
                     )
                 ]
                 for n, (k, stations, first, sub_cov) in enumerate(top):
                     f0 = 0.5 + 0.5 * n / len(top)
                     stations = refine(k, stations, first, sub_cov, f0, f0 + 0.4 / len(top))
                     new = finish(stations, first, k, f0, sub_cov)
-                    old = quick.get(k)
+                    old = quick.get(len(new[0].stations))
                     if old is None or rank(new[0]) < rank(old):
                         emit(*new)
     except CancelledError:

@@ -141,3 +141,17 @@ def test_report_has_dark_css():
     from core.report import CSS
 
     assert "prefers-color-scheme: dark" in CSS
+
+
+def test_settings_panel_shows_version(app, monkeypatch):
+    from core.version import app_version
+    from ui.app_state import build_settings
+
+    server, _state = app
+    seen = []
+    real = server.gui.add_markdown
+    monkeypatch.setattr(
+        server.gui, "add_markdown", lambda text, *a, **k: (seen.append(text), real(text, *a, **k))[1]
+    )
+    build_settings(server, False, None)
+    assert f"Version: {app_version()}" in seen

@@ -26,6 +26,7 @@ import numpy as np
 import trimesh
 import yourdfpy
 
+from core import data_paths
 from core.schema import EndEffector, ExtensionValues
 from core.transforms import make_T, pose_to_matrix, rpy_to_matrix
 
@@ -210,13 +211,14 @@ class ToolModel:
 
 # --- tool library (tools/<name>.yaml) ------------------------------------------------
 
-REPO = Path(__file__).resolve().parents[1]
-TOOLS_DIR = REPO / "tools"
+REPO = data_paths.resources()  # read-only bundled files
+TOOLS_DIR = data_paths.tools_dir()  # writable library (user data); bundled tools are read from REPO / "tools"
 _NAME_OK = __import__("re").compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 
 def list_tools() -> list[str]:
-    return sorted(p.stem for p in TOOLS_DIR.glob("*.yaml"))
+    found = {p.stem for d in (TOOLS_DIR, REPO / "tools") for p in d.glob("*.yaml")}
+    return sorted(found)
 
 
 def _tool_path(name: str) -> Path:
@@ -229,10 +231,12 @@ def load_tool(name: str) -> EndEffector:
     import yaml
 
     path = _tool_path(name)
+    if not path.is_file() and (REPO / "tools" / path.name).is_file():
+        path = REPO / "tools" / path.name  # bundled read-only tool
     if not path.is_file():
         raise FileNotFoundError(f"tool '{name}' not in library; have {list_tools()}")
     ee = EndEffector.model_validate(yaml.safe_load(path.read_text(encoding="utf-8")))
-    ref = path.relative_to(REPO) if path.is_relative_to(REPO) else path
+    ref = next((path.relative_to(b) for b in data_paths.asset_bases() if path.is_relative_to(b)), path)
     return ee.model_copy(update={"tool": ref.as_posix()})
 
 

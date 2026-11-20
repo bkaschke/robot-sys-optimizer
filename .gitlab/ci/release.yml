@@ -1,0 +1,202 @@
+# = .github/workflows/release.yml (D4): Windows exe folder, zip and per-user installer, tested offline,
+# then a GitLab release with the same notes and the same three files.
+#   git tag vX.Y.Z && git push origin vX.Y.Z   -> builds; the `release` job then waits for a click
+#   Build -> Pipelines -> New pipeline, RELEASE_RUN = true   -> same from a branch (tag manual-<pipeline>)
+# See packaging/README.md ("Releases from CI").
+#
+# Where GitLab differs from GitHub (closest equivalent chosen):
+# - No draft releases. The review step is a manual job instead: `windows` and `release-notes` run, the
+#   pipeline shows "blocked", you check the artifacts and notes.md, then start `release`. Nothing is
+#   published before that click (RELEASE_DRAFT = false on a manual run skips the wait).
+# - No pre-release flag: a manual run's release is named "... (pre-release)".
+# - No `gh release create --generate-notes`: the change list under "Changes" is the commit subjects
+#   since the previous v* tag plus a compare link (scripts/gitlab_release.py changes).
+# - Release files are not uploaded to the release itself: they go to the generic package registry and
+#   the release links to them (scripts/gitlab_release.py publish).
+# - The 2 GB per-file check is GitHub's limit; here it is the package registry's (RELEASE_MAX_FILE_BYTES).
+# - No `permissions:` block: the job token's rights are those of the person who started the pipeline.
+# - GITHUB_PATH -> $env:PATH (one shell per job); RUNNER_TEMP -> a folder under the temp dir, removed in
+#   after_script; `::error::` annotations -> plain "ERROR:" lines; `if: always()` -> try/finally plus
+#   after_script; `if-no-files-found: error` -> an explicit check in the script.
+
+.release-rules:
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v/
+    - if: $CI_PIPELINE_SOURCE == "web" && $RELEASE_RUN == "true"
+
+windows:
+  extends: [.windows-conda, .release-rules]
+  stage: build
+  needs: [] # like GitHub, the release build does not wait for the tests
+  timeout: 45 minutes # = GitHub (first run 38 min, 22 of them maps one at a time; now 4 at once)
+  variables:
+    GIT_DEPTH: "0" # git describe needs the tags
+    ARTIFACT_COMPRESSION_LEVEL: fastest # already compressed (needs FF_USE_FASTZIP, set in .windows-conda)
+  script:
+    - |
+      # Administrator rights are needed for the firewall rule (and for Chocolatey). gitlab.com's hosted
+      # Windows runners are elevated; fail early and clearly on a runner that is not.
+      $me = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
+      if (-not $me.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+        throw "this job must run elevated (administrator): it adds a firewall rule for the offline tests. Run the runner under an administrator account."
+      }
+      $env:RSO_CI_TEMP = Join-Path ([IO.Path]::GetTempPath()) "rso-ci-$env:CI_JOB_ID"
+      New-Item -ItemType Directory -Force -Path $env:RSO_CI_TEMP | Out-Null
+      git describe --tags --always --dirty
+    - |
+      # Microsoft Edge (the offline serve check loads the page in it): install only when missing
+      function Find-Edge {
+        foreach ($c in @("${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe", "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe")) {
+          if (Test-Path $c) { return $c }
+        }
+        $cmd = Get-Command msedge -ErrorAction SilentlyContinue
+        if ($cmd) { return $cmd.Source }
+        return $null
+      }
+      if (-not (Find-Edge)) {
+        if (-not (Get-Command choco -ErrorAction SilentlyContinue)) { throw "Microsoft Edge is not installed and Chocolatey is missing: install Edge on the runner" }
+        choco install microsoft-edge -y --no-progress
+        if ($LASTEXITCODE -ne 0) { throw "choco install microsoft-edge failed with exit code $LASTEXITCODE" }
+      }
+      if (-not (Find-Edge)) { throw "Microsoft Edge (msedge.exe) not found after the install" }
+      Write-Host "Edge: $(Find-Edge)"
+    - |
+      # Install Inno Setup (only when ISCC.exe is missing; same places as scripts/build_exe.py find_iscc)
+      function Find-Iscc {
+        $cmd = Get-Command iscc -ErrorAction SilentlyContinue
+        if ($cmd) { return $cmd.Source }
+        foreach ($base in @(${env:ProgramFiles(x86)}, $env:ProgramFiles, $env:LOCALAPPDATA)) {
+          foreach ($sub in @("Inno Setup 6", "Programs\Inno Setup 6")) {
+            if ($base -and (Test-Path (Join-Path $base "$sub\ISCC.exe"))) { return (Join-Path $base "$sub\ISCC.exe") }
+          }
+        }
+        return $null
+      }
+      if (-not (Find-Iscc)) {
+        if (-not (Get-Command choco -ErrorAction SilentlyContinue)) { throw "Inno Setup 6 (ISCC.exe) is not installed and Chocolatey is missing: install one of them on the runner" }
+        choco install innosetup -y --no-progress
+        if ($LASTEXITCODE -ne 0) { throw "choco install innosetup failed with exit code $LASTEXITCODE" }
+      }
+      $iscc = Find-Iscc
+      if (-not $iscc) { throw "ISCC.exe not found after the install" }
+      $env:PATH = "$(Split-Path $iscc);$env:PATH"
+      Write-Host "Inno Setup: $iscc"
+    # Build exe, zip and installer (includes the exe's own selftest)
+    - python scripts/build_exe.py --maps --zip --installer --map-jobs 4
+    - |
+      # Block outbound network (firewall rule), offline selftest of the built exe, offline serve check
+      # (exe + headless Edge). Loopback is not "Internet", so the app's own localhost server keeps
+      # working. The rule is removed in `finally`, and again in after_script if the job is cancelled.
+      Remove-NetFirewallRule -DisplayName "rso-offline-test" -ErrorAction SilentlyContinue
+      New-NetFirewallRule -DisplayName "rso-offline-test" -Direction Outbound -Action Block `
+        -RemoteAddress Internet -Profile Any | Out-Null
+      try {
+        $reached = $false
+        try {
+          Invoke-WebRequest https://example.com -TimeoutSec 15 -UseBasicParsing | Out-Null
+          $reached = $true
+        } catch { Write-Host "outbound blocked as intended: $($_.Exception.Message)" }
+        if ($reached) { throw "the firewall rule did not block outbound traffic" }
+        $env:RSO_OFFLINE_GUARD = "1"
+        $env:RSO_DATA = Join-Path $env:RSO_CI_TEMP "rso-data-selftest"
+        & dist\RobotCellOptimizer\RobotCellOptimizer.exe --selftest
+        if ($LASTEXITCODE -ne 0) { throw "selftest failed with exit code $LASTEXITCODE" }
+        $env:RSO_DATA = Join-Path $env:RSO_CI_TEMP "rso-data-serve"
+        powershell -NoProfile -ExecutionPolicy Bypass -File packaging\ci_serve_check.ps1 -Exe dist\RobotCellOptimizer\RobotCellOptimizer.exe -Port 8765
+        if ($LASTEXITCODE -ne 0) { throw "serve check failed" }
+      } finally {
+        Remove-NetFirewallRule -DisplayName "rso-offline-test" -ErrorAction SilentlyContinue
+      }
+    - |
+      # Install test (silent, per user), selftest of the installed app, uninstall
+      $env:RSO_OFFLINE_GUARD = "1"
+      $setup = Get-ChildItem dist -Filter "RobotCellOptimizer-*-setup.exe" | Select-Object -First 1
+      if (-not $setup) { throw "no setup exe in dist" }
+      $dir = Join-Path $env:LOCALAPPDATA "Programs\RobotCellOptimizer"
+      $p = Start-Process $setup.FullName -ArgumentList "/VERYSILENT", "/CURRENTUSER", "/SUPPRESSMSGBOXES", "/NORESTART", "/NOCANCEL" -Wait -PassThru
+      if ($p.ExitCode -ne 0) { throw "installer exit code $($p.ExitCode)" }
+      $exe = Join-Path $dir "RobotCellOptimizer.exe"
+      if (-not (Test-Path $exe)) { throw "installed exe missing: $exe" }
+      try {
+        $env:RSO_DATA = Join-Path $env:RSO_CI_TEMP "rso-data-installed"
+        & $exe --selftest
+        if ($LASTEXITCODE -ne 0) { throw "selftest of the installed app failed with exit code $LASTEXITCODE" }
+      } finally {
+        $un = Get-ChildItem $dir -Filter "unins*.exe" | Select-Object -First 1
+        if ($un) { Start-Process $un.FullName -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait }
+      }
+      if (Test-Path $exe) { throw "uninstall left $exe behind" }
+    - |
+      # Checksums and sizes; all three release files must exist (a missing artifact path is only a warning)
+      Get-Content dist\SHA256SUMS.txt
+      Get-ChildItem dist -File | Format-Table Name, Length -AutoSize | Out-String | Write-Host
+      foreach ($pattern in @("RobotCellOptimizer-*-win64.zip", "RobotCellOptimizer-*-setup.exe", "SHA256SUMS.txt")) {
+        if (-not (Get-ChildItem dist -Filter $pattern)) { throw "missing release file: dist\$pattern" }
+      }
+  after_script:
+    # a new shell, also after a failed or cancelled script
+    - |
+      Remove-NetFirewallRule -DisplayName "rso-offline-test" -ErrorAction SilentlyContinue
+      Remove-Item -Recurse -Force (Join-Path ([IO.Path]::GetTempPath()) "rso-ci-$env:CI_JOB_ID") -ErrorAction SilentlyContinue
+      Write-Host "cleanup done"
+  artifacts:
+    name: windows-release
+    expire_in: 90 days
+    paths:
+      - dist/RobotCellOptimizer-*-win64.zip
+      - dist/RobotCellOptimizer-*-setup.exe
+      - dist/SHA256SUMS.txt
+
+# The Linux half of GitHub's `release` job, split in two so the notes can be read before publishing.
+.release-linux:
+  extends: .release-rules
+  stage: release
+  image: $LINUX_RELEASE_IMAGE
+  tags: [$RUNNER_TAG_LINUX]
+  timeout: 20 minutes
+  variables:
+    GIT_DEPTH: "0" # the change list needs the history and the tags
+
+release-notes:
+  extends: .release-linux
+  needs: [windows] # its artifacts land in dist/ (GitHub: release/)
+  script:
+    - export TAG="${CI_COMMIT_TAG:-manual-$CI_PIPELINE_IID}"
+    - |
+      # Check asset sizes (the package registry's per-file limit)
+      ls -l dist
+      for f in dist/*; do
+        size=$(stat -c %s "$f")
+        if [ "$size" -gt "$RELEASE_MAX_FILE_BYTES" ]; then
+          echo "ERROR: $f is $size bytes, over the package registry's per-file limit ($RELEASE_MAX_FILE_BYTES). Build with --no-cad or split the asset." >&2
+          exit 1
+        fi
+      done
+    # Write the release notes (download steps, SmartScreen, checksums) and the change list
+    - python3 scripts/gitlab_release.py changes --tag "$TAG" --out changes.md
+    - python3 scripts/release_notes.py dist --version "$TAG" --changes changes.md --out notes.md
+    - cat notes.md
+  artifacts:
+    name: release-notes
+    expire_in: 90 days
+    paths:
+      - notes.md
+
+release:
+  extends: .release-linux
+  needs: [windows, release-notes]
+  rules:
+    # a manual run with RELEASE_DRAFT = false publishes at once; everything else waits for a click
+    - if: $CI_PIPELINE_SOURCE == "web" && $RELEASE_RUN == "true" && $RELEASE_DRAFT == "false"
+    - if: $CI_COMMIT_TAG =~ /^v/
+      when: manual
+    - if: $CI_PIPELINE_SOURCE == "web" && $RELEASE_RUN == "true"
+      when: manual
+  script:
+    - export TAG="${CI_COMMIT_TAG:-manual-$CI_PIPELINE_IID}"
+    # uploads dist/* to the generic package registry, then creates the release with links to the files;
+    # for a manual run the tag is created at this commit
+    - python3 scripts/gitlab_release.py publish dist --tag "$TAG" --notes notes.md
+
+# Linux AppImage: NOT yet (user decision: after the first Windows release). See the placeholder job in
+# .github/workflows/release.yml; add the twin here when it is built.

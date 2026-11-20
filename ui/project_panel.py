@@ -16,13 +16,14 @@ import shutil
 import threading
 import time
 from collections.abc import Callable
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
 import viser
 from pydantic import ValidationError
 
-from core import schema
+from core import data_paths, schema
 from ui.session import REPO, WORKSPACE, Session, load_project, remember_last, save_project
 
 MAX_JSON = 20 * 1024 * 1024
@@ -65,7 +66,11 @@ def _example_copy(name: str) -> Path:
 
 def _project_dir(text: str) -> Path:
     p = Path(text.strip()).expanduser()
-    return p if p.is_absolute() else (REPO / p)
+    return p if p.is_absolute() else (data_paths.data_dir() / p)
+
+
+class LoadingError(ValueError):
+    """A save was refused because a project is being loaded right now."""
 
 
 class ProjectPanel:
@@ -87,10 +92,12 @@ class ProjectPanel:
         self._saved_json: str | None = None
         self._last_save = time.monotonic()
         self._lock = threading.Lock()
+        self._loader: int | None = None  # thread that is loading (it may still save)
+        self.loading = False  # True from before load_project until the load has finished
         with server.gui.add_folder("Project", expand_by_default=False):
             rel = (
-                session.project_dir.relative_to(REPO)
-                if session.project_dir.is_relative_to(REPO)
+                session.project_dir.relative_to(data_paths.data_dir())
+                if session.project_dir.is_relative_to(data_paths.data_dir())
                 else session.project_dir
             )
             self.folder = server.gui.add_text(
@@ -142,17 +149,7 @@ class ProjectPanel:
         @self.upload.on_upload
         def _(e) -> None:
             f = self.upload.value
-            if len(f.content) > MAX_JSON:
-                return _notify(e, "Too large", "project.json over 20 MB")
-            try:
-                schema.Project.model_validate_json(f.content)
-            except ValidationError as err:
-                return _notify(e, "Invalid project", str(err)[:500])
-            # assets resolve relative to the folder field, so store the upload there
-            d = _project_dir(self.folder.value)
-            d.mkdir(parents=True, exist_ok=True)
-            (d / "project.json").write_bytes(f.content)
-            self._load(e, d)
+            self.open_upload(f.content, getattr(f, "name", "") or "project.json", e)
 
         self.new_part.on_click(lambda e: self.new_study(keep_cell=True, e=e))
         self.new_empty.on_click(lambda e: self.new_study(keep_cell=False, e=e))
@@ -171,6 +168,53 @@ class ProjectPanel:
 
         if autosave_thread:
             threading.Thread(target=self._autosave_loop, daemon=True).start()
+
+    @contextmanager
+    def _loading_window(self):
+        """Autosave and Save wait while the session is swapped and the GUI follows."""
+        with self._lock:
+            self.loading, self._loader = True, threading.get_ident()
+        try:
+            yield
+        finally:
+            self.loading, self._loader = False, None
+
+    def open_upload(self, content: bytes, name: str, e=None) -> bool:
+        """Open an uploaded project.json in a NEW folder workspace/<stem>_<date-time>; the
+        current project (saved first) and its file are never overwritten."""
+        if len(content) > MAX_JSON:
+            _notify(e, "Too large", "project.json over 20 MB")
+            return False
+        try:
+            schema.Project.model_validate_json(content)
+        except ValidationError as err:
+            _notify(e, "Invalid project", str(err)[:500])
+            return False
+        if not self.untitled:
+            try:
+                self.save_now()  # keep the current work before switching
+            except (OSError, ValidationError, ValueError):
+                pass
+        stem = re.sub(r"[^A-Za-z0-9_-]+", "_", Path(name).stem).strip("_") or "project"
+        base = WORKSPACE / f"{stem}_{datetime.now():%Y%m%d-%H%M%S}"
+        dest, k = base, 1
+        while dest.exists():
+            k += 1
+            dest = base.with_name(f"{base.name}_{k}")
+        try:
+            dest.mkdir(parents=True)
+            (dest / "project.json").write_bytes(content)
+        except OSError as err:
+            _notify(e, "Open failed", f"could not create {dest}: {err}. The current project is unchanged.")
+            return False
+        note = (
+            "The project.json was opened on its own, without its assets folder, so assets that "
+            "live in the original project folder cannot be found. The current project is unchanged."
+        )
+        if self._load(e, dest, note):
+            return True
+        shutil.rmtree(dest, ignore_errors=True)
+        return False
 
     def load_example(self, name: str, e=None) -> bool:
         """Examples are read-only templates: copy examples/<name> to a NEW working folder
@@ -213,27 +257,28 @@ class ProjectPanel:
             self.save_now()  # keep the current work (not possible inside examples/: a template)
         except (OSError, ValidationError, ValueError):
             pass
-        dest = WORKSPACE / f"study_{datetime.now():%Y%m%d_%H%M%S}"
-        s = self.s
-        if keep_cell:
-            s.part, s.selection = None, None
-            s.targets = s.targets.model_copy(update={"points": []})  # keep the tolerance groups
-            s.results, s.result_points, s.feasibility, s.stamps = [], {}, {}, {}
-            s.steps.pop("Targets", None)
-        else:
-            from ui.session import Session
+        with self._loading_window():
+            dest = WORKSPACE / f"study_{datetime.now():%Y%m%d_%H%M%S}"
+            s = self.s
+            if keep_cell:
+                s.part, s.selection = None, None
+                s.targets = s.targets.model_copy(update={"points": []})  # keep the tolerance groups
+                s.results, s.result_points, s.feasibility, s.stamps = [], {}, {}, {}
+                s.steps.pop("Targets", None)
+            else:
+                from ui.session import Session
 
-            hooks = s.before_save
-            fresh = Session()  # no robot, tool, part, carrier, targets or results
-            fresh.robot_name = None  # (the dataclass default names the UR20 without loading it)
-            fresh.project_dir = s.project_dir
-            s.__dict__.update(fresh.__dict__)
-            s.before_save = hooks
-        self.on_loaded()
-        path = self.save_now(dest)  # save_project carries project-local assets along
-        what = "new part in the same cell" if keep_cell else "new empty study"
-        self.status.content = f"_Started a {what} in `{self.folder.value}`._"
-        _notify(e, "New study", f"{what}: {path.parent}", ok=True)
+                hooks = s.before_save
+                fresh = Session()  # no robot, tool, part, carrier, targets or results
+                fresh.robot_name = None  # (the dataclass default names the UR20 without loading it)
+                fresh.project_dir = s.project_dir
+                s.__dict__.update(fresh.__dict__)
+                s.before_save = hooks
+            self.on_loaded()
+            path = self.save_now(dest)  # save_project carries project-local assets along
+            what = "new part in the same cell" if keep_cell else "new empty study"
+            self.status.content = f"_Started a {what} in `{self.folder.value}`._"
+            _notify(e, "New study", f"{what}: {path.parent}", ok=True)
         return dest
 
     def new_cell(self, e=None) -> Path:
@@ -247,15 +292,16 @@ class ProjectPanel:
                 self.save_now()
             except (OSError, ValidationError, ValueError):
                 pass
-        dest = WORKSPACE / f"study_{datetime.now():%Y%m%d_%H%M%S}"
-        hooks = self.s.before_save
-        self.s.__dict__.update(empty_cell().__dict__)
-        self.s.before_save = hooks
-        self.s.project_dir = dest
-        self.on_loaded()
-        path = self.save_now(dest)
-        self.status.content = f"_Started a new empty cell in `{self.folder.value}`._"
-        _notify(e, "New cell", str(path.parent), ok=True)
+        with self._loading_window():
+            dest = WORKSPACE / f"study_{datetime.now():%Y%m%d_%H%M%S}"
+            hooks = self.s.before_save
+            self.s.__dict__.update(empty_cell().__dict__)
+            self.s.before_save = hooks
+            self.s.project_dir = dest
+            self.on_loaded()
+            path = self.save_now(dest)
+            self.status.content = f"_Started a new empty cell in `{self.folder.value}`._"
+            _notify(e, "New cell", str(path.parent), ok=True)
         return dest
 
     # --- saving -------------------------------------------------------------------------------
@@ -265,6 +311,8 @@ class ProjectPanel:
         if target.is_relative_to(EXAMPLES.resolve()):
             raise ValueError("examples/ holds read-only templates: use 'Save as example' to change one")
         with self._lock:
+            if self.loading and self._loader != threading.get_ident():
+                raise LoadingError("a project is being loaded: try again in a moment")
             path = save_project(self.s, project_dir)
             self.untitled = False
             self._saved_json = path.read_text(encoding="utf-8")
@@ -285,7 +333,11 @@ class ProjectPanel:
         from ui.session_lock import LOCK
 
         try:
-            with LOCK:  # v12 #9: a consistent snapshot (not mid-way through a planner's update)
+            # the load takes self._lock to set ``loading`` (then the session LOCK for the swap):
+            # no snapshot during a load, and none mid-way through a planner's update (v12 #9)
+            with self._lock, LOCK:
+                if self.loading:
+                    return False
                 current = _dump(self.s.snapshot())
         except (ValidationError, ValueError):
             return False  # mid-edit state that does not validate: try again next tick
@@ -294,6 +346,8 @@ class ProjectPanel:
             return False
         try:
             self.save_now()
+        except LoadingError:
+            return False
         except (OSError, ValidationError, ValueError) as err:
             self.status.content = f"_Autosave failed: {err}_"
             return False
@@ -311,18 +365,23 @@ class ProjectPanel:
     @staticmethod
     def _rel(d: Path) -> str:
         d = Path(d)
-        return d.relative_to(REPO).as_posix() if d.is_relative_to(REPO) else d.as_posix()
+        base = data_paths.data_dir()
+        return d.relative_to(base).as_posix() if d.is_relative_to(base) else d.as_posix()
 
     # --- loading ------------------------------------------------------------------------------
 
-    def _load(self, e, project_dir: Path) -> bool:
+    def _load(self, e, project_dir: Path, note: str = "") -> bool:
         d = Path(project_dir).resolve()
         if d.is_relative_to(EXAMPLES.resolve()) and d.parent == EXAMPLES.resolve():
             return self.load_example(d.name, e)  # never work inside the shipped templates
+        with self._loading_window():  # autosave and Save wait until the new project is in place
+            return self._load_locked(e, project_dir, note)
+
+    def _load_locked(self, e, project_dir: Path, note: str) -> bool:
         try:
             load_project(self.s, project_dir)
         except (OSError, ValueError, ValidationError) as err:  # session untouched on failure
-            _notify(e, "Load failed", str(err)[:500])
+            _notify(e, "Load failed", (str(err)[:500] + (" " + note if note else "")).strip())
             return False
         self.untitled = False
         self.on_loaded()
@@ -346,5 +405,7 @@ class ProjectPanel:
             remember_last(project_dir)
         self.folder.value = self._rel(project_dir)
         self.status.content = f"_Opened `{self.folder.value}` at {datetime.now():%H:%M:%S}._"
+        for w in self.s.load_warnings:  # things the load dropped or changed
+            _notify(e, "Load warning", w)
         _notify(e, "Loaded", str(project_dir / "project.json"), ok=True)
         return True

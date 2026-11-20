@@ -31,7 +31,7 @@ def rpy_to_matrix(rpy) -> np.ndarray:
 
 
 def matrix_to_rpy(R: np.ndarray) -> tuple[float, float, float]:
-    R = np.asarray(R, float)
+    R = np.array(R, float)
     sp = -R[2, 0]
     if abs(sp) > 1 - 1e-12:  # gimbal lock: put all rotation into yaw
         pitch = np.copysign(np.pi / 2, sp)
@@ -65,6 +65,6 @@ def wxyz_to_matrix(q) -> np.ndarray:
 
 def matrix_to_wxyz(R: np.ndarray) -> np.ndarray:
     """(w, x, y, z) with w >= 0."""
-    x, y, z, w = Rotation.from_matrix(np.asarray(R, float)).as_quat()
+    x, y, z, w = Rotation.from_matrix(np.array(R, float)).as_quat()
     q = np.array([w, x, y, z])
     return q if q[0] >= 0 else -q

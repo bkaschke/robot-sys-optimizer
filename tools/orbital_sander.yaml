@@ -74,3 +74,4 @@ tolerances:
   standoff_m: 0.0
 line_of_sight: false
 approach_m: 0.0
+pad_radius_m: 0.075

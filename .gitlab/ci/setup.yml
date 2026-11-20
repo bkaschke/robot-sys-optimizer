@@ -1,0 +1,112 @@
+# Shared job templates: the conda env `rso` from environment.yml and the caches.
+# GitHub does this with conda-incubator/setup-miniconda (Miniforge + mamba) and actions/cache; GitLab has
+# no such building blocks, so the env is created in before_script.
+#
+# Caches:
+#   maps-<os>-<hash>   cache/reachability, keyed like GitHub: content hash of assets/robots/**/spec.yaml
+#                      and opt/reachability.py (cache:key:files takes exactly these two patterns)
+#   conda-<os>-<hash>  downloaded conda archives and the pip cache, keyed on environment.yml. GitHub does
+#                      not cache these; the env itself is built fresh in every job on both hosts.
+
+.windows-conda:
+  tags: [$RUNNER_TAG_WINDOWS]
+  variables:
+    FF_USE_FASTZIP: "true" # needed for the two compression settings below
+    CACHE_COMPRESSION_LEVEL: fastest
+  cache:
+    - key:
+        prefix: maps-windows
+        files:
+          - assets/robots/**/spec.yaml
+          - opt/reachability.py
+      paths:
+        - cache/reachability
+    - key:
+        prefix: conda-windows
+        files:
+          - environment.yml
+      paths:
+        - .ci-cache/conda-pkgs/*.conda
+        - .ci-cache/conda-pkgs/*.tar.bz2
+        - .ci-cache/pip
+  before_script:
+    # The shell is PowerShell (Windows PowerShell 5.1 or pwsh; the blocks below run in both). GitHub runs
+    # these jobs in `bash -el` with the env activated; here the env's folders are put on PATH instead,
+    # which is how the project is run locally (CLAUDE.md "Environment").
+    - |
+      # conda: use one that is already there, else install Miniforge silently for this user
+      $ErrorActionPreference = "Stop"
+      $ProgressPreference = "SilentlyContinue"
+      [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+      $root = Join-Path $env:WINDOWS_CI_DIR "miniforge3"
+      $conda = $null
+      $found = Get-Command conda.exe -ErrorAction SilentlyContinue
+      foreach ($c in @($env:CONDA_EXE, (Join-Path $root "Scripts\conda.exe"), $(if ($found) { $found.Source }))) {
+        if ($c -and (Test-Path $c)) { $conda = $c; break }
+      }
+      if (-not $conda) {
+        New-Item -ItemType Directory -Force -Path $env:WINDOWS_CI_DIR | Out-Null
+        $setup = Join-Path ([IO.Path]::GetTempPath()) "Miniforge3-setup-$env:CI_JOB_ID.exe"
+        Write-Host "installing Miniforge into $root"
+        Invoke-WebRequest $env:WINDOWS_MINIFORGE_URL -OutFile $setup -UseBasicParsing
+        $p = Start-Process $setup -ArgumentList "/InstallationType=JustMe", "/RegisterPython=0", "/AddToPath=0", "/S", "/D=$root" -Wait -PassThru
+        Remove-Item $setup -Force -ErrorAction SilentlyContinue
+        if ($p.ExitCode -ne 0) { throw "the Miniforge installer failed with exit code $($p.ExitCode)" }
+        $conda = Join-Path $root "Scripts\conda.exe"
+        if (-not (Test-Path $conda)) { throw "Miniforge was installed but $conda is missing" }
+      }
+      $env:RSO_CI_CONDA = $conda
+      Write-Host "conda: $conda"
+    - |
+      # the env `rso` from environment.yml, built fresh (the folder must be named rso: build_exe.py checks it)
+      $env:CONDA_PKGS_DIRS = Join-Path $env:CI_PROJECT_DIR ".ci-cache\conda-pkgs"
+      $env:PIP_CACHE_DIR = Join-Path $env:CI_PROJECT_DIR ".ci-cache\pip"
+      $envDir = Join-Path $env:WINDOWS_CI_DIR "slot$env:CI_CONCURRENT_ID\rso"
+      if (Test-Path $envDir) { Remove-Item -Recurse -Force $envDir }
+      & $env:RSO_CI_CONDA env create --prefix $envDir --file environment.yml
+      if ($LASTEXITCODE -ne 0) { throw "conda env create failed with exit code $LASTEXITCODE" }
+      $env:CONDA_PREFIX = $envDir
+      $env:CONDA_DEFAULT_ENV = "rso"
+      $env:PATH = "$envDir;$envDir\Library\mingw-w64\bin;$envDir\Library\usr\bin;$envDir\Library\bin;$envDir\Scripts;$envDir\bin;$env:PATH"
+    - python -c "import sys; print(sys.version); print(sys.prefix)"
+
+.linux-conda:
+  image: $LINUX_TEST_IMAGE
+  tags: [$RUNNER_TAG_LINUX]
+  variables:
+    FF_USE_FASTZIP: "true"
+    CACHE_COMPRESSION_LEVEL: fastest
+  cache:
+    - key:
+        prefix: maps-linux
+        files:
+          - assets/robots/**/spec.yaml
+          - opt/reachability.py
+      paths:
+        - cache/reachability
+    - key:
+        prefix: conda-linux
+        files:
+          - environment.yml
+      paths:
+        - .ci-cache/conda-pkgs/*.conda
+        - .ci-cache/conda-pkgs/*.tar.bz2
+        - .ci-cache/pip
+  before_script:
+    - |
+      # system libraries a bare container may lack (GitHub's ubuntu VM has them)
+      if [ -n "$LINUX_APT_PACKAGES" ] && command -v apt-get >/dev/null 2>&1; then
+        apt-get update -q
+        DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends $LINUX_APT_PACKAGES
+      fi
+    - |
+      if ! command -v conda >/dev/null 2>&1; then
+        echo "ERROR: conda not found. LINUX_TEST_IMAGE ($LINUX_TEST_IMAGE) must provide Miniforge." >&2
+        exit 1
+      fi
+    - export CONDA_PKGS_DIRS="$CI_PROJECT_DIR/.ci-cache/conda-pkgs" PIP_CACHE_DIR="$CI_PROJECT_DIR/.ci-cache/pip"
+    - conda env remove --name rso --yes >/dev/null 2>&1 || true
+    - conda env create --name rso --file environment.yml
+    - source "$(conda info --base)/etc/profile.d/conda.sh"
+    - conda activate rso
+    - python -c "import sys; print(sys.version); print(sys.prefix)"

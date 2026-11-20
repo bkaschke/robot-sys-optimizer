@@ -1,0 +1,37 @@
+# Robot Cell Optimizer {{VERSION}}
+
+## Which file to download
+
+- **{{INSTALLER}}** is the normal choice. Download it, run it, and start the program from the Start menu.
+- **{{ZIP}}** is for PCs where installers are blocked. Unzip it anywhere you can write to (not Program Files) and run `RobotCellOptimizer.exe` inside the folder.
+
+## First run on Windows
+
+The program is not code-signed, so Windows and your browser warn about it. This is expected.
+
+1. Browser: "isn't commonly downloaded" - choose **Keep**.
+2. Windows SmartScreen: "Windows protected your PC" - choose **More info**, then **Run anyway**.
+3. If **Run anyway** is missing, your IT policy blocks unsigned apps. Ask IT to allow the file (by its SHA-256 below).
+
+No administrator rights are needed. The installer installs for the current user only.
+
+## Updating
+
+Run the new installer over the old one. Your projects and settings in `%LOCALAPPDATA%\RobotCellOptimizer` are kept. The app does not update itself.
+
+## Works offline
+
+Nothing is downloaded at install time or at run time. The program shows its version under "Settings & help" and prints it with `RobotCellOptimizer.exe --version`.
+
+## Checksums
+
+SHA-256:
+
+```
+{{SHA256}}
+```
+
+To check a download, run in PowerShell: `Get-FileHash <file> -Algorithm SHA256`
+
+## Changes
+

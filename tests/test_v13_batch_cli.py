@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.test_batch_job import _make_batch, fake  # noqa: F401 (fixture)
 from tests.test_v13_batch import RAIL, make_parts
 
 REPO = Path(__file__).resolve().parents[1]
@@ -41,3 +42,12 @@ def test_runs_from_a_subprocess(tmp_path):
     assert "rail_a: 25/25 reached" in p.stdout and "bad_tcp: failed" in p.stdout
     assert (tmp_path / "out" / "rail_a" / "project.json").is_file()
     assert (tmp_path / "out" / "summary.json").is_file() and not (tmp_path / "out" / "rail_b").exists()
+
+
+def test_a_batch_folder_runs_its_queue(tmp_path, fake, capsys):  # noqa: F811
+    """One positional argument with a batch.json: the queue's pending jobs (ui.batch_job)."""
+    from scripts.batch_run import main
+
+    _m, bdir = _make_batch(tmp_path, n=1)
+    assert main([str(bdir)]) == 0
+    assert "1/1 job(s) done" in capsys.readouterr().out and fake["seen"]

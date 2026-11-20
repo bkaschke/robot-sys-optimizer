@@ -4,7 +4,11 @@ A browser-based tool for robotic process cells (sanding, scanning, grinding, gri
 
 Built in Python: a [Viser](https://viser.studio) GUI, Pinocchio and Coal for kinematics and collision, and OR-Tools and CMA-ES for optimization. It ships with a UR20 model.
 
+What changed since `main`: [CHANGELOG.md](CHANGELOG.md).
+
 **Start here: [docs/USER_GUIDE.md](docs/USER_GUIDE.md)** (setup on a new computer, quickstart, features, examples). Inside the running tool: **User guide → 📖 Open user guide** (the same guide as HTML, `docs/USER_GUIDE.html`).
+
+**Windows, no conda or internet needed:** download the installer (`RobotCellOptimizer-<version>-setup.exe`, per user, no admin rights) or the zip from the Releases page (GitHub or GitLab) and run it; see [section 2.1 of the guide](docs/USER_GUIDE.md#21-download-and-run-windows-installer-or-zip). Your data stays in `%LOCALAPPDATA%\RobotCellOptimizer`. For development, set up from source:
 
 ```bash
 # after setup (Miniforge env "rso", see the guide)

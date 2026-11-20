@@ -12,14 +12,16 @@ import viser
 
 from core.golden_parts import GOLDEN_PARTS
 from core.robot import list_robots
+from core.safe_io import replace_file
 from core.transforms import (
     make_T,
     matrix_to_rpy,
     rpy_to_matrix,
 )
 from core.urdf_import import URDFImportError, import_urdf_zip
+from ui import display_lod
 from ui.robot_view import RobotView
-from ui.session import MESH_EXTS, MOUNT_RPY, UNIT_SCALE, PartState, Session, load_mesh
+from ui.session import MOUNT_RPY, PART_EXTS, UNIT_SCALE, PartState, Session, load_mesh
 from ui.widgets import MAX_UPLOAD, Latest, PoseWidgets
 from ui.widgets import notify as _notify
 from ui.widgets import safe_name as _safe_name
@@ -94,10 +96,11 @@ class CellTab:
                 initial_value="mm",
                 hint="units of the file you upload next",
             )
-            self.part_upload = server.gui.add_upload_button("Upload mesh (.stl/.obj/.ply)")
+            self.part_upload = server.gui.add_upload_button("Upload part (.stl/.obj/.ply/.step)")
             self.part_units = server.gui.add_dropdown(
                 "Units", tuple(UNIT_SCALE), initial_value="mm", hint="units of the current part mesh"
             )
+            self.lod_note = server.gui.add_markdown("", visible=False)  # R1c
             self.part_pose = PoseWidgets(server, PART_NODE, np.eye(4), self._on_part_pose)
         self.part_click_blocked = False  # True only while Move mode moves the part (T11)
 
@@ -158,19 +161,7 @@ class CellTab:
         @self.part_upload.on_upload
         def _(e) -> None:
             f = self.part_upload.value
-            name = _safe_name(f.name)
-            if Path(name).suffix.lower() not in MESH_EXTS or len(f.content) > MAX_UPLOAD:
-                return _notify(e, "Unsupported mesh", f"Use {', '.join(MESH_EXTS)} under 200 MB")
-            path = self.s.project_dir / "assets" / "parts" / name
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(f.content)
-            try:
-                load_mesh(path, self.upload_units.value)
-            except Exception as err:  # trimesh raises many types on bad files
-                return _notify(e, "Mesh load failed", str(err))
-            T = self.s.part.T_world_part if self.s.part else make_T(p=(1.0, 0.0, 0.5))
-            self.s.part = PartState(self.s.relative(path), self.upload_units.value, T)
-            self.refresh_part()
+            self.upload_part(f.name, f.content, e)
 
         @self.part_units.on_update
         def _(_e) -> None:
@@ -179,6 +170,23 @@ class CellTab:
             if self.s.part is not None and self.s.part.units != self.part_units.value:
                 self.s.part.units = self.part_units.value
                 self.refresh_part()
+
+    def upload_part(self, filename: str, content: bytes, e=None) -> None:
+        """Store an uploaded part mesh (validated before it can replace a file of that name)."""
+        name = _safe_name(filename)
+        if Path(name).suffix.lower() not in PART_EXTS or len(content) > MAX_UPLOAD:
+            return _notify(e, "Unsupported mesh", f"Use {', '.join(PART_EXTS)} under 200 MB")
+        path = self.s.project_dir / "assets" / "parts" / name
+        try:  # validated as a temp file first: a bad upload never overwrites the old one
+            replaced = replace_file(path, content, lambda p: load_mesh(p, self.upload_units.value))
+        except Exception as err:  # trimesh raises many types on bad files
+            kept = " The existing file was kept." if path.exists() else ""
+            return _notify(e, "Upload rejected", f"{name}: {err}.{kept}")
+        if replaced:
+            _notify(e, "Part file replaced", f"replaced existing {name}", ok=True)
+        T = self.s.part.T_world_part if self.s.part else make_T(p=(1.0, 0.0, 0.5))
+        self.s.part = PartState(self.s.relative(path), self.upload_units.value, T)
+        self.refresh_part()
 
     def _on_base(self, T: np.ndarray) -> None:
         self.s.T_world_base = T
@@ -233,19 +241,53 @@ class CellTab:
         self.view.set_q(self.s.q)
         self._update_readout()
 
+    READOUT_MIN_DT = 0.25  # s: at most 4 readout updates per second while values change quickly
+
     def _update_readout(self) -> None:
         T = self.s.T_world_flange()
         for fn in self.listeners:
             fn(T)
         if self.s.robot is None:
-            self.readout.content = "_No robot in this study yet: choose one above (Robot) or upload a URDF._"
+            self._put_readout("_No robot in this study yet: choose one above (Robot) or upload a URDF._")
             return
         p = T[:3, 3] * 1000
         r = np.degrees(matrix_to_rpy(T[:3, :3]))
-        self.readout.content = (
+        self._put_readout(
             f"**Flange `{self.s.robot.spec.flange_link}` in world (Pinocchio FK)**  \n"
             f"xyz mm: {p[0]:.1f}, {p[1]:.1f}, {p[2]:.1f}  \nrpy deg: {r[0]:.2f}, {r[1]:.2f}, {r[2]:.2f}"
         )
+
+    def _put_readout(self, text: str) -> None:
+        """Assign the readout text, at most once per READOUT_MIN_DT: a faster call is kept and
+        written by a trailing timer, so the last value always shows (playback sends one GUI update
+        per tick otherwise)."""
+        import threading
+        import time
+
+        lock = self.__dict__.setdefault("_ro_lock", threading.Lock())
+        with lock:
+            self._ro_text = text
+            if text == getattr(self, "_ro_shown", None) and getattr(self, "_ro_timer", None) is None:
+                return
+            wait = self.READOUT_MIN_DT - (time.monotonic() - getattr(self, "_ro_last", -1e9))
+            if wait <= 0 and getattr(self, "_ro_timer", None) is None:
+                self._ro_flush()
+            elif getattr(self, "_ro_timer", None) is None:
+                self._ro_timer = threading.Timer(wait, self._ro_trailing)
+                self._ro_timer.daemon = True
+                self._ro_timer.start()
+
+    def _ro_flush(self) -> None:  # lock held
+        import time
+
+        self._ro_last, self._ro_shown = time.monotonic(), self._ro_text
+        self.readout.content = self._ro_text
+
+    def _ro_trailing(self) -> None:
+        with self._ro_lock:
+            self._ro_timer = None
+            if self._ro_text != self._ro_shown:
+                self._ro_flush()
 
     def refresh(self) -> None:
         """Rebuild robot display + sliders from the session (after robot or project change)."""
@@ -306,6 +348,7 @@ class CellTab:
         self.part_pose.gizmo.visible = part is not None  # subtree: part mesh, targets
         self.part_pose.set_handles(self.part_pose.show.value)
         if part is None:
+            self.lod_note.visible = False
             self.part_choice.value = "(none)"
             for fn in self.part_listeners:
                 fn()
@@ -318,13 +361,17 @@ class CellTab:
         )
         self.part_units.value = part.units
         self.part_pose.set(part.T_world_part)
-        m = self.s.part_mesh()
+        shown, n_full = self.s.part_display()  # simplified above ~300k triangles (R1c)
         self.part_handle = self.server.scene.add_mesh_simple(  # double-sided: never see-through
-            f"{PART_NODE}/mesh", m.vertices, m.faces, color=PART_COLOR, side="double"
+            f"{PART_NODE}/mesh", shown.vertices, shown.faces, color=PART_COLOR, side="double"
         )
+        simplified = len(shown.faces) < n_full
+        self.lod_note.visible = simplified
+        if simplified:
+            self.lod_note.content = "_" + display_lod.note(n_full, len(shown.faces)) + "_"
         from ui.widgets import GizmoStyle
 
-        GizmoStyle.fit(self.part_pose.gizmo, float(np.max(m.bounds[1] - m.bounds[0])))  # T10
+        GizmoStyle.fit(self.part_pose.gizmo, float(np.max(shown.bounds[1] - shown.bounds[0])))  # T10
         self.sync_part_click()
         for fn in self.part_listeners:
             fn()

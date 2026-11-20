@@ -7,7 +7,6 @@ exist there are looked up relative to the repo (bundled assets such as golden pa
 
 from __future__ import annotations
 
-import os
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -15,18 +14,21 @@ from pathlib import Path
 import numpy as np
 import trimesh
 
-from core import schema
+from core import data_paths, schema
 from core.robot import Robot, list_robots
+from core.step_import import STEP_EXTS, StepImportError, read_step
 from core.tool import ToolModel, load_tool
 from core.transforms import matrix_to_pose, pose_to_matrix
 from core.urdf_import import inspect_urdf
+from ui import display_lod
 
-REPO = Path(__file__).resolve().parents[1]
+REPO = data_paths.resources()  # read-only bundled files (the repo folder in a source checkout)
 # where projects live; RSO_WORKSPACE moves it (the test suite uses a temporary one so it never
 # writes into the user's projects)
-WORKSPACE = Path(os.environ.get("RSO_WORKSPACE") or REPO / "workspace")
+WORKSPACE = data_paths.workspace_dir()
 DEFAULT_PROJECT_DIR = WORKSPACE / "default"
 MESH_EXTS = (".stl", ".obj", ".ply")
+PART_EXTS = MESH_EXTS + STEP_EXTS  # a part may also be a STEP model (core.step_import)
 UNIT_SCALE = {"m": 1.0, "mm": 1e-3, "in": 0.0254}
 MOUNT_RPY = {"floor": (0.0, 0.0, 0.0), "wall": (0.0, -np.pi / 2, 0.0), "ceiling": (np.pi, 0.0, 0.0)}
 
@@ -76,7 +78,11 @@ class Session:
     edge_check: object = None  # v10 T10: last core.edge_check.EdgeResult (not saved)
     skip_unfit: bool = False  # v10 T12: planners leave out points below the tool's minimum radius
     cycle: object = None  # v8 T6: core.cycle_time.CycleSettings (Optimize -> Cycle time)
+    max_manip: float | None = None  # best manipulability of the last plan's map (not saved)
+    load_warnings: list = field(default_factory=list)  # things a load dropped or changed (not saved)
     before_save: list = field(default_factory=list)  # GUI hooks that copy their state in here
+    _mesh_cache: object = field(default_factory=display_lod.MeshCache, repr=False)  # part meshes
+    _display_cache: object = field(default_factory=display_lod.MeshCache, repr=False)  # drawn copies
 
     # --- assets ---------------------------------------------------------------
 
@@ -84,14 +90,14 @@ class Session:
         p = Path(rel)
         if p.is_absolute():
             return p
-        for base in (self.project_dir, REPO):
+        for base in (self.project_dir, *data_paths.asset_bases()):
             if (base / p).exists():
                 return (base / p).resolve()
         raise FileNotFoundError(f"asset not found in project or repo: {rel}")
 
     def relative(self, path: Path) -> str:
         path = path.resolve()
-        for base in (self.project_dir.resolve(), REPO):
+        for base in (self.project_dir.resolve(), *data_paths.asset_bases()):
             if path.is_relative_to(base):
                 return path.relative_to(base).as_posix()
         return path.as_posix()
@@ -177,7 +183,24 @@ class Session:
     def part_mesh(self) -> trimesh.Trimesh:
         if self.part is None:
             raise ValueError("no part loaded")
-        return load_mesh(self.resolve(self.part.mesh_path), self.part.units)
+        path = self.resolve(self.part.mesh_path)
+        key = display_lod.file_key(path, self.part.units)
+        # a copy: callers may change their mesh; the cached one stays as loaded
+        return self._mesh_cache.get(key, lambda: load_mesh(path, self.part.units)).copy()
+
+    def part_display(self) -> tuple[trimesh.Trimesh, int]:
+        """(mesh to draw, triangles of the full part mesh). Parts above display_lod.DISPLAY_FACES
+        are drawn simplified; the full mesh stays the one for planning and picking."""
+        if self.part is None:
+            raise ValueError("no part loaded")
+        path = self.resolve(self.part.mesh_path)
+        key = display_lod.file_key(path, self.part.units)
+
+        def make():
+            full = self._mesh_cache.get(key, lambda: load_mesh(path, self.part.units))
+            return display_lod.display_copy(full, background=True)[0], len(full.faces)
+
+        return self._display_cache.get(key, make)
 
     # --- project file -----------------------------------------------------------
 
@@ -313,8 +336,10 @@ class Session:
                 try:  # limits that do not fit this robot are dropped
                     self.robot.set_limits(pr.joint_limits_deg)
                     self.q = np.clip(self.q, self.robot.lower, self.robot.upper)
-                except ValueError:
-                    pass
+                except ValueError as err:
+                    self.load_warnings.append(
+                        f"Joint limits in the project were ignored ({err}); the robot's own limits are used."
+                    )
         self.part = None
         if project.part is not None:
             self.part = PartState(
@@ -374,13 +399,34 @@ class Session:
 
 
 def load_mesh(path: Path, units: str = "m") -> trimesh.Trimesh:
-    if path.suffix.lower() not in MESH_EXTS:
-        raise ValueError(f"unsupported mesh type {path.suffix}; use {', '.join(MESH_EXTS)}")
+    """Load a part mesh in metres. STL / OBJ / PLY are scaled by ``units``. A STEP model carries
+    its own length unit, so ``units`` is ignored for it; the CAD face of every triangle is kept in
+    ``mesh.metadata["cad_face_ids"]`` (and the CAD face types in ``"cad_face_types"``)."""
+    ext = path.suffix.lower()
+    if ext not in PART_EXTS:
+        raise ValueError(f"unsupported mesh type {path.suffix}; use {', '.join(PART_EXTS)}")
+    if ext in STEP_EXTS:
+        try:
+            sm = read_step(path, "m")
+        except StepImportError as err:
+            raise ValueError(str(err)) from err
+        mesh = sm.mesh
+        mesh.metadata["cad_face_ids"] = sm.face_ids
+        mesh.metadata["cad_face_types"] = list(sm.face_types)
+        mesh.metadata["cad_solids"] = sm.n_solids
+        return mesh
     mesh = trimesh.load(path, force="mesh")
     if not isinstance(mesh, trimesh.Trimesh) or len(mesh.faces) == 0:
         raise ValueError(f"{path.name} contains no triangles")
     mesh.apply_scale(UNIT_SCALE[units])
     return mesh
+
+
+def load_cad_face_ids(path: Path, units: str = "m") -> np.ndarray | None:
+    """Per-triangle CAD face index of a STEP part (aligned with ``load_mesh(path)``), else None."""
+    if path.suffix.lower() not in STEP_EXTS:
+        return None
+    return load_mesh(path, units).metadata["cad_face_ids"]
 
 
 def save_project(session: Session, project_dir: Path | None = None) -> Path:
@@ -420,7 +466,7 @@ def load_project(session: Session, project_dir: Path) -> None:
         session.before_save = hooks  # GUI hooks belong to the app, not to the loaded project
 
 
-LAST_PROJECT = WORKSPACE / "last_project.txt"
+LAST_PROJECT = data_paths.last_project_file()
 
 
 MAX_RECENT = 5

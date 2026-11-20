@@ -2,6 +2,10 @@
 
     python scripts/batch_run.py <project folder> <parts folder> <output folder>
                                 [--parts a,b] [--frame-search] [--workers N]
+    python scripts/batch_run.py <batch folder> [--frame-search]
+
+The second form runs the pending jobs of a batch made in Optimize -> Several parts (a folder
+with batch.json: queued part packages, part files and selections; ``ui.batch_job``).
 
 The project folder holds the project.json whose robot, end effector, external axis, stay-outs
 and planner settings every part uses (save the project in the app first). The parts folder holds
@@ -25,7 +29,15 @@ if str(ROOT) not in sys.path:
 
 
 def main(argv: list[str] | None = None) -> int:
+    from core import batch as bt
     from core import part_package as pp
+
+    args = list(sys.argv[1:] if argv is None else argv)
+    pos = [x for x in args if not x.startswith("-")]
+    if len(pos) == 1 and (Path(pos[0]) / bt.MANIFEST_NAME).is_file():
+        from ui.batch_job import main as run_queue
+
+        return run_queue(args)
     from ui.batch_run import plan_workers, run_batch
 
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -37,7 +49,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--workers", type=int, default=None, help="parts at once (default: from cores and memory)"
     )
-    a = ap.parse_args(argv)
+    a = ap.parse_args(args)
 
     if not (a.project / "project.json").is_file():
         print(f"error: no project.json in {a.project}", file=sys.stderr)

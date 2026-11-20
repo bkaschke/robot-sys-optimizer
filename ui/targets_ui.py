@@ -12,27 +12,28 @@ import trimesh
 import viser
 from pydantic import ValidationError
 
-from core import target_tools as tt
 from core import targets as tg
-from core.facing import facing_sides
 from core.schema import TargetGroup, Tolerances
-from core.surface_grid import surface_grid
+from core.target_gen import GRID, LATTICE, METHODS, GenSettings, dedupe_tol, generate_raw
 from core.transforms import make_T, wxyz_to_matrix
 from ui.session import Session
 from ui.surface_select_ui import SurfaceTools
 from ui.target_preview import draw_preview, target_tcp_pose  # noqa: F401 (re-export)
-from ui.target_tools_ui import PointTools
-from ui.unreached_view import LEGEND, draw_unreached, unreached_ids
+from ui.target_tools_ui import PointTools, ask_delete_all, delete_all
+from ui.targets_draw import (  # noqa: F401 (colours re-exported)
+    PALETTE,
+    SEL_COLOR,
+    STATUS_COLORS,
+    UNCHECKED,
+    SelectionLayer,
+    draw_points,
+    track_heat,
+)
+from ui.tool_surface_ui import ToolSurfacePanel
+from ui.unreached_view import LEGEND
 from ui.widgets import MAX_UPLOAD, notify
 
 PART = "/cell/part"
-SEL_COLOR = (60, 200, 120)
-PALETTE = [(230, 60, 60), (40, 120, 230), (240, 170, 20), (150, 70, 200), (20, 170, 170), (120, 120, 120)]
-STATUS_COLORS = {"reachable": (40, 180, 70), "marginal": (240, 170, 20), "unreachable": (220, 40, 40)}
-UNCHECKED = (150, 150, 150)
-GRID = "Surface grid (rows/columns)"
-LATTICE = "Part-anchored lattice"
-METHODS = (GRID, LATTICE, "Projected grid", "Poisson (even)", "Raster lines", "Selection edges")
 GEN_FIELDS = (
     "row",
     "col",
@@ -64,12 +65,15 @@ class TargetsTab:
         self._mesh: trimesh.Trimesh | None = None
         self._mesh_key = None
         self._handles: dict[str, object] = {}
+        self._fp: dict[str, object] = {}  # what is drawn now (ui.targets_draw): redraw on change
+        self.sel_layer = SelectionLayer(server, f"{PART}/selection")
         self._busy = False
         self.selected_results = None  # set by the app: point results of the selected solution
         gui = server.gui
 
         with gui.add_folder("Select surface & points"):
             self.surf = SurfaceTools(server, self)
+            self.detect = ToolSurfacePanel(server, self)  # T4: Detect tool surface
         s_ = self.surf  # the tab's names for the selection widgets (tests, saved settings)
         self.click_mode, self.angle, self.sel_info = s_.tool, s_.angle, s_.sel_info
         self.normal_dir, self.normal_angle, self.by_normal = s_.normal_dir, s_.normal_angle, s_.by_normal
@@ -136,6 +140,7 @@ class TargetsTab:
             from ui.part_heatmap import HeatmapLayer
 
             self.heat = HeatmapLayer(gui, self)  # v8 T8: Colour part by
+            track_heat(self)  # R1a: refresh() skips redrawing an unchanged heatmap
             self.show_normals = gui.add_checkbox("Show normals", True)
             self.normal_len = gui.add_number("Normal length (mm)", 20.0, min=1.0, step=1.0)
             self.point_size = gui.add_number("Point size (mm)", 4.0, min=0.5, step=0.5)
@@ -296,8 +301,7 @@ class TargetsTab:
 
         @self.delete_all.on_click
         def _(e) -> None:
-            self.s.targets = self.s.targets.model_copy(update={"points": []})
-            self.refresh()
+            self._ask_delete_all(e)
 
         @self.csv.on_upload
         def _(e) -> None:
@@ -329,61 +333,42 @@ class TargetsTab:
         for name in GEN_FIELDS:
             getattr(self, name).visible = name in shown
 
+    def gen_settings(self) -> GenSettings:
+        """The Generate points widgets as a GenSettings (SI units)."""
+
+        def vec(w) -> tuple[float, float, float]:
+            return tuple(float(x) for x in w.value)
+
+        return GenSettings(
+            method=self.method.value,
+            row_m=self.row.value / 1000,
+            col_m=self.col.value / 1000,
+            inset_m=self.inset.value / 1000,
+            row_angle_deg=self.row_angle.value,
+            row_dir=vec(self.row_dir),
+            spacing_m=self.spacing.value / 1000,
+            stepover_m=self.stepover.value / 1000,
+            direction=vec(self.direction),
+            normals_mode=self.normals_mode.value,
+            split_sides=bool(self.split_sides.value),
+            group=self.gen_group.value,
+        )
+
     def run_generate(self, e=None) -> int:
         """Generate points on the selection with the chosen generator; returns how many."""
         m = self.mesh()
         if m is None or len(self.selection) == 0:
             notify(e, "No selection", "Select a surface on the part first")
             return 0
-        step = self.spacing.value / 1000
-        d = np.asarray(self.direction.value, float)
-        d = d if np.linalg.norm(d) > 0 else None
-        method = self.method.value
-        row, col = self.row.value / 1000, self.col.value / 1000
-        tol = 0.4 * (min(row, col) if method in (GRID, LATTICE) else step)
-        if method == "Raster lines":
-            tol = 0.4 * min(step, self.stepover.value / 1000)
-        note = ""
-
-        def one(faces) -> tuple[np.ndarray, np.ndarray, str]:
-            if method == GRID:
-                P, N, info = surface_grid(
-                    m, faces, row, col, self.inset.value / 1000, self.row_angle.value, self.normals_mode.value
-                )
-                txt = f"{info.rows} rows on {info.area_m2 * 1e4:.0f} cm²"
-                if info.dropped_at_edge:
-                    txt += f"; {info.dropped_at_edge} within the edge inset left out"
-                return P, N, txt + "".join(f"  \n⚠ {w}" for w in info.warnings)
-            if method == LATTICE:
-                rd = self.tools._row_dir()
-                return (*tt.lattice_grid(m, faces, row, col, d, rd, normals=self.normals_mode.value), "")
-            if method == "Projected grid":
-                return (*tg.projected_grid(m, faces, step, direction=d, normals=self.normals_mode.value), "")
-            if method == "Poisson (even)":
-                return (*tg.poisson_disk(m, faces, step, normals=self.normals_mode.value), "")
-            if method == "Raster lines":
-                so = self.stepover.value / 1000
-                return (*tg.raster(m, faces, so, step, d, self.normals_mode.value), "")
-            return (*tg.edge_paths(m, faces, step), "")
-
         try:
-            per_side = self.split_sides.value and d is None and "split_sides" in METHOD_FIELDS.get(method, ())
-            cell = row * col if method in (GRID, LATTICE) else step * step
-            sides = facing_sides(m, self.selection, min_area=cell) if per_side else [self.selection]
-            if not sides:
-                raise ValueError("Every selected side is smaller than one grid cell: reduce the spacing.")
-            outs = [one(f) for f in sides]
-            P = np.concatenate([o[0] for o in outs]) if outs else np.zeros((0, 3))
-            N = np.concatenate([o[1] for o in outs]) if outs else np.zeros((0, 3))
-            note = "; ".join(o[2] for o in outs if o[2])
-            if len(sides) > 1:
-                note = f"{len(sides)} sides" + (f": {note}" if note else "")
+            st = self.gen_settings()
+            gen = generate_raw(m, self.selection, st)
         except (ValueError, IndexError) as err:
             self.gen_info.content = f"_{err}_"
             notify(e, "Generation failed", str(err))
             return 0
-        n = self.tools.add(P, N, e, "points", tol=tol)
-        self.gen_info.content = f"Generated **{n}** points" + (f" ({note})" if note else "") + "."
+        n = self.tools.add(gen.P, gen.N, e, "points", tol=dedupe_tol(st))
+        self.gen_info.content = f"Generated **{n}** points" + (f" ({gen.note})" if gen.note else "") + "."
         if n:
             notify(e, "Generated", f"{n} points into '{self.gen_group.value}'", ok=True)
         return n
@@ -392,8 +377,14 @@ class TargetsTab:
 
     def _drop(self, key: str) -> None:
         h = self._handles.pop(key, None)
-        if h is not None:
+        if h is not None and not h._impl.removed:  # a parent's removal took it already
             h.remove()
+
+    def _ask_delete_all(self, event) -> None:
+        ask_delete_all(self, event)  # confirm, then delete (undoable): ui/target_tools_ui.py
+
+    def _delete_all(self, event=None) -> None:
+        delete_all(self, event)
 
     def refresh(self) -> None:
         self._busy = True
@@ -410,6 +401,7 @@ class TargetsTab:
         self._draw_selection()
         self._draw_points()
         self._draw_preview()
+        self.detect.sync()
 
     def _show_group(self) -> None:
         g = next((x for x in self.s.targets.groups if x.name == self.group.value), None)
@@ -425,75 +417,16 @@ class TargetsTab:
         self.g_pattern.value = g.pattern if g is not None and g.pattern else self.g_pattern.options[0]
 
     def _draw_selection(self) -> None:
-        self._drop("sel")
+        """Selection chunks (ui.targets_draw.SelectionLayer: an add sends only the new faces)."""
         m = self.mesh()
         n = len(self.selection)
-        if m is not None and n:
-            sub = m.submesh([self.selection], append=True)
-            verts = sub.vertices + 5e-4 * sub.vertex_normals  # draw just above the part
-            self._handles["sel"] = self.server.scene.add_mesh_simple(
-                f"{PART}/selection", verts, sub.faces, color=SEL_COLOR, opacity=0.6, side="double"
-            )
+        self._handles["sel"] = self.sel_layer.update(m, self.selection)
         area = m.area_faces[self.selection].sum() * 1e4 if m is not None and n else 0.0
         self.sel_info.content = f"Selected: {n} faces, {area:.1f} cm²" if n else "_Nothing selected._"
 
     def _draw_points(self) -> None:
-        self.heat.draw()  # v8 T8: the part's colours follow the selected plan too
-        for key in ["points", "normals", *(k for k in self._handles if k.startswith("unreached"))]:
-            self._drop(key)
-        ids, P, N, G = tg.as_arrays(self.s.targets)
-        names = [g.name for g in self.s.targets.groups]
-        counts = {g: G.count(g) for g in names}
-        self.count.content = f"**{len(P)} points**  \n" + ", ".join(f"{k}: {v}" for k, v in counts.items())
-        self.preview_idx.max = max(1, len(P) - 1)
-        if len(P) == 0:
-            return
-        sel = self.selected_results() if self.selected_results else {}
-        if self.color_by.value == "feasibility" and self.s.feasibility:
-            res = self.s.feasibility
-            colors = np.array([STATUS_COLORS[res[i].status] if i in res else UNCHECKED for i in ids])
-        elif self.color_by.value in ("zone", "configuration") and sel:
-            # selected solution (Results tab): zone index, or one colour per joint configuration
-            labels = sorted({r.config for r in sel.values() if r.config})
-            key = (lambda r: r.zone) if self.color_by.value == "zone" else (lambda r: labels.index(r.config))
-            colors = np.array(
-                [
-                    PALETTE[key(sel[i]) % len(PALETTE)]
-                    if i in sel and sel[i].config and sel[i].zone is not None
-                    else UNCHECKED
-                    for i in ids
-                ]
-            )
-        else:
-            colors = np.array(
-                [PALETTE[names.index(g) % len(PALETTE)] if g in names else PALETTE[-1] for g in G]
-            )
-        self._handles["points"] = self.server.scene.add_point_cloud(
-            f"{PART}/targets",
-            P,
-            colors.astype(np.uint8),
-            point_size=self.point_size.value / 1000,
-            point_shape="circle",
-            precision="float32",
-        )
-        if self.show_normals.value:
-            seg = np.stack([P, P + N * self.normal_len.value / 1000], axis=1)
-            self._handles["normals"] = self.server.scene.add_line_segments(
-                f"{PART}/normals", seg, (30, 30, 30), thickness=1.5, thickness_units="screen"
-            )
-        if self.show_unreached.value:  # v6 feedback: make the points the plan misses obvious
-            from ui.staleness import feasibility_changes
-
-            # an out-of-date feasibility check (points, tool, part or base changed since) would
-            # mark the wrong points: only the selected plan's results are used then
-            feas = self.s.feasibility if self.s.feasibility and not feasibility_changes(self.s) else {}
-            bad = unreached_ids(ids, sel, feas)
-            self._handles.update(
-                draw_unreached(self.server, PART, ids, P, N, bad, self.point_size.value / 1000, sel or feas)
-            )
-            from ui.unreached_view import draw_extras
-
-            self._handles.update(draw_extras(self, PART, ids, P, N))  # v10 T10 gaps, T12 tool fit
+        """Points, normals, unreached markers and heatmap; only what changed is re-sent."""
+        draw_points(self)
 
     def _draw_preview(self) -> None:
         draw_preview(self)

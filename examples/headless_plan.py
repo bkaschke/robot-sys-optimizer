@@ -119,6 +119,7 @@ def main(out: Path) -> None:
             station_poses=[ex.station_pose(Base(), s, np.eye(4)) for s in sol.stations],
             envelope_svg=ex.envelope_svg(tool, sol.tool_values),
             length_samples=geo.samples,
+            mesh_license=robot.spec.mesh_license,
         )
     )
     (out / "report.html").write_text(html, encoding="utf-8")

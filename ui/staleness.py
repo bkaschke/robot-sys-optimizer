@@ -16,7 +16,17 @@ import numpy as np
 from ui.fingerprint import content
 from ui.plan_ids import key as plan_key
 
-COMPONENTS = ("robot", "carrier", "tool", "part", "targets", "stayout", "collision")
+COMPONENTS = (
+    "robot",
+    "carrier",
+    "tool",
+    "part",
+    "targets",
+    "stayout",
+    "collision",
+    "collision_geom",
+    "margins",
+)
 LABELS = {
     "robot": "robot / mount",
     "carrier": "external axis",
@@ -25,11 +35,13 @@ LABELS = {
     "targets": "targets",
     "stayout": "stay-out zones",
     "collision": "collision settings",
+    "collision_geom": "collision geometry",
+    "margins": "clearance / joint margins",
     "base_pose": "robot base pose",
 }
 # setup steps (tab names in app.TABS) and the components each one defines
 STEP_COMPONENTS = {
-    "Cell": ("robot", "part", "stayout", "collision"),
+    "Cell": ("robot", "part", "stayout", "collision", "collision_geom"),
     "External Axis": ("carrier",),
     "Tool Setup": ("tool",),
     "Targets": ("targets",),
@@ -42,7 +54,7 @@ def _h(x) -> str:
 
 
 def _pose(T: np.ndarray, digits: int = 6) -> list:
-    return np.round(np.asarray(T, float), digits).tolist()
+    return (np.round(np.asarray(T, float), digits) + 0.0).tolist()  # + 0.0: -0.0 hashes as 0.0
 
 
 def _prims(s, prims, legacy: bool) -> list:
@@ -56,6 +68,16 @@ def _prims(s, prims, legacy: bool) -> list:
                     d[k] = content(s, d[k])
         out.append(d)
     return out
+
+
+def _margins(s) -> dict:
+    """The project's clearance / joint margins (defaults when the session has none; review R13)."""
+    try:
+        from core.schema import Optimizer
+
+        return (s.extra.get("optimizer") or Optimizer()).margins.model_dump()
+    except (AttributeError, TypeError, ValueError):
+        return {}
 
 
 def components(s, base_pose: bool = False, tool_nominal: bool = True, legacy: bool = False) -> dict[str, str]:
@@ -87,9 +109,11 @@ def components(s, base_pose: bool = False, tool_nominal: bool = True, legacy: bo
         "part": "",
         "targets": _h(s.targets.model_dump_json()),
         "stayout": _h(_prims(s, getattr(s, "stayouts", []), legacy)),
+        "margins": _h(_margins(s)),
     }
     if s.tool is not None:
         tool = s.tool.model_dump(mode="json")
+        tool.pop("pad_radius_m", None)  # informational (Detect warning only): not a planning input
         if not tool_nominal:
             tool["extension"].pop("nominal", None)
         if not legacy:
@@ -110,6 +134,9 @@ def components(s, base_pose: bool = False, tool_nominal: bool = True, legacy: bo
                 sorted(int(f) for f in part.collision_keep) if part is not None else [],
             ]
         )
+        # review R11: the simplified-copy mode per component (reduce / hull / wrap, triangles). Its own
+        # key, so stamps saved without it are not flagged (``changed`` compares the stamp's keys)
+        out["collision_geom"] = _h(sorted((k, v.key()) for k, v in cfg.geom.items()))
     if base_pose:
         out["base_pose"] = _h(_pose(T))
     return out
@@ -126,9 +153,10 @@ def migrate(s) -> int:
     stamps = [s.stamps, *(c.get("stamps", {}) for c in (getattr(s, "compared", None) or {}).values())]
     now = variants[0][1]
     for d in [v for st in stamps for v in st.values()] + list(s.steps.values()):
-        if "collision" not in d:  # v10 #5: new component, taken as it is now
-            d["collision"] = now["collision"]
-            n += 1
+        for k in ("collision", "collision_geom"):  # v10 #5 / review R11: new components, taken as now
+            if k not in d:
+                d[k] = now[k]
+                n += 1
         for k in ("robot", "carrier", "tool", "part", "stayout"):
             for old, new in variants:
                 if k in d and d[k] == old[k] and old[k] != new[k]:

@@ -25,10 +25,11 @@ from shapely.affinity import affine_transform
 from shapely.geometry import MultiPoint, Polygon
 from shapely.ops import unary_union
 
+from core import data_paths
 from core.schema import Base, Pose, Primitive
 from core.transforms import make_T, pose_to_matrix, rpy_to_matrix
 
-REPO = Path(__file__).resolve().parents[1]
+REPO = data_paths.resources()
 UNIT_SCALE = {"m": 1.0, "mm": 1e-3, "in": 0.0254}
 MESH_EXTS = (".stl", ".obj", ".ply")
 Resolver = Callable[[str], Path]
@@ -36,7 +37,9 @@ Resolver = Callable[[str], Path]
 
 def default_resolve(rel: str) -> Path:
     p = Path(rel)
-    return p if p.is_absolute() else REPO / p
+    if p.is_absolute():
+        return p
+    return next((b / p for b in data_paths.asset_bases() if (b / p).exists()), REPO / p)
 
 
 @functools.lru_cache(maxsize=32)

@@ -13,6 +13,7 @@ from core.feasibility import CancelledError
 from opt.tolerance import ToleranceSettings
 from ui.log_panel import log
 from ui.plan_ids import key as plan_key
+from ui.report_text import tolerance_summary as summary  # re-export (viser-free)
 from ui.session_lock import LOCK
 from ui.widgets import notify
 
@@ -91,11 +92,14 @@ class TolerancePanel:
             elif kind == "warn":
                 log(f"Tolerance check: {data}.", "warn")
 
+        plan_stamp = dict(s.stamps.get(plan_key(sol)) or {})  # the setup the plan was made for
+
         def work() -> None:
             try:
                 r = jobs.call("ui.plan_job:tolerance_job", payload, on_msg, self._cancel.is_set, in_process)
                 with LOCK:  # v12 #9
                     s.tolerance = r
+                    r.plan_stamp = plan_stamp
                 self.status.content = summary(r)
                 log(
                     f"Tolerance check of **{sol.label}**: every point reached in "
@@ -105,13 +109,13 @@ class TolerancePanel:
                 )
                 if self.on_done is not None:
                     self.on_done()
-            except (CancelledError, jobs.JobCancelledError):
-                self.status.content = "**Cancelled.**"
+            except (CancelledError, jobs.JobCancelledError):  # any cancel (thread or worker)
+                self.status.content = "**Cancelled**; no result from this run."
                 log("Tolerance check cancelled.", "warn", t0)
             except Exception as err:
-                self.status.content = f"⚠ tolerance check failed: {err}"
-                log(f"Tolerance check failed: {err}", "error")
-                raise
+                from ui.plan_job import failure_text
+
+                self.status.content = f"⚠ tolerance check failed: {failure_text('Tolerance check', err)}"
             finally:
                 self.run.visible, self.stop.visible, self.progress.visible = True, False, False
 
@@ -119,26 +123,3 @@ class TolerancePanel:
         self._thread.start()
         if block:
             self._thread.join()
-
-
-def summary(r) -> str:
-    st = r.settings
-    head = (
-        f"**{100 * r.all_reached:.0f} %** of {st.samples} samples reach every planned point "
-        f"(part ±{st.part_mm:g} mm, {st.part_deg:g}°, stops ±{st.station_mm:g} mm)."
-    )
-    worst = [p for p in r.worst(10) if p.rate < 1.0]
-    if not worst:
-        return head + "  \nEvery point was reached in every sample."
-    rows = "\n".join(
-        f"| {p.pid} | {p.station + 1} | {100 * p.rate:.0f} % | "
-        f"{'—' if p.fail_mm is None else f'{p.fail_mm:.1f}'} | {p.clearance_mm:.0f} | {p.limit_deg:.0f} |"
-        for p in worst
-    )
-    return (
-        head
-        + "\n\n**Least robust points** (fails from = the point's shift in the smallest failing sample):\n\n"
-        + "| point | stop | reached | fails from (mm) | clearance (mm) | limit margin (°) |\n"
-        + "|---|---|---|---|---|---|\n"
-        + rows
-    )

@@ -326,7 +326,7 @@ def parse_csv(text: str, scale: float = 1.0) -> list[tuple[np.ndarray, np.ndarra
     offending line number on bad input.
     """
     rows = []
-    reader = csv.reader(io.StringIO(text))
+    reader = csv.reader(io.StringIO(text.removeprefix("\ufeff")))  # BOM of a Windows export
     for lineno, row in enumerate(reader, start=1):
         row = [c.strip() for c in row]
         if not row or all(not c for c in row) or row[0].startswith("#"):

@@ -184,6 +184,9 @@ class EndEffector(_Model):
     tolerances: Tolerances = Field(default_factory=Tolerances)
     line_of_sight: bool = False  # scanning: require a clear ray from sensor to point
     approach_m: float = Field(default=0.0, ge=0)  # gripping: approach/retreat distance
+    pad_radius_m: float | None = Field(
+        default=None, gt=0
+    )  # sanding pad radius; only the tool-surface warning uses it
 
     @field_validator("tcps")
     @classmethod

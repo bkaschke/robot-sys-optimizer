@@ -76,13 +76,12 @@ def test_mobile_plans_have_one_area_per_stop(app):
         res = s.result_points[sol.key]
         assert all(res[p].q is not None for p in sol.assignment)  # every moved point has its joints
     # the colour layer: one painted mesh per stop, in the station colours, on the part
-    from ui.results import STATION_COLORS
 
     r = app["results"]
     sol = multi[0]
     r.choice.value = next(o for o in r.choice.options if sol.label in o)
     r.draw()
-    names = {h.name.rsplit("/", 1)[-1] for h in r._areas}
+    names = set(r.area_names)  # one vertex-coloured mesh for all groups (feature R1b)
     # v6: an unzoned stop has one group per joint configuration (the main one in its colour)
     from ui.station_areas import config_groups
 
@@ -95,11 +94,7 @@ def test_mobile_plans_have_one_area_per_stop(app):
         groups = config_groups(sol, r._configs(sol))
     want = {f"S{sol.assignment[p] + 1}_G{g + 1}" for p, g in groups.items()}
     assert names == want and {f"S{k + 1}_G1" for k in range(len(sol.stations))} <= names
-    for h in r._areas:
-        k = int(h.name.rsplit("/S", 1)[-1].split("_")[0]) - 1
-        if h.name.endswith("_G1"):
-            assert tuple(h.color) == STATION_COLORS[k % len(STATION_COLORS)]
-        assert h.name.startswith("/cell/part/areas/")
+    assert len(r._areas) == 1 and r._areas[0].name.startswith("/cell/part/areas/")
     objs = app["objects"]
     objs.show["Results/Station areas"].value = False
     objs.apply_visibility()

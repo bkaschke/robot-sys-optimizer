@@ -164,7 +164,15 @@ class JogPanel:
 
     def _go(self, q: np.ndarray, event=None, quiet: bool = False) -> bool:
         if not self.allow.value:
-            hits = self.coll.hits(q, self._tcp())
+            hits, err = self.coll.check(q, self._tcp())
+            if err:
+                if not quiet:
+                    notify(
+                        event,
+                        "Step blocked",
+                        f"collision check unavailable ({err}). Fix the setup or turn on Allow collisions.",
+                    )
+                return False
             if hits:
                 if not quiet:
                     notify(event, "Collision", f"that step collides: {describe(hits)}")
@@ -181,8 +189,10 @@ class JogPanel:
         if T is None:
             self.readout.content = "_No robot._"
             return
-        hits = self.coll.hits(None, self._tcp())
+        hits, err = self.coll.check(None, self._tcp())
         warn = "  \n⚠ **Collision:** " + describe(hits) if hits else ""
+        if err:
+            warn = f"  \n⚠ collision check unavailable: {err}"
         f = self.frame.value
         if f == "Joint":
             deg = ", ".join(f"{v:.1f}" for v in np.degrees(self.s.q))

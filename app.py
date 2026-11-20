@@ -7,15 +7,15 @@ import threading
 import time
 from pathlib import Path
 
-import numpy as np
 import viser
 
-from core.schema import Optimizer
 from core.transforms import make_T
-from ui import settings as ui_settings
+from core.version import app_version
+from ui import display_lod
+from ui.app_state import build_settings, collect_work, restore_work
 from ui.carrier_ui import CarrierPanel
 from ui.cell import CellTab
-from ui.guide import GuideServer, add_guide_panel
+from ui.guide import GuideServer
 from ui.log_panel import LogPanel, log
 from ui.objects import ObjectsPanel
 from ui.open_popup import OpenPopup
@@ -31,6 +31,7 @@ from ui.stayout_ui import StayoutPanel
 from ui.targets_ui import TargetsTab
 from ui.tool_opt import ToolOptPanel
 from ui.tool_setup import ToolSetupTab
+from ui.view_controls import ViewControls
 from ui.widgets import Latest
 from ui.workflow import Workflow
 
@@ -81,42 +82,11 @@ def build_app(
 
     precise(server)  # v12 #28: four decimals in every mm / deg field
     server.scene.set_up_direction("+z")
-    server.initial_camera.position = (3.0, -3.0, 2.2)
-    server.initial_camera.look_at = (0.5, 0.0, 0.6)
     apply_theme(server, dark)
     server.scene.add_frame("/world/origin", axes_length=0.2, axes_radius=0.005)
 
     state: dict = {"session": session}
-    with server.gui.add_folder("Settings & help", expand_by_default=False):  # v7: out of the way
-        dark_toggle = server.gui.add_checkbox("Dark mode", dark)
-        from ui import jobs
-
-        worker_box = server.gui.add_checkbox(
-            "Run planners in a separate process",
-            jobs.USE_WORKER,
-            hint="keeps the panel responsive; Cancel always ends the run; "
-            "the worker's memory is freed after 5 idle minutes",
-        )
-
-        def set_worker(_e=None) -> None:
-            jobs.USE_WORKER = bool(worker_box.value)
-
-        worker_box.on_update(set_worker)
-        workers_num = server.gui.add_number(
-            "Check worker processes",
-            jobs.CHECK_WORKERS,
-            min=1,
-            max=16,
-            step=1,
-            hint="exact checks of the station planner in parallel (1 = off); each holds a robot + scene "
-            "(~300 MB)",
-        )
-
-        def set_workers(_e=None) -> None:
-            jobs.CHECK_WORKERS = int(workers_num.value)
-
-        workers_num.on_update(set_workers)
-        guide = add_guide_panel(server, guide_port)
+    dark_toggle, worker_box, guide = build_settings(server, dark, guide_port, session)
     dark_toggle.on_update(lambda e: apply_theme(server, dark_toggle.value))
     state["worker_box"] = worker_box
 
@@ -129,54 +99,24 @@ def build_app(
         state["slowzones"].refresh()
         state["carrier"].refresh()
         state["results"].refresh()
-        restore_work()
+        restore_work(state, session)
         state["workflow"].forget_states()  # the loaded project's confirmed steps: gizmos off
         state["workflow"].refresh(force=True)
         state["sim"].reset("another project was opened")
         state["tool_opt"].update_hint()
         state["cable"].follow_robot()  # the robot view was rebuilt: redraw the hose on it
         state["floor"].update(session)  # the floor fits the new cell
+        view.fit(quiet=True)  # the camera frames the loaded cell
         state["collision"].settings_changed()  # the project's part surfaces kept exact
         state["compare_view"].refresh()  # v9 #6: the project's compared robots
 
-    def restore_work() -> None:
-        """Bring back where the user left off: selection, then panel settings."""
-        t = state["targets"]
-        sel = session.selection
-        if sel and session.part is not None and sel[0] == session.part.mesh_path:
-            m = t.mesh()
-            faces = np.asarray(sel[1], dtype=int)
-            if m is not None and (len(faces) == 0 or faces.max() < len(m.faces)):
-                t.selection = faces
-        # the project's station limit first; saved panel settings (if any) override it
-        n = (session.extra.get("optimizer") or Optimizer()).max_stations
-        for panel in (state["stations"], state["tool_opt"]):
-            panel.max_stations.value = float(min(max(n, 1), 40))
-        state["stations"].costs.load()  # the project's cost weights
-        state["tool_opt"].costs.load()  # and the tool optimizer's
-        if "frame" in state:
-            state["frame"].reset_range()  # v10 #6: this project's mount height, unless saved
-        ui_settings.apply(state, session.ui)
-        state["collision"].sync()
-        t.refresh()
-
-    def collect_work() -> None:
-        """before_save hook: copy GUI-side state into the session."""
-        t = state["targets"]
-        part = session.part
-        session.selection = (part.mesh_path, [int(f) for f in t.selection]) if part is not None else None
-        session.ui = ui_settings.collect(state)
-        opt = session.extra.get("optimizer") or Optimizer()
-        session.extra["optimizer"] = opt.model_copy(
-            update={"max_stations": int(state["stations"].max_stations.value)}
-        )
-
-    session.before_save.append(collect_work)
+    session.before_save.append(lambda: collect_work(state, session))
     project = ProjectPanel(
         server, session, on_loaded=on_loaded, remember=remember, autosave_thread=autosave_thread
     )
     tree = server.gui.add_panel()  # object tree on the left of the 3D view (v3 feedback item 1)
     with tree.add_tab("Objects"):
+        state["view"] = view = ViewControls(server, session)  # lighting, shadows, camera (R2)
         objects = ObjectsPanel(server, session)
         from ui.collision_view import CollisionView
 
@@ -225,6 +165,15 @@ def build_app(
     targets.tools.on_mesh_replaced = cell.refresh_part
     cell.part_listeners.append(targets.on_part_changed)
     cell.part_listeners.append(carrier.draw)
+    cell.part_listeners.append(view.on_part_changed)  # a different part: frame the cell
+
+    def redraw_overlays() -> None:  # the display deviation was measured: re-lift selection and heatmap
+        targets.sel_layer._mesh = None
+        targets._draw_selection()
+        targets._fp.pop("heat", None)
+        targets.heat.draw()
+
+    display_lod.on_deviation_ready[:] = [redraw_overlays]
 
     def part_moved() -> None:
         carrier.realign()  # a track aligned with the part follows it
@@ -239,6 +188,10 @@ def build_app(
     with tab_handles["Optimize"]:
         workflow.optimize_header()
         workflow.confirm_all_button()  # v11 #5
+        from ui.preflight_ui import SetupCheckPanel
+
+        # common setup mistakes, before a long plan (above the Optimizer dropdown: it applies to all)
+        setup_check = SetupCheckPanel(server, session)
         from ui.optimizer_select import OptimizerSelect
 
         picker = OptimizerSelect(server)  # v9 #10: one Optimizer dropdown, one panel shown
@@ -289,7 +242,8 @@ def build_app(
         picker.on_show["Gantry placement"] = frame.refresh
         from ui.batch_ui import BatchPanel
 
-        batch = BatchPanel(server, session)  # v13 #6: several parts
+        # v13 #6 + our queue: part packages, part files and the current part, planned by v13's runner
+        batch = BatchPanel(server, session, project, targets, stations)
         picker.on_show["Several parts (batch)"] = batch.refresh
         state["batch"] = batch
         picker.bind(
@@ -396,7 +350,9 @@ def build_app(
     ex.sim = sim  # v8 T19: the report shows the built paths' cycle time
     ex.frame = frame  # v10 T22: Gantry placement in the report
     workflow.gate(
-        (ex.csv, ex.uframes, ex.urdf, ex.report, ex.step), ex.gate_md, result_reason(results.selected)
+        (ex.csv, ex.uframes, ex.urdf, ex.report, ex.step, ex.package),
+        ex.gate_md,
+        result_reason(results.selected),
     )
     workflow.gate(sim.build_btn, sim.gate_md, plan_reason(sim.selected))
     workflow.gate(tool_opt.run, tool_opt.gate_md)
@@ -422,8 +378,9 @@ def build_app(
 
     results.choice.on_update(on_selection)
     results.tool_opt = tool_opt
-    stations.on_start = lambda: sim.reset("a new station plan started")
-    tool_opt.on_start = lambda: sim.reset("the tool optimizer started")
+    pre = setup_check.on_plan_start if autosave_thread else (lambda: None)  # the real app only
+    stations.on_start = lambda: (sim.reset("a new station plan started"), pre())
+    tool_opt.on_start = lambda: (sim.reset("the tool optimizer started"), pre())
     results.move_carrier = carrier.set_values
     results.set_q = cell.set_q
     workflow.cell, workflow.carrier, workflow.results = cell, carrier, results
@@ -503,6 +460,7 @@ def build_app(
         edge=edge,
         cycle=cycle,
         compare=compare,
+        setup_check=setup_check,
         builder=builder,
         builder_window=builder_window,
         pareto=pareto,
@@ -516,6 +474,7 @@ def build_app(
         log=log_panel,
         clear_stale=clear_stale,
     )
+    view.fit(quiet=True)  # start-up camera
     return state
 
 
@@ -523,6 +482,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Robot cell & end-effector optimizer")
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8080)
+    parser.add_argument("--version", action="version", version=f"Robot Cell Optimizer {app_version()}")
     parser.add_argument("--dark", action="store_true", help="start in dark mode (also a checkbox in the GUI)")
     parser.add_argument("--guide-port", type=int, default=None, help="user guide port (default: --port + 1)")
     # v7 round 2 (T9): the app always opens empty with a project popup; --fresh is kept so old
@@ -531,13 +491,16 @@ def main() -> None:
     parser.add_argument("--open", default=None, metavar="FOLDER", help="open this project folder (no popup)")
     args = parser.parse_args()
 
+    from core import app_log
     from ui import jobs
 
+    log_file = app_log.setup(app_version())  # <data>/logs/app.log, for the support bundle
+    print(f"Log file: {log_file}" if log_file else "Log file not written (folder not writable)", flush=True)
     jobs.USE_WORKER = True  # v8 T1: planners run in a worker process in the real app
     from opt.parallel import default_workers
 
     jobs.CHECK_WORKERS = default_workers()  # v8 T2
-    server = viser.ViserServer(host=args.host, port=args.port, label="Robot Cell Optimizer")
+    server = viser.ViserServer(host=args.host, port=args.port, label=f"Robot Cell Optimizer {app_version()}")
     guide = None
     try:
         guide = GuideServer(args.host, args.guide_port or server.get_port() + 1)
@@ -553,6 +516,10 @@ def main() -> None:
         autosave_thread=True,
     )
     project = state["project"]
+    print(
+        f"Robot Cell Optimizer ready: http://localhost:{server.get_port()}/ (version {app_version()})",
+        flush=True,
+    )  # CI start-up check
     project.untitled = True  # the empty start-up cell has no folder: no autosave until one opens
     opened = False
     if args.open:

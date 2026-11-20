@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import subprocess
+import sys
 from functools import lru_cache
 from pathlib import Path
 
@@ -18,10 +20,25 @@ ROOT = Path(__file__).resolve().parents[1]
 SEED = 1  # the planners' fixed seed (CMA-ES, TPE, GP, NSGA-II, tolerance samples default)
 
 
+def frozen_version() -> dict[str, str]:
+    """The ``_version.py`` that scripts/build_exe.py writes into a frozen build (VERSION, COMMIT,
+    DATE as plain string assignments; read as text, never imported). {} when absent."""
+    from core import data_paths
+
+    try:
+        text = (data_paths.resources() / "_version.py").read_text(encoding="utf-8")
+    except OSError:
+        return {}
+    return dict(re.findall(r'^(VERSION|COMMIT|DATE)\s*=\s*"([^"]*)"', text, re.M))
+
+
 @lru_cache(maxsize=1)
 def git_version() -> str:
     """Short commit hash (+dirty), or "unknown" (no git / not a checkout, e.g. the portable zip
-    built from ``git archive``: then the zip name carries the commit)."""
+    built from ``git archive``: then the zip name carries the commit). A frozen build has no git:
+    it reads the commit that the build script stored in ``_version.py``."""
+    if getattr(sys, "frozen", False):
+        return frozen_version().get("COMMIT") or "unknown"
     try:
         h = subprocess.run(
             ["git", "rev-parse", "--short", "HEAD"], cwd=ROOT, capture_output=True, text=True, timeout=5

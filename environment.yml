@@ -15,6 +15,12 @@ dependencies:
   - rtree>=1.3          # trimesh ray casting / nearest-point queries
   - pyyaml
   - pillow             # PNG snapshots in the HTML report
+  - lxml               # pycollada (robot .dae meshes); only in the user site before D3
+  - pyparsing          # pycollada
+  - python-dateutil    # pycollada
+  - fonttools          # ezdxf (CadQuery) text/fonts
+  - pyinstaller=6.22.3  # scripts/build_exe.py (Windows exe); the version the D0 spike used
+  - pyinstaller-hooks-contrib
   - pytest>=8
   - ruff=0.17.3          # pinned (v12 #12): CI lint must match the local one; CI lints on Linux
   - markdown-it-py>=3   # docs/USER_GUIDE.md -> USER_GUIDE.html (scripts/build_guide.py)

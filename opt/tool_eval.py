@@ -21,6 +21,7 @@ from core.tool import ToolModel
 from opt.cost import cost_breakdown, wrap_excess
 from opt.placement import PlannerSettings, Targets, plan_stations, verify
 from opt.sites import FloorSites
+from opt.station_checks import station_terms
 
 if TYPE_CHECKING:
     from opt.tool_geometry import GeometrySettings
@@ -58,6 +59,8 @@ class _Evaluator:
         self.max_manip = 1.0  # set from the reachability map on the first plan
         self.cancelled: Callable[[], bool] | None = None  # polled by every exact check
         self.obstacles: list = []  # stay-out zones (name, mesh, T_world)
+        self.margins = None  # core.collision.Margins of the project (None: defaults)
+        self.settings = None  # core.feasibility.CheckSettings of the project (None: defaults)
 
     def tool(self, v: ExtensionValues) -> ToolModel:
         self.tm.ee = self.ee.model_copy(
@@ -74,12 +77,13 @@ class _Evaluator:
             self.part,
             self.T_base0,
             self.T_part,
+            self.margins,
             base_bodies=bb,
             world_bodies=wb,
             obstacles=self.obstacles,
         )
         checker = FeasibilityChecker(
-            self.robot, self.ik, tm, scene, self.T_base0, self.T_part, CheckSettings()
+            self.robot, self.ik, tm, scene, self.T_base0, self.T_part, self.settings or CheckSettings()
         )
         checker.cancelled = self.cancelled
         return checker
@@ -160,6 +164,7 @@ class _Evaluator:
         pl = self.st.planner
         cyc = cycle_estimate(seqs, res, stations, sites, checker.robot, pl.cycle, pl.speed_zones, self.t)
         cyc = cyc["total"]
+        travel, penalty = station_terms(stations, sites)
         cost, terms = cost_breakdown(
             list(res.values()),
             len(unreached),
@@ -168,6 +173,8 @@ class _Evaluator:
             self.tm.length(v),
             self.L_ref,
             self.max_manip,
+            travel=travel,
+            standoff_penalty=penalty,
             groups=groups,
             wrist_flips=zone_counts(zones)[1],
             motion=arm_motion(seqs, res),

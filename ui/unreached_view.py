@@ -110,6 +110,19 @@ def draw_unfit(server, root: str, ids, P, N, bad: dict, point_size: float) -> di
     return out
 
 
+def unreached_key(ids, P, N, bad: list[int], point_size: float, results=None) -> bytes:
+    """Digest of everything ``draw_unreached`` draws for these arguments (positions, normals,
+    reasons and labels of the flagged points): the markers are redrawn only when it changes."""
+    from ui.targets_draw import digest
+
+    index = {pid: k for k, pid in enumerate(ids)}
+    bad = [i for i in bad if i in index]
+    k = np.array([index[i] for i in bad], int)
+    res = results or {}
+    texts = [(getattr(res.get(i), "reason", ""), why(res[i]) if i in res else "") for i in bad]
+    return digest(np.asarray(P, float)[k], np.asarray(N, float)[k], bad, texts, float(point_size))
+
+
 def draw_unreached(server, root: str, ids, P, N, bad: list[int], point_size: float, results=None) -> dict:
     """Scene handles {name: handle} for the flagged points (empty when none); ``results``
     (point id -> PointResult) colours and labels them by reason."""
@@ -137,7 +150,12 @@ def draw_unreached(server, root: str, ids, P, N, bad: list[int], point_size: flo
         ),
     }
     for j, (pid, p, n) in enumerate(zip(bad, Pb, Nb, strict=True)):
-        if j >= MAX_LABELS:
+        if j >= MAX_LABELS:  # one summary label for the rest (their dots and crosses stay)
+            out["unreached_label_more"] = server.scene.add_label(
+                f"{root}/unreached_label_more",
+                f"+{len(bad) - MAX_LABELS} more unreached",
+                position=tuple(p + 0.02 * n),
+            )
             break
         out[f"unreached_label_{pid}"] = server.scene.add_label(
             f"{root}/unreached_label_{pid}",
